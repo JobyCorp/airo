@@ -322,11 +322,26 @@ Reused from the scaffold: `req`, `ecto_sql`/`postgrex`, `jason`, `telemetry_*`,
 
 ## 15. Open questions / next steps
 
-- [ ] Detail the OTP supervision tree and the `Airo.Adapter` behaviour contract.
-- [ ] Streaming: confirm OpenAI-delta normalization covers every orchester event
+- [x] Detail the OTP supervision tree and the `Airo.Adapter` behaviour contract.
+      *(S1: `Airo.Adapter` behaviour + per-capability optional callbacks; S4:
+      `Airo.Runtime.Store`/`Airo.Health.Prober` in the tree.)*
+- [x] Streaming: confirm OpenAI-delta normalization covers every orchester event
       (tool-call argument streaming, Anthropic content-block boundaries).
+      *(S3: OpenAI-compatible passthrough; S5: Anthropic `stream_event/1` maps
+      content-block deltas → `content`/`reasoning_content`/`tool_calls`.)*
 - [ ] Migration mechanics for orchester's `:queued`/Oban path (it calls Airo from
       a worker; nothing special, but confirm error/retry semantics).
 - [ ] Homelab ops: deploy as a Phoenix release behind Traefik
       (`airo.local.joby.gg`) + its own Postgres; client keys for orchester/incogito.
 - [ ] Pricing source for cost attribution (manual per-Deployment vs a price feed).
+
+**Anthropic claude-code OAuth** is configurable (the exact token endpoint /
+client id / beta header are deployment-specific):
+
+```elixir
+config :airo, Airo.Adapters.Anthropic,
+  version: "2023-06-01",
+  beta: "oauth-2025-04-20",
+  oauth_token_url: "https://console.anthropic.com/v1/oauth/token",
+  oauth_client_id: System.get_env("ANTHROPIC_OAUTH_CLIENT_ID")
+```
