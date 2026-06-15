@@ -189,22 +189,117 @@ defmodule AiroWeb.ChatControllerTest do
       assert String.ends_with?(String.trim_trailing(body), "data: [DONE]")
     end
 
-    test "emits a terminal gateway.error event when the upstream stream fails", %{conn: conn} do
+    test "returns a clean HTTP error when the stream fails before any output", %{conn: conn} do
+      # Single candidate, upstream errors before emitting → nothing committed, so
+      # the gateway can still answer with a proper status (no SSE was opened).
       Req.Test.stub(Airo.TestStub, fn upstream ->
-        upstream |> Plug.Conn.put_status(500) |> Req.Test.json(%{"error" => "boom"})
+        upstream
+        |> Plug.Conn.put_status(500)
+        |> Req.Test.json(%{"error" => %{"message" => "boom", "type" => "server_error"}})
       end)
 
       conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body(%{"stream" => true}))
 
-      # Status/headers already committed before the upstream failure surfaced.
-      assert conn.status == 200
-      assert conn.resp_body =~ "event: gateway.error"
-      assert conn.resp_body =~ "data: [DONE]"
+      assert json_response(conn, 500)["error"]["message"] == "boom"
+      refute conn.resp_body =~ "event:"
     end
 
     test "401 still applies on the streaming path (auth runs before streaming)", %{conn: conn} do
       conn = post(conn, ~p"/v1/chat/completions", body(%{"stream" => true}))
       assert json_response(conn, 401)["error"]["code"] == "invalid_api_key"
+    end
+  end
+
+  describe "POST /v1/chat/completions — routing & failover" do
+    @sse_up """
+    data: {"choices":[{"index":0,"delta":{"content":"ok"}}]}
+
+    data: [DONE]
+
+    """
+
+    defp two_candidate_alias do
+      {:ok, down} =
+        Config.create_provider(%{
+          name: "down",
+          adapter_type: :vllm,
+          base_url: "http://down/v1",
+          auth_kind: :none
+        })
+
+      {:ok, up} =
+        Config.create_provider(%{
+          name: "up",
+          adapter_type: :vllm,
+          base_url: "http://up/v1",
+          auth_kind: :none
+        })
+
+      {:ok, dd} =
+        Config.create_deployment(%{provider_id: down.id, model_name: "md", capability: :chat})
+
+      {:ok, du} =
+        Config.create_deployment(%{provider_id: up.id, model_name: "mu", capability: :chat})
+
+      {:ok, _} =
+        Config.create_alias(%{
+          name: "chat-standard",
+          capability: :chat,
+          strategy: :priority,
+          candidates: [
+            %{deployment_id: dd.id, weight: 100, priority: 0},
+            %{deployment_id: du.id, weight: 100, priority: 1}
+          ]
+        })
+
+      :ok
+    end
+
+    test "non-streaming fails over and reports it in x-gateway headers", %{conn: conn} do
+      two_candidate_alias()
+
+      Req.Test.stub(Airo.TestStub, fn upstream ->
+        case upstream.host do
+          "down" -> Req.Test.transport_error(upstream, :econnrefused)
+          "up" -> Req.Test.json(upstream, @completion)
+        end
+      end)
+
+      conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body())
+
+      assert json_response(conn, 200)
+      assert get_resp_header(conn, "x-gateway-provider") == ["up"]
+      assert get_resp_header(conn, "x-gateway-fallback") == ["true"]
+    end
+
+    test "streaming fails over before the first byte and reports it in the trailer", %{conn: conn} do
+      two_candidate_alias()
+
+      Req.Test.stub(Airo.TestStub, fn upstream ->
+        case upstream.host do
+          "down" ->
+            Req.Test.transport_error(upstream, :econnrefused)
+
+          "up" ->
+            upstream
+            |> Plug.Conn.put_resp_content_type("text/event-stream")
+            |> Plug.Conn.send_resp(200, @sse_up)
+        end
+      end)
+
+      conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body(%{"stream" => true}))
+
+      assert conn.status == 200
+      assert conn.resp_body =~ ~s("content":"ok")
+      assert conn.resp_body =~ ~s("fallback_used":true)
+      assert conn.resp_body =~ "data: [DONE]"
+    end
+
+    test "409 for an unavailable strict binding", %{conn: conn} do
+      seed_alias()
+      body = body(%{"route" => %{"binding" => "vllm:ghost"}})
+      conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body)
+      assert json_response(conn, 409)["error"]["code"] == "selected_binding_unavailable"
     end
   end
 end

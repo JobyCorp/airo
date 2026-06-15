@@ -41,9 +41,14 @@ defmodule Airo.Adapter do
   Streaming chat. Folds each normalized OpenAI delta chunk into `acc` via
   `reducer` and returns the final accumulator. The terminal `[DONE]` sentinel is
   consumed, not forwarded.
+
+  On failure the accumulator is returned alongside the reason so the caller can
+  tell whether anything was already emitted (and thus whether failover is still
+  possible). For a pre-response failure (connection refused, non-2xx) the
+  accumulator is unchanged.
   """
   @callback stream(params, Context.t(), acc :: term(), stream_reducer) ::
-              {:ok, term()} | {:error, term()}
+              {:ok, term()} | {:error, term(), acc :: term()}
 
   @doc "Embeddings. Body is OpenAI `/embeddings` shaped."
   @callback embed(params, Context.t()) :: result

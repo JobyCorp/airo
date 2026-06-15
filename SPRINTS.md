@@ -57,7 +57,7 @@ No provider calls yet; just the schema both apps converge onto.
 - `x-gateway-*` response headers + SSE trailing event (DESIGN §5.1)
 - **DoD extra:** streamed tokens + trailer verified
 
-### [ ] S4 — Routing core
+### [x] S4 — Routing core
 - Multi-candidate selection: `weighted | priority | round-robin`
 - Health prober → ETS/`:persistent_term` (~90s staleness signal, not hard gate)
 - Failover/retries along the fallback chain

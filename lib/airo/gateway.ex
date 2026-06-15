@@ -1,99 +1,137 @@
 defmodule Airo.Gateway do
   @moduledoc """
-  Request entry point: alias resolution → scope authorization → candidate
-  selection → param normalization → adapter dispatch (DESIGN §13).
+  Request entry point: alias resolution → scope authorization → routing →
+  param normalization → adapter dispatch with failover (DESIGN §9, §13).
 
-  `resolve/3` makes all the policy decisions and returns a dispatch *plan*;
-  `run/1` (chat) and `run_stream/3` execute it. Splitting them lets the
-  controller read transparency metadata (provider/model) from the plan *before*
-  it starts streaming. Candidate *selection* here is deliberately minimal —
-  enabled candidates, lowest `priority` first — since the real routing core
-  (weighting, health-awareness, failover, strict pins) is S4. Usage/cost
-  recording is S6.
+  `resolve/3` makes the policy decisions and returns a *plan* — an ordered list
+  of dispatch `attempts` (the failover order from `Airo.Routing`), each with its
+  own adapter, context, and per-candidate normalized body. `run/1` (chat) and
+  `run_stream/4` walk that list, advancing to the next attempt on a *retryable*
+  failure (upstream 5xx / transport error), never on a 4xx. Streaming can only
+  fail over before the first byte is committed.
+
+  Transparency reflects the candidate that actually *served*, with
+  `fallback_used` set when an earlier attempt was skipped.
   """
 
   alias Airo.Adapter
   alias Airo.Adapter.Context
   alias Airo.Config
-  alias Airo.Config.{Alias, AliasCandidate, ClientKey, Deployment, Provider}
+  alias Airo.Config.{Alias, ClientKey, Deployment, Provider}
   alias Airo.Gateway.Params
   alias Airo.Registry
-  alias Airo.Repo
+  alias Airo.Routing
 
-  @type plan :: %{
+  @type attempt :: %{
           adapter: module(),
           provider: Provider.t(),
           deployment: Deployment.t(),
-          alias: Alias.t(),
           context: Context.t(),
           body: map()
         }
+
+  @type plan :: %{alias: Alias.t(), attempts: [attempt(), ...]}
+
+  @type info :: %{served: attempt(), fallback_used: boolean()}
 
   @type error ::
           :missing_model
           | {:model_not_found, String.t()}
           | {:forbidden, String.t()}
           | :no_deployment
+          | :selected_binding_unavailable
           | {:no_adapter, atom()}
           | {:unsupported_capability, atom()}
           | {:http_error, non_neg_integer(), term()}
           | {:transport_error, term()}
 
   @doc """
-  Resolve a request to a dispatch plan: validate the model, look up the alias,
-  authorize the client key's scope, select an enabled candidate, pick the
-  adapter, and confirm it supports `capability` (`:chat` | `:stream`). The plan
-  carries the normalized upstream `body`. Returns a structured error otherwise.
+  Resolve a request to a dispatch plan for `capability` (`:chat` | `:stream`):
+  validate the model, look up the alias, authorize scope, route to an ordered
+  candidate list, and build a dispatch attempt per candidate whose adapter
+  supports the capability. Returns a structured error otherwise.
   """
   @spec resolve(map(), ClientKey.t(), atom()) :: {:ok, plan()} | {:error, error()}
   def resolve(params, %ClientKey{} = client_key, capability) when is_map(params) do
     with {:ok, model} <- fetch_model(params),
          {:ok, alias_} <- fetch_alias(model),
          :ok <- authorize(client_key, model),
-         {:ok, deployment, provider} <- select_candidate(alias_),
-         {:ok, adapter} <- fetch_adapter(provider),
-         :ok <- ensure_capability(adapter, capability) do
-      {:ok,
-       %{
-         adapter: adapter,
-         provider: provider,
-         deployment: deployment,
-         alias: alias_,
-         context: Context.new(provider, deployment: deployment),
-         body:
-           Params.normalize(params, %{provider: provider, deployment: deployment, alias: alias_})
-       }}
+         {:ok, candidates} <- route(alias_, params),
+         {:ok, attempts} <- build_attempts(candidates, alias_, params, capability) do
+      {:ok, %{alias: alias_, attempts: attempts}}
     end
   end
 
   @doc """
-  Run a non-streaming chat completion. Convenience over `resolve/3` + `run/1`;
-  returns just the OpenAI-shaped response body.
+  Run a non-streaming chat completion. Convenience over `resolve/3` + `run/1`,
+  returning just the OpenAI-shaped response body.
   """
   @spec chat(map(), ClientKey.t()) :: {:ok, map()} | {:error, error()}
   def chat(params, %ClientKey{} = client_key) when is_map(params) do
-    with {:ok, plan} <- resolve(params, client_key, :chat), do: run(plan)
+    with {:ok, plan} <- resolve(params, client_key, :chat),
+         {:ok, body, _info} <- run(plan) do
+      {:ok, body}
+    end
   end
 
-  @doc "Execute a resolved plan as a non-streaming chat completion."
-  @spec run(plan()) :: {:ok, map()} | {:error, error()}
-  def run(%{adapter: adapter, body: body, context: context}), do: adapter.chat(body, context)
+  @doc """
+  Execute a plan as a non-streaming chat completion, failing over across attempts
+  on retryable upstream errors. Returns the body plus `info` (served attempt +
+  whether a fallback fired).
+  """
+  @spec run(plan()) :: {:ok, map(), info()} | {:error, error()}
+  def run(%{attempts: attempts}), do: run_attempts(attempts, false)
+
+  defp run_attempts([attempt | rest], fallback_used) do
+    case attempt.adapter.chat(attempt.body, attempt.context) do
+      {:ok, body} ->
+        {:ok, body, %{served: attempt, fallback_used: fallback_used}}
+
+      {:error, reason} ->
+        if retryable?(reason) and rest != [],
+          do: run_attempts(rest, true),
+          else: {:error, reason}
+    end
+  end
 
   @doc """
-  Execute a resolved plan as a streaming completion, folding each normalized
-  delta chunk into `acc` via `reducer` (see `Airo.Adapter.stream/4`).
+  Execute a plan as a streaming completion, folding each delta into `acc` via
+  `reducer`. Fails over to the next attempt only while `committed?.(acc)` is
+  false (nothing emitted yet). Returns `{:ok, acc, info}`, or
+  `{:partial_error, reason, acc}` once output has begun, or `{:error, reason,
+  acc}` when every attempt failed before emitting.
   """
-  @spec run_stream(plan(), acc, (map(), acc -> acc)) :: {:ok, acc} | {:error, error()}
+  @spec run_stream(plan(), acc, (map(), acc -> acc), (acc -> boolean())) ::
+          {:ok, acc, info()} | {:partial_error, error(), acc} | {:error, error(), acc}
         when acc: term()
-  def run_stream(%{adapter: adapter, body: body, context: context}, acc, reducer),
-    do: adapter.stream(body, context, acc, reducer)
+  def run_stream(%{attempts: attempts}, acc, reducer, committed?) do
+    stream_attempts(attempts, acc, reducer, committed?, false)
+  end
+
+  defp stream_attempts([attempt | rest], acc, reducer, committed?, fallback_used) do
+    case attempt.adapter.stream(attempt.body, attempt.context, acc, reducer) do
+      {:ok, acc} ->
+        {:ok, acc, %{served: attempt, fallback_used: fallback_used}}
+
+      {:error, reason, acc} ->
+        cond do
+          committed?.(acc) ->
+            {:partial_error, reason, acc}
+
+          retryable?(reason) and rest != [] ->
+            stream_attempts(rest, acc, reducer, committed?, true)
+
+          true ->
+            {:error, reason, acc}
+        end
+    end
+  end
 
   @doc """
-  Transparency metadata for a resolved plan (DESIGN §5.1) — which concrete
+  Transparency metadata for the served attempt (DESIGN §5.1): which concrete
   provider/model served, whether a fallback fired, and (when known) latency.
-  Emitted as `x-gateway-*` headers and the streaming trailer.
   """
-  @spec transparency(plan(), keyword()) :: map()
+  @spec transparency(attempt(), keyword()) :: map()
   def transparency(%{provider: provider, deployment: deployment}, extra \\ []) do
     %{
       "provider" => provider.name,
@@ -104,8 +142,7 @@ defmodule Airo.Gateway do
     |> maybe_put("latency_ms", Keyword.get(extra, :latency_ms))
   end
 
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+  ## Internal
 
   defp fetch_model(params) do
     case params["model"] do
@@ -125,38 +162,59 @@ defmodule Airo.Gateway do
     if ClientKey.scoped?(client_key, model), do: :ok, else: {:error, {:forbidden, model}}
   end
 
-  # S2: enabled candidates, lowest priority first, first one wins. S4 generalizes
-  # this to weighted/round-robin selection with health-awareness and failover.
-  defp select_candidate(%Alias{} = alias_) do
-    alias_ = Repo.preload(alias_, candidates: [deployment: [provider: :credential]])
+  defp route(alias_, params) do
+    route = if is_map(params["route"]), do: params["route"], else: %{}
 
-    alias_.candidates
-    |> Enum.filter(&candidate_enabled?/1)
-    |> Enum.sort_by(& &1.priority)
-    |> List.first()
-    |> case do
-      %AliasCandidate{deployment: deployment} -> {:ok, deployment, deployment.provider}
-      nil -> {:error, :no_deployment}
+    case Routing.candidates(alias_, route) do
+      {:ok, []} -> {:error, :no_deployment}
+      {:ok, candidates} -> {:ok, candidates}
+      {:error, _reason} = error -> error
     end
   end
 
-  defp candidate_enabled?(%AliasCandidate{
-         deployment: %{enabled: dep_on, provider: %{enabled: prov_on}}
-       }),
-       do: dep_on and prov_on
+  # One dispatch attempt per candidate whose adapter supports the capability,
+  # preserving routing order. The body is normalized per-candidate (provider and
+  # deployment default-param layers differ across candidates).
+  defp build_attempts(candidates, alias_, params, capability) do
+    attempts =
+      Enum.flat_map(candidates, fn %{provider: provider, deployment: deployment} ->
+        with {:ok, adapter} <- Registry.fetch(provider.adapter_type),
+             true <- Adapter.supports?(adapter, capability) do
+          [
+            %{
+              adapter: adapter,
+              provider: provider,
+              deployment: deployment,
+              context: Context.new(provider, deployment: deployment),
+              body:
+                Params.normalize(params, %{
+                  provider: provider,
+                  deployment: deployment,
+                  alias: alias_
+                })
+            }
+          ]
+        else
+          _ -> []
+        end
+      end)
 
-  defp candidate_enabled?(_), do: false
-
-  defp fetch_adapter(provider) do
-    case Registry.fetch(provider.adapter_type) do
-      {:ok, adapter} -> {:ok, adapter}
-      {:error, :no_adapter} -> {:error, {:no_adapter, provider.adapter_type}}
+    case attempts do
+      [] -> {:error, attempts_error(candidates, capability)}
+      list -> {:ok, list}
     end
   end
 
-  defp ensure_capability(adapter, capability) do
-    if Adapter.supports?(adapter, capability),
-      do: :ok,
-      else: {:error, {:unsupported_capability, capability}}
+  defp attempts_error(candidates, capability) do
+    if Enum.any?(candidates, &match?({:ok, _}, Registry.fetch(&1.provider.adapter_type))),
+      do: {:unsupported_capability, capability},
+      else: {:no_adapter, hd(candidates).provider.adapter_type}
   end
+
+  defp retryable?({:transport_error, _}), do: true
+  defp retryable?({:http_error, status, _}) when status >= 500, do: true
+  defp retryable?(_), do: false
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 end

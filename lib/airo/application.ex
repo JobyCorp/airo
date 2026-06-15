@@ -19,6 +19,10 @@ defmodule Airo.Application do
       # connections per {scheme, host, port}, so each provider base_url gets its
       # own connection pool (DESIGN §13).
       {Finch, name: Airo.Finch, pools: Airo.Transport.finch_pools()},
+      # Runtime ETS tables (health snapshots, round-robin counters), then the
+      # health prober that populates them.
+      Airo.Runtime.Store,
+      Airo.Health.Prober,
       # Start a worker by calling: Airo.Worker.start_link(arg)
       # {Airo.Worker, arg},
       # Start to serve requests, typically the last entry

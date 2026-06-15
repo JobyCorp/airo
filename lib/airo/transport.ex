@@ -77,12 +77,24 @@ defmodule Airo.Transport do
   Req's `:into` streaming, so backpressure and per-host pooling are unchanged.
   """
   @spec stream(Context.t(), String.t(), map(), acc, (map(), acc -> acc), keyword()) ::
-          {:ok, acc} | {:error, term()}
+          {:ok, acc} | {:error, term(), acc}
         when acc: term()
   def stream(%Context{} = ctx, path, json, acc, reducer, opts \\ []) do
-    init = %{buffer: "", acc: acc, reducer: reducer, err: ""}
+    # Track the live accumulator in the process dictionary so a mid-stream
+    # transport drop (where Req returns no response) can still hand it back —
+    # the caller needs it to know whether any bytes were already emitted.
+    live = {:airo_stream_acc, make_ref()}
+    Process.put(live, acc)
 
-    result =
+    tracked = fn chunk, current ->
+      next = reducer.(chunk, current)
+      Process.put(live, next)
+      next
+    end
+
+    init = %{buffer: "", acc: acc, reducer: tracked, err: ""}
+
+    try do
       ctx
       |> build_request(opts)
       |> Req.post(
@@ -99,21 +111,23 @@ defmodule Airo.Transport do
 
             {:cont, {req, Req.Response.put_private(resp, :airo_sse, state)}}
 
-          _other, acc ->
-            {:cont, acc}
+          _other, into_acc ->
+            {:cont, into_acc}
         end
       )
+      |> case do
+        {:ok, %Req.Response{status: status} = resp} when status in 200..299 ->
+          {:ok, Req.Response.get_private(resp, :airo_sse, init).acc}
 
-    case result do
-      {:ok, %Req.Response{status: status} = resp} when status in 200..299 ->
-        {:ok, Req.Response.get_private(resp, :airo_sse, init).acc}
+        {:ok, %Req.Response{status: status} = resp} ->
+          state = Req.Response.get_private(resp, :airo_sse, init)
+          {:error, {:http_error, status, decode_error(state.err)}, state.acc}
 
-      {:ok, %Req.Response{status: status} = resp} ->
-        {:error,
-         {:http_error, status, decode_error(Req.Response.get_private(resp, :airo_sse, init).err)}}
-
-      {:error, reason} ->
-        {:error, {:transport_error, reason}}
+        {:error, reason} ->
+          {:error, {:transport_error, reason}, Process.get(live, acc)}
+      end
+    after
+      Process.delete(live)
     end
   end
 

@@ -195,7 +195,7 @@ defmodule Airo.Adapters.OpenAICompatibleTest do
 
       ctx = context(__MODULE__, deployment: %Deployment{model_name: "m"})
 
-      assert {:error, {:http_error, 500, %{"error" => "boom"}}} =
+      assert {:error, {:http_error, 500, %{"error" => "boom"}}, []} =
                OpenAICompatible.stream(%{"messages" => []}, ctx, [], fn c, acc -> [c | acc] end)
     end
   end
