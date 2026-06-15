@@ -275,6 +275,22 @@ For incogito and orchester:
   browser → app (WS/WebRTC) → `AiroClient.Realtime` → Airo → Speaches. The
   browser stops knowing any URL but the app's own.
 
+### 7.1 Migration gotcha — `base_url` and `/v1`
+
+`airo_client` owns the full `/v1/...` endpoint paths, so its **`base_url` is the
+gateway *host*** (e.g. `http://airo.internal:4000`) — **not** `…/v1`. `openai_ex`
+appended `/v1` itself, so connections carried over from it often have `/v1` baked
+into `base_url`; left as-is they double up to `/v1/v1/...` and 404. incogito hit
+this during its cutover.
+
+`airo_client` now **strips a trailing `/v1`** (and slash) defensively, so a
+carried-over config works either way — but configure the "airo" connection's
+`base_url` as the **host** (no `/v1`). Set `api_key` to the Airo client key.
+
+> **For orchester:** when repointing its dispatch connection at Airo, set
+> `base_url` to the Airo host (no `/v1`); the resolved `model` is an Airo alias or
+> a concrete deployment id (Airo resolves both). Same convention as incogito.
+
 ---
 
 ## 8. Sequencing
