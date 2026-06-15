@@ -13,6 +13,16 @@ config :airo, Airo.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
+# Cloak vault key for the test env. Static, non-secret.
+config :airo, Airo.Vault,
+  ciphers: [
+    default:
+      {Cloak.Ciphers.AES.GCM,
+       tag: "AES.GCM.V1",
+       key: Base.decode64!("KVplU57km1VxUNxCETOEO6pS2jDhM2t8Rw4U/4s67Ik="),
+       iv_length: 12}
+  ]
+
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
 config :airo, AiroWeb.Endpoint,

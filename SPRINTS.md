@@ -30,7 +30,7 @@ for the architecture this builds toward.
 
 ## Backlog (ordered — each depends on the previous)
 
-### [ ] S0 — Foundations & config plane
+### [x] S0 — Foundations & config plane
 No provider calls yet; just the schema both apps converge onto.
 - Cloak vault + `Airo.Encrypted.Binary` Ecto type
 - Migrations + schemas + changesets: `Provider`, `Deployment`, `Alias`,
