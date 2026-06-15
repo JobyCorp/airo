@@ -15,6 +15,10 @@ defmodule Airo.Application do
       Airo.Repo,
       {DNSCluster, query: Application.get_env(:airo, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Airo.PubSub},
+      # Shared HTTP transport for upstream provider calls. Finch pools
+      # connections per {scheme, host, port}, so each provider base_url gets its
+      # own connection pool (DESIGN §13).
+      {Finch, name: Airo.Finch, pools: Airo.Transport.finch_pools()},
       # Start a worker by calling: Airo.Worker.start_link(arg)
       # {Airo.Worker, arg},
       # Start to serve requests, typically the last entry

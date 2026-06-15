@@ -1,0 +1,52 @@
+defmodule Airo.Registry do
+  @moduledoc """
+  Maps a provider `adapter_type` to its `Airo.Adapter` implementation (DESIGN §13).
+
+  OpenAI-compatible upstreams (vLLM, Ollama, LM Studio, OpenAI, Speaches) all
+  share `Airo.Adapters.OpenAICompatible`. Anthropic and Infinity get bespoke
+  normalizing adapters (S5); until then `fetch/1` reports `:no_adapter` for them
+  so callers fail loudly rather than silently mis-dispatching.
+  """
+
+  alias Airo.Adapters.OpenAICompatible
+
+  @adapters %{
+    openai: OpenAICompatible,
+    vllm: OpenAICompatible,
+    ollama: OpenAICompatible,
+    lmstudio: OpenAICompatible,
+    speaches: OpenAICompatible
+    # anthropic: Airo.Adapters.Anthropic — S5
+    # infinity:  Airo.Adapters.Infinity  — S5
+  }
+
+  @doc """
+  Fetch the adapter module for an `adapter_type`.
+
+      iex> Airo.Registry.fetch(:vllm)
+      {:ok, Airo.Adapters.OpenAICompatible}
+
+      iex> Airo.Registry.fetch(:anthropic)
+      {:error, :no_adapter}
+  """
+  @spec fetch(atom()) :: {:ok, module()} | {:error, :no_adapter}
+  def fetch(adapter_type) do
+    case Map.fetch(@adapters, adapter_type) do
+      {:ok, module} -> {:ok, module}
+      :error -> {:error, :no_adapter}
+    end
+  end
+
+  @doc "Like `fetch/1` but raises if no adapter is registered."
+  @spec fetch!(atom()) :: module()
+  def fetch!(adapter_type) do
+    case fetch(adapter_type) do
+      {:ok, module} -> module
+      {:error, :no_adapter} -> raise ArgumentError, "no adapter for #{inspect(adapter_type)}"
+    end
+  end
+
+  @doc "All registered adapter types."
+  @spec adapter_types() :: [atom()]
+  def adapter_types, do: Map.keys(@adapters)
+end
