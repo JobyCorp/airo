@@ -5,8 +5,10 @@ defmodule Airo.Adapters.OpenAICompatible do
   already in canonical (OpenAI) shape, so this is near-passthrough: forward the
   body to the provider's endpoint and hand back the decoded response.
 
-  S1 implements `chat/2` (non-streaming) only. Streaming (`stream/3`) and the
-  other capabilities land in later sprints.
+  Implements `chat/2` (non-streaming) and `stream/4`. Since these upstreams
+  already emit OpenAI-shaped SSE deltas, streaming is near-passthrough — the
+  Transport parses the SSE and we forward each chunk unchanged. The remaining
+  capabilities land in later sprints.
   """
   @behaviour Airo.Adapter
 
@@ -20,6 +22,14 @@ defmodule Airo.Adapters.OpenAICompatible do
     |> put_model(ctx.deployment)
     |> then(&Transport.post(ctx, "/chat/completions", &1))
     |> handle_response()
+  end
+
+  @impl Airo.Adapter
+  def stream(params, %Context{} = ctx, acc, reducer) when is_map(params) do
+    params
+    |> put_model(ctx.deployment)
+    |> Map.put("stream", true)
+    |> then(&Transport.stream(ctx, "/chat/completions", &1, acc, reducer))
   end
 
   # When routing has chosen a concrete deployment, the upstream model is the

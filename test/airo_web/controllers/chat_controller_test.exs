@@ -123,4 +123,88 @@ defmodule AiroWeb.ChatControllerTest do
       assert json_response(conn, 400)["error"]["code"] == "missing_model"
     end
   end
+
+  describe "POST /v1/chat/completions — non-streaming transparency" do
+    setup do
+      seed_alias()
+      :ok
+    end
+
+    test "attaches x-gateway-* headers including latency", %{conn: conn} do
+      Req.Test.stub(Airo.TestStub, fn upstream -> Req.Test.json(upstream, @completion) end)
+
+      conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body())
+
+      assert json_response(conn, 200)
+      assert get_resp_header(conn, "x-gateway-provider") == ["local"]
+      assert get_resp_header(conn, "x-gateway-model") == ["qwen3.5-9b"]
+      assert get_resp_header(conn, "x-gateway-fallback") == ["false"]
+      assert [latency] = get_resp_header(conn, "x-gateway-latency-ms")
+      assert String.to_integer(latency) >= 0
+    end
+  end
+
+  describe "POST /v1/chat/completions — streaming" do
+    setup do
+      seed_alias()
+      :ok
+    end
+
+    @sse """
+    data: {"choices":[{"index":0,"delta":{"role":"assistant"}}]}
+
+    data: {"choices":[{"index":0,"delta":{"content":"He"}}]}
+
+    data: {"choices":[{"index":0,"delta":{"content":"llo"},"finish_reason":null}]}
+
+    data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+    data: [DONE]
+
+    """
+
+    test "streams SSE deltas, a transparency trailer, and [DONE]", %{conn: conn} do
+      Req.Test.stub(Airo.TestStub, fn upstream ->
+        upstream
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(200, @sse)
+      end)
+
+      conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body(%{"stream" => true}))
+
+      assert conn.status == 200
+      assert ["text/event-stream" <> _] = get_resp_header(conn, "content-type")
+
+      # Up-front transparency headers (latency only lands in the trailer here).
+      assert get_resp_header(conn, "x-gateway-model") == ["qwen3.5-9b"]
+      assert get_resp_header(conn, "x-gateway-latency-ms") == []
+
+      body = conn.resp_body
+      assert body =~ ~s("content":"He")
+      assert body =~ ~s("content":"llo")
+      refute body =~ "[DONE]\"]"
+      # Trailer metadata event with latency, then the OpenAI sentinel last.
+      assert body =~ "event: gateway.metadata"
+      assert body =~ "latency_ms"
+      assert String.ends_with?(String.trim_trailing(body), "data: [DONE]")
+    end
+
+    test "emits a terminal gateway.error event when the upstream stream fails", %{conn: conn} do
+      Req.Test.stub(Airo.TestStub, fn upstream ->
+        upstream |> Plug.Conn.put_status(500) |> Req.Test.json(%{"error" => "boom"})
+      end)
+
+      conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body(%{"stream" => true}))
+
+      # Status/headers already committed before the upstream failure surfaced.
+      assert conn.status == 200
+      assert conn.resp_body =~ "event: gateway.error"
+      assert conn.resp_body =~ "data: [DONE]"
+    end
+
+    test "401 still applies on the streaming path (auth runs before streaming)", %{conn: conn} do
+      conn = post(conn, ~p"/v1/chat/completions", body(%{"stream" => true}))
+      assert json_response(conn, 401)["error"]["code"] == "invalid_api_key"
+    end
+  end
 end

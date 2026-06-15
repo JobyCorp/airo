@@ -67,6 +67,57 @@ defmodule Airo.Transport do
   end
 
   @doc """
+  Stream a POST of `json` to `path`, parsing the upstream Server-Sent Events and
+  folding each `data:` JSON event into `acc` via `reducer`. The SSE `[DONE]`
+  sentinel terminates the stream and is not forwarded; malformed JSON events are
+  skipped.
+
+  Returns `{:ok, acc}` on a 2xx stream, or `{:error, {:http_error, status, body}}`
+  / `{:error, {:transport_error, reason}}`. Reuses the shared `Airo.Finch` via
+  Req's `:into` streaming, so backpressure and per-host pooling are unchanged.
+  """
+  @spec stream(Context.t(), String.t(), map(), acc, (map(), acc -> acc), keyword()) ::
+          {:ok, acc} | {:error, term()}
+        when acc: term()
+  def stream(%Context{} = ctx, path, json, acc, reducer, opts \\ []) do
+    init = %{buffer: "", acc: acc, reducer: reducer, err: ""}
+
+    result =
+      ctx
+      |> build_request(opts)
+      |> Req.post(
+        url: full_url(ctx.provider.base_url, path),
+        json: json,
+        into: fn
+          {:data, data}, {req, resp} ->
+            state = Req.Response.get_private(resp, :airo_sse, init)
+
+            state =
+              if resp.status in 200..299,
+                do: consume_sse(data, state),
+                else: %{state | err: state.err <> data}
+
+            {:cont, {req, Req.Response.put_private(resp, :airo_sse, state)}}
+
+          _other, acc ->
+            {:cont, acc}
+        end
+      )
+
+    case result do
+      {:ok, %Req.Response{status: status} = resp} when status in 200..299 ->
+        {:ok, Req.Response.get_private(resp, :airo_sse, init).acc}
+
+      {:ok, %Req.Response{status: status} = resp} ->
+        {:error,
+         {:http_error, status, decode_error(Req.Response.get_private(resp, :airo_sse, init).err)}}
+
+      {:error, reason} ->
+        {:error, {:transport_error, reason}}
+    end
+  end
+
+  @doc """
   Join an endpoint path onto a base URL without discarding the base's path
   prefix. Both a leading slash on `path` and a trailing slash on `base` are
   tolerated.
@@ -113,6 +164,65 @@ defmodule Airo.Transport do
   # install a `Req.Test` plug globally. Empty in dev/prod.
   defp global_req_options do
     Application.get_env(:airo, __MODULE__, []) |> Keyword.get(:req_options, [])
+  end
+
+  ## SSE parsing
+
+  # Append a raw chunk, emit any now-complete events, retain the partial tail.
+  defp consume_sse(data, state) do
+    {events, rest} = split_events(state.buffer <> data)
+
+    acc =
+      Enum.reduce(events, state.acc, fn raw, acc ->
+        case event_data(raw) do
+          {:ok, "[DONE]"} -> acc
+          {:ok, json} -> reduce_json(json, acc, state.reducer)
+          :none -> acc
+        end
+      end)
+
+    %{state | buffer: rest, acc: acc}
+  end
+
+  # Split on blank-line event boundaries (LF or CRLF); the trailing element is
+  # the incomplete event still being received.
+  defp split_events(buffer) do
+    case String.split(buffer, ~r/\r?\n\r?\n/) do
+      [only] -> {[], only}
+      parts -> {Enum.drop(parts, -1), List.last(parts)}
+    end
+  end
+
+  # Concatenate the `data:` field(s) of one SSE event (SSE allows several).
+  defp event_data(raw_event) do
+    data =
+      raw_event
+      |> String.split(~r/\r?\n/)
+      |> Enum.flat_map(fn
+        "data:" <> rest -> [String.trim_leading(rest, " ")]
+        _ -> []
+      end)
+
+    case data do
+      [] -> :none
+      lines -> {:ok, Enum.join(lines, "\n")}
+    end
+  end
+
+  defp reduce_json(json, acc, reducer) do
+    case Jason.decode(json) do
+      {:ok, chunk} -> reducer.(chunk, acc)
+      {:error, _} -> acc
+    end
+  end
+
+  defp decode_error(""), do: %{}
+
+  defp decode_error(raw) do
+    case Jason.decode(raw) do
+      {:ok, decoded} -> decoded
+      {:error, _} -> raw
+    end
   end
 
   defp load_credential(%Provider{credential: %Secret{} = secret}), do: secret

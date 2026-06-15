@@ -6,8 +6,8 @@ defmodule Airo.AdapterTest do
 
   test "supports?/2 reflects which callbacks an adapter implements" do
     assert Adapter.supports?(OpenAICompatible, :chat)
-    # Not yet implemented in S1.
-    refute Adapter.supports?(OpenAICompatible, :stream)
+    assert Adapter.supports?(OpenAICompatible, :stream)
+    # Not yet implemented.
     refute Adapter.supports?(OpenAICompatible, :embed)
   end
 

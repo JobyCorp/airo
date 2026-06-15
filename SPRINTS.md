@@ -52,7 +52,7 @@ No provider calls yet; just the schema both apps converge onto.
   `provider_params` passthrough, unknown-key passthrough (DESIGN §7)
 - **DoD extra:** real request against a local vLLM/Ollama succeeds
 
-### [ ] S3 — Streaming & transparency
+### [x] S3 — Streaming & transparency
 - SSE streaming for chat, normalized to OpenAI deltas (tools, `reasoning_content`)
 - `x-gateway-*` response headers + SSE trailing event (DESIGN §5.1)
 - **DoD extra:** streamed tokens + trailer verified
