@@ -7,8 +7,9 @@ defmodule Airo.AdapterTest do
   test "supports?/2 reflects which callbacks an adapter implements" do
     assert Adapter.supports?(OpenAICompatible, :chat)
     assert Adapter.supports?(OpenAICompatible, :stream)
+    assert Adapter.supports?(OpenAICompatible, :embed)
     # Not yet implemented.
-    refute Adapter.supports?(OpenAICompatible, :embed)
+    refute Adapter.supports?(OpenAICompatible, :rerank)
   end
 
   test "capabilities/0 lists the contract callbacks" do

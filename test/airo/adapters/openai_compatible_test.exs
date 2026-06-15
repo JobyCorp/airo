@@ -199,4 +199,50 @@ defmodule Airo.Adapters.OpenAICompatibleTest do
                OpenAICompatible.stream(%{"messages" => []}, ctx, [], fn c, acc -> [c | acc] end)
     end
   end
+
+  describe "speech/2" do
+    test "returns binary audio tagged with its content type" do
+      Req.Test.stub(__MODULE__, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("audio/mpeg", nil)
+        |> Plug.Conn.send_resp(200, <<1, 2, 3, 4>>)
+      end)
+
+      ctx = context(__MODULE__, deployment: %Deployment{model_name: "tts-1"})
+
+      assert {:ok, {:audio, "audio/mpeg", <<1, 2, 3, 4>>}} =
+               OpenAICompatible.speech(%{"model" => "voice", "input" => "hi"}, ctx)
+    end
+  end
+
+  describe "transcribe/2" do
+    test "uploads the file as multipart and returns the JSON transcript" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        [content_type] = Plug.Conn.get_req_header(conn, "content-type")
+        send(test_pid, {:content_type, content_type})
+        Req.Test.json(conn, %{"text" => "hello world"})
+      end)
+
+      path = Path.join(System.tmp_dir!(), "airo-#{System.unique_integer([:positive])}.wav")
+      File.write!(path, "RIFFfake")
+      upload = %Plug.Upload{path: path, filename: "a.wav", content_type: "audio/wav"}
+
+      ctx = context(__MODULE__, deployment: %Deployment{model_name: "whisper-1"})
+
+      assert {:ok, %{"text" => "hello world"}} =
+               OpenAICompatible.transcribe(%{"model" => "stt", "file" => upload}, ctx)
+
+      assert_received {:content_type, "multipart/form-data" <> _}
+      File.rm(path)
+    end
+
+    test "errors when no file is provided" do
+      ctx = context(__MODULE__, deployment: %Deployment{model_name: "whisper-1"})
+
+      assert {:error, {:invalid_request, :missing_file}} =
+               OpenAICompatible.transcribe(%{"model" => "stt"}, ctx)
+    end
+  end
 end

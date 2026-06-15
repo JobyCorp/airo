@@ -4,20 +4,20 @@ defmodule Airo.Registry do
 
   OpenAI-compatible upstreams (vLLM, Ollama, LM Studio, OpenAI, Speaches) all
   share `Airo.Adapters.OpenAICompatible`. Anthropic and Infinity get bespoke
-  normalizing adapters (S5); until then `fetch/1` reports `:no_adapter` for them
+  normalizing adapters; until an adapter exists `fetch/1` reports `:no_adapter`
   so callers fail loudly rather than silently mis-dispatching.
   """
 
-  alias Airo.Adapters.OpenAICompatible
+  alias Airo.Adapters.{Anthropic, Infinity, OpenAICompatible}
 
   @adapters %{
     openai: OpenAICompatible,
     vllm: OpenAICompatible,
     ollama: OpenAICompatible,
     lmstudio: OpenAICompatible,
-    speaches: OpenAICompatible
-    # anthropic: Airo.Adapters.Anthropic — S5
-    # infinity:  Airo.Adapters.Infinity  — S5
+    speaches: OpenAICompatible,
+    anthropic: Anthropic,
+    infinity: Infinity
   }
 
   @doc """

@@ -25,6 +25,11 @@ defmodule AiroWeb.Router do
     pipe_through :gateway_api
 
     post "/chat/completions", ChatController, :create
+    post "/embeddings", EmbeddingsController, :create
+    post "/rerank", RerankController, :create
+    post "/audio/speech", AudioController, :speech
+    post "/audio/transcriptions", AudioController, :transcriptions
+    get "/models", ModelsController, :index
   end
 
   scope "/", AiroWeb do
