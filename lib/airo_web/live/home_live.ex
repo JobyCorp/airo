@@ -29,8 +29,12 @@ defmodule AiroWeb.HomeLive do
             Welcome to Airo.
           </h1>
           <p class="max-w-2xl text-base text-base-content/75">
-            This app is generated with
-            <a href="https://github.com/jobycorp/joby_kit" class="link link-primary" target="_blank" rel="noopener">
+            This app is generated with <a
+              href="https://github.com/jobycorp/joby_kit"
+              class="link link-primary"
+              target="_blank"
+              rel="noopener"
+            >
               JobyKit
             </a>, an opinionated, agentic-first design system on top of Phoenix and daisyUI.
             The two pages below are the discoverability surface for human and AI contributors.
@@ -63,7 +67,10 @@ defmodule AiroWeb.HomeLive do
             The combined manifest (kit core + composites + domain) is served as JSON. Your
             coding agent can fetch it without parsing rendered HEEx.
           </p>
-          <pre class="overflow-x-auto rounded-lg bg-base-300/40 p-4 text-xs" phx-no-curly-interpolation><code>curl http://localhost:4000/design.json | jq</code></pre>
+          <pre
+            class="overflow-x-auto rounded-lg bg-base-300/40 p-4 text-xs"
+            phx-no-curly-interpolation
+          ><code>curl http://localhost:4000/design.json | jq</code></pre>
         </section>
       </main>
     </Layouts.app>
