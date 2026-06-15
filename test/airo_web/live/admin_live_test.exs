@@ -98,6 +98,60 @@ defmodule AiroWeb.AdminLiveTest do
     end
   end
 
+  describe "deployments" do
+    test "the model field becomes a picker of the provider's upstream models", %{conn: conn} do
+      Req.Test.stub(Airo.TestStub, fn upstream ->
+        Req.Test.json(upstream, %{"data" => [%{"id" => "qwen3.5-9b"}, %{"id" => "nomic-embed"}]})
+      end)
+
+      p = provider("vllm-models")
+      {:ok, view, _html} = live(conn, ~p"/admin/deployments")
+
+      view |> element("button", "New deployment") |> render_click()
+
+      html =
+        view
+        |> form("form", deployment: %{provider_id: p.id})
+        |> render_change()
+
+      assert html =~ ~s(<select)
+      assert html =~ "qwen3.5-9b"
+      assert html =~ "nomic-embed"
+    end
+
+    test "notes when a reachable provider reports an empty catalog", %{conn: conn} do
+      Req.Test.stub(Airo.TestStub, fn upstream ->
+        Req.Test.json(upstream, %{"data" => []})
+      end)
+
+      p = provider("vllm-empty")
+      {:ok, view, _html} = live(conn, ~p"/admin/deployments")
+
+      view |> element("button", "New deployment") |> render_click()
+
+      html = view |> form("form", deployment: %{provider_id: p.id}) |> render_change()
+      assert html =~ "reports no models"
+    end
+
+    test "falls back to free text with a hint when the upstream can't be listed", %{conn: conn} do
+      Req.Test.stub(Airo.TestStub, fn upstream ->
+        Req.Test.transport_error(upstream, :econnrefused)
+      end)
+
+      p = provider("vllm-down")
+      {:ok, view, _html} = live(conn, ~p"/admin/deployments")
+
+      view |> element("button", "New deployment") |> render_click()
+
+      html =
+        view
+        |> form("form", deployment: %{provider_id: p.id})
+        |> render_change()
+
+      assert html =~ "Couldn&#39;t reach the provider" or html =~ "Couldn't reach the provider"
+    end
+  end
+
   describe "usage" do
     test "renders the usage view", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/admin/usage")

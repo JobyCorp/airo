@@ -27,6 +27,11 @@ defmodule Airo.Adapters.Infinity do
     |> handle_response()
   end
 
+  @impl Airo.Adapter
+  def list_models(%Context{} = ctx) do
+    ctx |> Transport.get("/models") |> handle_response() |> to_model_ids()
+  end
+
   defp put_model(params, %Deployment{model_name: model}) when is_binary(model),
     do: Map.put(params, "model", model)
 
@@ -39,4 +44,7 @@ defmodule Airo.Adapters.Infinity do
     do: {:error, {:http_error, status, body}}
 
   defp handle_response({:error, reason}), do: {:error, {:transport_error, reason}}
+
+  defp to_model_ids({:ok, body}), do: {:ok, Airo.Adapter.model_ids(body)}
+  defp to_model_ids({:error, _} = error), do: error
 end

@@ -62,12 +62,38 @@ defmodule Airo.Adapter do
   @doc "Transcription. OpenAI `/audio/transcriptions` shaped."
   @callback transcribe(params, Context.t()) :: result
 
-  @optional_callbacks chat: 2, stream: 4, embed: 2, rerank: 2, speech: 2, transcribe: 2
+  @doc """
+  List the model ids the upstream advertises (its `/models` endpoint). Used by
+  discovery/admin to populate model pickers — not part of request serving, so it
+  takes only a `Context` (no request body). Returns the ids, or an error reason
+  when the upstream is unreachable or doesn't expose a catalog.
+  """
+  @callback list_models(Context.t()) :: {:ok, [String.t()]} | {:error, term()}
+
+  @optional_callbacks chat: 2,
+                      stream: 4,
+                      embed: 2,
+                      rerank: 2,
+                      speech: 2,
+                      transcribe: 2,
+                      list_models: 1
 
   @capabilities [:chat, :stream, :embed, :rerank, :speech, :transcribe]
 
   @doc "The capability callbacks an adapter may implement."
   def capabilities, do: @capabilities
+
+  @doc """
+  Model ids out of an OpenAI-style catalog body — `%{"data" => [%{"id" => id}]}`,
+  the shape OpenAI, vLLM/Ollama/LM Studio, Anthropic, and Infinity all return.
+  Anything malformed yields `[]`.
+  """
+  @spec model_ids(map()) :: [String.t()]
+  def model_ids(%{"data" => data}) when is_list(data) do
+    for %{"id" => id} <- data, is_binary(id), do: id
+  end
+
+  def model_ids(_body), do: []
 
   @doc """
   Whether `module` implements `capability`. `stream` is arity 3; the rest are

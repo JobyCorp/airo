@@ -123,4 +123,27 @@ defmodule Airo.Adapters.AnthropicTest do
       assert Enum.any?(chunks, &(hd(&1["choices"])["finish_reason"] == "stop"))
     end
   end
+
+  describe "list_models/1" do
+    test "GETs /v1/models with auth headers and returns the catalog's ids" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        send(
+          test_pid,
+          {:req, conn.method, conn.request_path, Plug.Conn.get_req_header(conn, "x-api-key")}
+        )
+
+        Req.Test.json(conn, %{
+          "data" => [
+            %{"id" => "claude-opus-4-8", "type" => "model"},
+            %{"id" => "claude-sonnet-4-6", "type" => "model"}
+          ]
+        })
+      end)
+
+      assert {:ok, ["claude-opus-4-8", "claude-sonnet-4-6"]} = Anthropic.list_models(context())
+      assert_received {:req, "GET", "/v1/models", ["sk-ant-123"]}
+    end
+  end
 end
