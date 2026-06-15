@@ -13,7 +13,7 @@ defmodule Airo.Usage.UsageRecord do
 
   alias Airo.Config.{ClientKey, Deployment}
 
-  @capabilities [:chat, :embeddings, :rerank, :speech, :transcription]
+  @capabilities [:chat, :embeddings, :rerank, :speech, :transcription, :vision, :classify]
   @outcomes [:success, :error, :timeout]
 
   @type t :: %__MODULE__{}

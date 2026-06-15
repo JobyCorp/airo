@@ -31,7 +31,7 @@ defmodule Airo.Config.DeploymentTest do
     end
 
     test "rejects an unknown capability", %{provider: provider} do
-      changeset = Deployment.changeset(%Deployment{}, %{valid(provider) | capability: :vision})
+      changeset = Deployment.changeset(%Deployment{}, %{valid(provider) | capability: :nonsense})
       assert "is invalid" in errors_on(changeset).capability
     end
 

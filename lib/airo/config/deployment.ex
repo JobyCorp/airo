@@ -10,7 +10,7 @@ defmodule Airo.Config.Deployment do
 
   alias Airo.Config.Provider
 
-  @capabilities [:chat, :embeddings, :rerank, :speech, :transcription]
+  @capabilities [:chat, :embeddings, :rerank, :speech, :transcription, :vision, :classify]
   @classes [:edge, :standard, :deep, :cloud]
 
   @type t :: %__MODULE__{}
