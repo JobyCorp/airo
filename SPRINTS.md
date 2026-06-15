@@ -1,0 +1,89 @@
+# Airo — Sprint Process
+
+Lightweight, scope-boxed process for standing up Airo. See [DESIGN.md](./DESIGN.md)
+for the architecture this builds toward.
+
+## How we work
+
+- **A sprint is a vertical slice**, not a week. It's done when it compiles, is
+  tested, and moves the system one mergeable step forward — however long that takes.
+- **One sprint = one branch** named `sprint/NN-slug` (e.g. `sprint/00-foundations`),
+  merged to `main` when the Definition of Done is met. `main` always compiles.
+- **Track in-sprint work** with the session task list; this file is the durable
+  cross-session record — tick the checkbox when a sprint merges.
+- **Commits** end with the co-author trailer; keep the subject imperative and scoped.
+
+## Definition of Done (every sprint)
+
+- [ ] `mix precommit` green (`compile --warnings-as-errors`, `deps.unlock --unused`,
+      `format`, `test`)
+- [ ] New behavior has tests (adapters tested against a stubbed Req plug, not live)
+- [ ] `mix joby_kit.lint` green *if the sprint touched UI*
+- [ ] `DESIGN.md` updated if any decision changed; `SPRINTS.md` checkbox ticked
+- [ ] Branch merged to `main` and pushed
+
+## Definition of Ready (before starting a sprint)
+
+- Goal is one sentence; deliverables are listed; it depends only on merged sprints.
+
+---
+
+## Backlog (ordered — each depends on the previous)
+
+### [ ] S0 — Foundations & config plane
+No provider calls yet; just the schema both apps converge onto.
+- Cloak vault + `Airo.Encrypted.Binary` Ecto type
+- Migrations + schemas + changesets: `Provider`, `Deployment`, `Alias`,
+  `ClientKey`, `Secret`, `UsageRecord` (DESIGN §8)
+- `Airo.Config` context(s); dev seeds for one local provider
+- **DoD extra:** migrations run clean; changeset tests cover required fields + enums
+
+### [ ] S1 — Transport & adapter behaviour
+- `Airo.Adapter` behaviour (`chat/stream/embed/rerank/speech/transcribe`)
+- Own Req/Finch wrapper; one Finch named pool per `Provider` (DESIGN §13)
+- `Airo.Registry` (adapter type → module)
+- First OpenAI-compatible adapter: **chat, non-streaming**
+- **DoD extra:** adapter unit-tested against a stubbed Req plug
+
+### [ ] S2 — Chat front door (first end-to-end slice)
+- `POST /v1/chat/completions` (non-streaming): alias → normalize → adapter → response
+- Client-key auth plug (hashed lookup, `allowed_aliases` scope)
+- Param normalization v1: layered defaults (provider<deployment<alias<request),
+  `provider_params` passthrough, unknown-key passthrough (DESIGN §7)
+- **DoD extra:** real request against a local vLLM/Ollama succeeds
+
+### [ ] S3 — Streaming & transparency
+- SSE streaming for chat, normalized to OpenAI deltas (tools, `reasoning_content`)
+- `x-gateway-*` response headers + SSE trailing event (DESIGN §5.1)
+- **DoD extra:** streamed tokens + trailer verified
+
+### [ ] S4 — Routing core
+- Multi-candidate selection: `weighted | priority | round-robin`
+- Health prober → ETS/`:persistent_term` (~90s staleness signal, not hard gate)
+- Failover/retries along the fallback chain
+- Strict pin via `route.binding` → serve or `selected_binding_unavailable`
+- **DoD extra:** routing + failover unit-tested with a downed stub
+
+### [ ] S5 — Capability breadth
+- `/v1/embeddings`; unified `/v1/models` (aggregate healthy providers)
+- Anthropic adapter (Messages API + claude-code OAuth refresh, normalized out)
+- Infinity `/v1/rerank`; Speaches `/v1/audio/{speech,transcriptions}`
+- **DoD extra:** each capability has an adapter + test
+
+### [ ] S6 — Observability & config UI
+- Async `UsageRecord` writes + cost from `Deployment` pricing
+- LiveView admin (JobyKit) for Providers/Deployments/Aliases/Keys + usage view
+- OpenAPI spec via `open_api_spex`; Oban prune worker for `UsageRecord`
+- **DoD extra:** admin CRUD works; spec served at `/openapi`; usage recorded
+
+### [ ] S7 — Consumer migration
+- incogito: repoint `base_url` → Airo; map assignments to single-candidate aliases
+- orchester: delete resolver, repoint dispatch, translate strict pins → `route.binding`;
+  keep Sink / agent loop / `:queued` Oban app-side
+- **DoD extra:** both apps green against Airo
+
+---
+
+## Status log
+
+_Append one line per merge: `S0 merged <sha> — note`._
