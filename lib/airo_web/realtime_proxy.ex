@@ -28,8 +28,8 @@ defmodule AiroWeb.RealtimeProxy do
 
       {:error, reason} ->
         Logger.warning("realtime: upstream connect failed: #{inspect(reason)}")
-        record_usage(state, :error)
-        {:push, [{:close, 1011, "upstream unavailable"}], %{state | status: :closed}}
+
+        {:stop, :normal, {1011, "upstream unavailable"}, close_state(%{state | status: :error})}
     end
   end
 
@@ -101,51 +101,62 @@ defmodule AiroWeb.RealtimeProxy do
 
   ## ── inbound response processing (upstream → client) ──────────────
 
-  # Fold Mint responses, accumulating frames to push to the client.
-  defp process([], state, pushes), do: {:push, Enum.reverse(pushes), state}
+  # Fold Mint responses into the frames to push to the client, tracking a terminal
+  # close. WebSock has no pushable close frame — a close is a `{:stop, …}` return
+  # with a `close_detail` (`code | {code, reason}`), so we flush pending pushes and
+  # stop rather than pushing a `{:close, …}` (which crashes Bandit's deflate).
+  defp process(responses, state, pushes), do: process(responses, state, pushes, nil)
 
-  defp process([{:status, ref, status} | rest], %{ref: ref} = state, pushes),
-    do: process(rest, %{state | upstream_status: status}, pushes)
+  defp process([], state, pushes, nil), do: {:push, Enum.reverse(pushes), state}
 
-  defp process([{:headers, ref, headers} | rest], %{ref: ref} = state, pushes) do
+  defp process([], state, pushes, close),
+    do: {:stop, :normal, close, Enum.reverse(pushes), close_state(state)}
+
+  defp process([{:status, ref, status} | rest], %{ref: ref} = state, pushes, close),
+    do: process(rest, %{state | upstream_status: status}, pushes, close)
+
+  defp process([{:headers, ref, headers} | rest], %{ref: ref} = state, pushes, close) do
     case Mint.WebSocket.new(state.conn, ref, state.upstream_status, headers) do
       {:ok, conn, websocket} ->
         state = flush_pending(%{state | conn: conn, websocket: websocket, status: :open})
-        process(rest, state, pushes)
+        process(rest, state, pushes, close)
 
       {:error, conn, reason} ->
         Logger.warning("realtime: upstream upgrade rejected: #{inspect(reason)}")
 
-        {:push, Enum.reverse([{:close, 1011, "upstream upgrade failed"} | pushes]),
-         close_state(%{state | conn: conn})}
+        {:stop, :normal, {1011, "upstream upgrade failed"}, Enum.reverse(pushes),
+         close_state(%{state | conn: conn, status: :error})}
     end
   end
 
-  defp process([{:data, ref, data} | rest], %{ref: ref, status: :open} = state, pushes) do
+  defp process([{:data, ref, data} | rest], %{ref: ref, status: :open} = state, pushes, close) do
     case Mint.WebSocket.decode(state.websocket, data) do
       {:ok, websocket, frames} ->
-        process(rest, %{state | websocket: websocket}, prepend_frames(frames, pushes))
+        {pushes, close} = collect_frames(frames, pushes, close)
+        process(rest, %{state | websocket: websocket}, pushes, close)
 
       {:error, websocket, reason} ->
         Logger.warning("realtime: decode error: #{inspect(reason)}")
 
-        {:push, Enum.reverse([{:close, 1011, "decode error"} | pushes]),
-         close_state(%{state | websocket: websocket})}
+        {:stop, :normal, {1011, "decode error"}, Enum.reverse(pushes),
+         close_state(%{state | websocket: websocket, status: :error})}
     end
   end
 
-  defp process([_other | rest], state, pushes), do: process(rest, state, pushes)
+  defp process([_other | rest], state, pushes, close), do: process(rest, state, pushes, close)
 
   # Map decoded upstream frames to client pushes (verbatim), newest-first into the
-  # accumulator (reversed when emitted).
-  defp prepend_frames(frames, pushes) do
-    Enum.reduce(frames, pushes, fn
-      {:text, data}, acc -> [{:text, data} | acc]
-      {:binary, data}, acc -> [{:binary, data} | acc]
-      {:ping, data}, acc -> [{:ping, data} | acc]
-      {:pong, data}, acc -> [{:pong, data} | acc]
-      {:close, code, reason}, acc -> [{:close, code || 1000, reason || ""} | acc]
-      :close, acc -> [{:close, 1000, ""} | acc]
+  # accumulator; an upstream close becomes the terminal `close_detail` (once set,
+  # later frames are dropped — the session is ending).
+  defp collect_frames(frames, pushes, close) do
+    Enum.reduce(frames, {pushes, close}, fn
+      _frame, {pushes, {_code, _reason} = close} -> {pushes, close}
+      {:text, data}, {pushes, nil} -> {[{:text, data} | pushes], nil}
+      {:binary, data}, {pushes, nil} -> {[{:binary, data} | pushes], nil}
+      {:ping, data}, {pushes, nil} -> {[{:ping, data} | pushes], nil}
+      {:pong, data}, {pushes, nil} -> {[{:pong, data} | pushes], nil}
+      {:close, code, reason}, {pushes, nil} -> {pushes, {code || 1000, reason || ""}}
+      :close, {pushes, nil} -> {pushes, {1000, ""}}
       _other, acc -> acc
     end)
   end
@@ -187,5 +198,11 @@ defmodule AiroWeb.RealtimeProxy do
       outcome: outcome,
       latency_ms: System.monotonic_time(:millisecond) - state.started_at
     })
+  rescue
+    # Usage accounting is best-effort — a recording failure must never tear down
+    # the relay (in async mode the Task isolates this; this guards the sync path).
+    error ->
+      Logger.warning("realtime: usage record failed: #{inspect(error)}")
+      :ok
   end
 end

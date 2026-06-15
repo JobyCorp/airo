@@ -8,6 +8,7 @@ defmodule AiroWeb.RealtimeProxyTest do
   alias AiroWeb.RealtimeProxy
 
   @port 4123
+  @reject_port 4124
 
   setup do
     start_supervised!({Airo.Test.EchoServer, port: @port})
@@ -55,6 +56,21 @@ defmodule AiroWeb.RealtimeProxyTest do
     end
   end
 
+  # Feed upstream Mint messages until the handler returns a `:stop`.
+  defp pump_until_stop(state) do
+    receive do
+      message ->
+        case RealtimeProxy.handle_info(message, state) do
+          {:ok, state} -> pump_until_stop(state)
+          {:push, _pushes, state} -> pump_until_stop(state)
+          {:stop, _reason, _detail, _state} = stop -> stop
+          {:stop, _reason, _detail, _pushes, _state} = stop -> stop
+        end
+    after
+      5_000 -> flunk("timed out waiting for the proxy to stop")
+    end
+  end
+
   # Receive one upstream message and return the handler's pushes.
   defp recv_pushes(state) do
     receive do
@@ -93,5 +109,16 @@ defmodule AiroWeb.RealtimeProxyTest do
     state = pump_until_open(state)
     {pushes, _state} = recv_pushes(state)
     assert {:text, "early"} in pushes
+  end
+
+  test "stops with a close detail (no Bandit deflate crash) when the upstream rejects the upgrade" do
+    start_supervised!({Airo.Test.RejectServer, port: @reject_port})
+    state = put_in(initial_state(), [:target, :port], @reject_port)
+
+    assert {:ok, state} = RealtimeProxy.init(state)
+
+    # WebSock close must be a `{:stop, …}` with a close_detail — never a pushed
+    # `{:close, …}` frame (which has no opcode and crashes Bandit's deflate).
+    assert {:stop, :normal, {1011, _reason}, _pushes, _state} = pump_until_stop(state)
   end
 end
