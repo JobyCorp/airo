@@ -23,6 +23,8 @@ defmodule Airo.Application do
       # health prober that populates them.
       Airo.Runtime.Store,
       Airo.Health.Prober,
+      # Off-path usage-record writes.
+      {Task.Supervisor, name: Airo.Usage.TaskSupervisor},
       # Start a worker by calling: Airo.Worker.start_link(arg)
       # {Airo.Worker, arg},
       # Start to serve requests, typically the last entry

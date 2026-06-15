@@ -20,6 +20,9 @@ config :airo, Airo.Transport, req_options: [plug: {Req.Test, Airo.TestStub}]
 # Don't run the periodic health prober in tests; tests set health explicitly.
 config :airo, Airo.Health.Prober, enabled: false
 
+# Record usage synchronously in tests so writes hit the SQL sandbox connection.
+config :airo, Airo.Usage, async: false
+
 # Cloak vault key for the test env. Static, non-secret.
 config :airo, Airo.Vault,
   ciphers: [
