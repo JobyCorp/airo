@@ -74,6 +74,7 @@ defmodule Airo.MixProject do
       {:cloak, "~> 1.1"},
       {:cloak_ecto, "~> 1.3"},
       {:finch, "~> 0.22"},
+      {:mint_web_socket, "~> 1.0"},
       {:open_api_spex, "~> 3.21"},
       {:oban, "~> 2.23"}
     ]

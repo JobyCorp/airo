@@ -98,4 +98,13 @@ defmodule AiroWeb.GatewayError do
          "api_error",
          "unsupported_capability"
        )}
+
+  defp to_response({:unsupported_intent, intent}),
+    do:
+      {400,
+       OpenAIError.body(
+         "Unsupported realtime intent `#{intent}`.",
+         "invalid_request_error",
+         "unsupported_intent"
+       )}
 end

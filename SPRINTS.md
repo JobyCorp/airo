@@ -83,7 +83,7 @@ No provider calls yet; just the schema both apps converge onto.
 - **DoD extra:** both apps green against Airo
 - _incogito validated: chat/embeddings/speech via concrete model ids; STT still direct (→ S8)._
 
-### [ ] S8 — Realtime proxy
+### [x] S8 — Realtime proxy
 See [DESIGN-realtime-and-client.md](./DESIGN-realtime-and-client.md) §4.
 - `/v1/realtime` WebSocket (Bandit `WebSock` in, `Mint.WebSocket` out), Bearer auth
 - Connect-time resolution + health routing; internal/external provider brokering
@@ -109,3 +109,4 @@ _Append one line per merge: `S0 merged <sha> — note`._
 - S4 merged a050d91 — Routing core: Airo.Runtime.Store (ETS), Airo.Health + Prober (preference signal, ~90s staleness), Airo.Routing (priority/weighted/round_robin, health re-sort, class/tools filters, fallback chain, strict route.binding pin), Gateway failover (5xx/timeout not 4xx; streaming pre-byte), served-candidate transparency; 105 tests + real-socket failover smoke, precommit green.
 - S5 merged 5ca0bca — Capability breadth: generic Gateway.run dispatch; /v1/embeddings, /v1/models (scoped aliases), /v1/rerank, /v1/audio/{speech,transcriptions}; Anthropic adapter (Translate OpenAI↔Messages, claude-code OAuth refresh, chat+stream normalization), Infinity rerank/embed, Speaches audio; shared GatewayError/GatewayHeaders; 139 tests, precommit green. Each capability has an adapter + test.
 - S6 merged d9e9c21 — Observability & config UI: async Airo.Usage + cost (Task.Supervisor), GatewayUsage wired into all controllers; OpenAPI at /openapi (open_api_spex); Oban + UsageRecord PruneWorker; JobyKit admin LiveViews under /admin (Providers/Deployments/Aliases+candidates/Keys/Usage); 150 tests, joby_kit.lint green.
+- S8 merged 370ebde — realtime WebSocket proxy: Airo.Realtime (alias/concrete resolution, connect-time health routing, intent→capability), AiroWeb.RealtimeProxy (WebSock in / Mint.WebSocket out, transparent frame relay, pre-open buffering, session UsageRecord), RealtimeController + :realtime_api pipeline + GET /v1/realtime, GatewayError :unsupported_intent, mint_web_socket dep; 6 tests (resolution + relay against a real echo upstream) + verified against the REAL Speaches endpoint (session.created relayed back), precommit green (169 tests).
