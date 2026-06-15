@@ -38,7 +38,7 @@ No provider calls yet; just the schema both apps converge onto.
 - `Airo.Config` context(s); dev seeds for one local provider
 - **DoD extra:** migrations run clean; changeset tests cover required fields + enums
 
-### [ ] S1 — Transport & adapter behaviour
+### [x] S1 — Transport & adapter behaviour
 - `Airo.Adapter` behaviour (`chat/stream/embed/rerank/speech/transcribe`)
 - Own Req/Finch wrapper; one Finch named pool per `Provider` (DESIGN §13)
 - `Airo.Registry` (adapter type → module)
