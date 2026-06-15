@@ -30,12 +30,20 @@ defmodule Airo.Adapter do
   @doc "Chat completion (non-streaming). Body is OpenAI `/chat/completions` shaped."
   @callback chat(params, Context.t()) :: result
 
-  @doc """
-  Streaming chat. Invokes `on_event` for each normalized OpenAI delta and
-  returns once the stream completes. (Implemented in S3.)
+  @typedoc """
+  Reduces normalized OpenAI delta chunks into an accumulator — the streaming
+  analogue of `Enum.reduce/3`'s function. The caller (e.g. the controller)
+  threads its own state through `acc` (typically the `Plug.Conn` it chunks to).
   """
-  @callback stream(params, Context.t(), on_event :: (map() -> any())) ::
-              {:ok, map()} | {:error, term()}
+  @type stream_reducer :: (map(), acc :: term() -> term())
+
+  @doc """
+  Streaming chat. Folds each normalized OpenAI delta chunk into `acc` via
+  `reducer` and returns the final accumulator. The terminal `[DONE]` sentinel is
+  consumed, not forwarded.
+  """
+  @callback stream(params, Context.t(), acc :: term(), stream_reducer) ::
+              {:ok, term()} | {:error, term()}
 
   @doc "Embeddings. Body is OpenAI `/embeddings` shaped."
   @callback embed(params, Context.t()) :: result
@@ -49,7 +57,7 @@ defmodule Airo.Adapter do
   @doc "Transcription. OpenAI `/audio/transcriptions` shaped."
   @callback transcribe(params, Context.t()) :: result
 
-  @optional_callbacks chat: 2, stream: 3, embed: 2, rerank: 2, speech: 2, transcribe: 2
+  @optional_callbacks chat: 2, stream: 4, embed: 2, rerank: 2, speech: 2, transcribe: 2
 
   @capabilities [:chat, :stream, :embed, :rerank, :speech, :transcribe]
 
@@ -65,6 +73,6 @@ defmodule Airo.Adapter do
       function_exported?(module, capability, arity_for(capability))
   end
 
-  defp arity_for(:stream), do: 3
+  defp arity_for(:stream), do: 4
   defp arity_for(_), do: 2
 end

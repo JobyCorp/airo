@@ -130,4 +130,73 @@ defmodule Airo.Adapters.OpenAICompatibleTest do
                OpenAICompatible.chat(%{"messages" => []}, context(__MODULE__))
     end
   end
+
+  describe "stream/4" do
+    @sse """
+    data: {"choices":[{"index":0,"delta":{"role":"assistant"}}]}
+
+    data: {"choices":[{"index":0,"delta":{"content":"He"}}]}
+
+    data: {"choices":[{"index":0,"delta":{"content":"llo"},"finish_reason":null}]}
+
+    data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+    data: [DONE]
+
+    """
+
+    test "folds each SSE delta chunk through the reducer, dropping [DONE]" do
+      Req.Test.stub(__MODULE__, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(200, @sse)
+      end)
+
+      ctx = context(__MODULE__, deployment: %Deployment{model_name: "qwen3.5-9b"})
+
+      assert {:ok, chunks} =
+               OpenAICompatible.stream(%{"messages" => []}, ctx, [], fn chunk, acc ->
+                 acc ++ [chunk]
+               end)
+
+      # Four deltas, [DONE] consumed (not forwarded).
+      assert length(chunks) == 4
+
+      content =
+        chunks
+        |> Enum.map(&get_in(&1, ["choices", Access.at(0), "delta", "content"]))
+        |> Enum.reject(&is_nil/1)
+        |> Enum.join()
+
+      assert content == "Hello"
+    end
+
+    test "sets stream:true on the upstream request body" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, raw, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:sent, Jason.decode!(raw)})
+        Plug.Conn.send_resp(conn, 200, "data: [DONE]\n\n")
+      end)
+
+      ctx = context(__MODULE__, deployment: %Deployment{model_name: "m"})
+
+      assert {:ok, []} =
+               OpenAICompatible.stream(%{"messages" => []}, ctx, [], fn c, acc -> [c | acc] end)
+
+      assert_received {:sent, %{"stream" => true, "model" => "m"}}
+    end
+
+    test "maps a non-2xx stream to {:error, {:http_error, status, body}}" do
+      Req.Test.stub(__MODULE__, fn conn ->
+        conn |> Plug.Conn.put_status(500) |> Req.Test.json(%{"error" => "boom"})
+      end)
+
+      ctx = context(__MODULE__, deployment: %Deployment{model_name: "m"})
+
+      assert {:error, {:http_error, 500, %{"error" => "boom"}}} =
+               OpenAICompatible.stream(%{"messages" => []}, ctx, [], fn c, acc -> [c | acc] end)
+    end
+  end
 end
