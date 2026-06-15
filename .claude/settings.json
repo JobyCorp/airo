@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mix joby_kit.lint)",
+      "Bash(mix xref *)",
+      "Bash(mix phx.routes*)",
+      "Bash(mix hex.info *)",
+      "Bash(graphify query *)",
+      "Bash(graphify explain *)",
+      "Bash(graphify path *)",
+      "mcp__tidewave__get_logs"
+    ]
+  }
+}
