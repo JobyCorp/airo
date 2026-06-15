@@ -11,7 +11,7 @@ defmodule AiroWeb.AudioController do
   use AiroWeb, :controller
 
   alias Airo.Gateway
-  alias AiroWeb.{GatewayError, GatewayHeaders}
+  alias AiroWeb.{GatewayError, GatewayHeaders, GatewayUsage}
 
   def speech(conn, params) do
     started = System.monotonic_time(:millisecond)
@@ -19,6 +19,7 @@ defmodule AiroWeb.AudioController do
     with {:ok, plan} <- Gateway.resolve(params, conn.assigns.client_key, :speech),
          {:ok, {:audio, content_type, data}, info} <- Gateway.run(plan) do
       latency = System.monotonic_time(:millisecond) - started
+      GatewayUsage.record(conn, plan, info, latency_ms: latency)
 
       conn
       |> GatewayHeaders.put(info.served, fallback_used: info.fallback_used, latency_ms: latency)
@@ -35,6 +36,7 @@ defmodule AiroWeb.AudioController do
     with {:ok, plan} <- Gateway.resolve(params, conn.assigns.client_key, :transcribe),
          {:ok, response, info} <- Gateway.run(plan) do
       latency = System.monotonic_time(:millisecond) - started
+      GatewayUsage.record(conn, plan, info, response: response, latency_ms: latency)
 
       conn
       |> GatewayHeaders.put(info.served, fallback_used: info.fallback_used, latency_ms: latency)

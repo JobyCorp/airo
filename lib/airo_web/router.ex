@@ -38,6 +38,12 @@ defmodule AiroWeb.Router do
     live "/", HomeLive, :index
     live "/design", DesignSystemLive, :index
     live "/custom-designs", CustomDesignsLive, :index
+
+    live "/admin/providers", Admin.ProviderLive, :index
+    live "/admin/deployments", Admin.DeploymentLive, :index
+    live "/admin/aliases", Admin.AliasLive, :index
+    live "/admin/keys", Admin.KeyLive, :index
+    live "/admin/usage", Admin.UsageLive, :index
   end
 
   scope "/" do
@@ -45,6 +51,8 @@ defmodule AiroWeb.Router do
 
     get "/design.json", JobyKit.ManifestController, :show,
       private: %{joby_kit_manifest: AiroWeb.DesignManifest}
+
+    get "/openapi", AiroWeb.OpenApiController, :show
   end
 
   if Application.compile_env(:airo, :dev_routes) do

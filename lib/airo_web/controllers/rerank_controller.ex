@@ -7,7 +7,7 @@ defmodule AiroWeb.RerankController do
   use AiroWeb, :controller
 
   alias Airo.Gateway
-  alias AiroWeb.{GatewayError, GatewayHeaders}
+  alias AiroWeb.{GatewayError, GatewayHeaders, GatewayUsage}
 
   def create(conn, params) do
     started = System.monotonic_time(:millisecond)
@@ -15,6 +15,7 @@ defmodule AiroWeb.RerankController do
     with {:ok, plan} <- Gateway.resolve(params, conn.assigns.client_key, :rerank),
          {:ok, response, info} <- Gateway.run(plan) do
       latency = System.monotonic_time(:millisecond) - started
+      GatewayUsage.record(conn, plan, info, response: response, latency_ms: latency)
 
       conn
       |> GatewayHeaders.put(info.served, fallback_used: info.fallback_used, latency_ms: latency)

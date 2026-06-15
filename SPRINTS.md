@@ -70,7 +70,7 @@ No provider calls yet; just the schema both apps converge onto.
 - Infinity `/v1/rerank`; Speaches `/v1/audio/{speech,transcriptions}`
 - **DoD extra:** each capability has an adapter + test
 
-### [ ] S6 — Observability & config UI
+### [x] S6 — Observability & config UI
 - Async `UsageRecord` writes + cost from `Deployment` pricing
 - LiveView admin (JobyKit) for Providers/Deployments/Aliases/Keys + usage view
 - OpenAPI spec via `open_api_spex`; Oban prune worker for `UsageRecord`

@@ -12,7 +12,7 @@ defmodule AiroWeb.ChatController do
   use AiroWeb, :controller
 
   alias Airo.Gateway
-  alias AiroWeb.GatewayError
+  alias AiroWeb.{GatewayError, GatewayUsage}
 
   def create(conn, params) do
     capability = if streaming?(params), do: :stream, else: :chat
@@ -32,6 +32,7 @@ defmodule AiroWeb.ChatController do
     case Gateway.run(plan) do
       {:ok, response, info} ->
         latency = System.monotonic_time(:millisecond) - started
+        GatewayUsage.record(conn, plan, info, response: response, latency_ms: latency)
 
         conn
         |> put_gateway_headers(info.served,
@@ -56,6 +57,7 @@ defmodule AiroWeb.ChatController do
     case Gateway.run_stream(plan, conn, &sse_delta/2, &committed?/1) do
       {:ok, conn, info} ->
         latency = System.monotonic_time(:millisecond) - started
+        GatewayUsage.record(conn, plan, info, latency_ms: latency)
 
         meta =
           Gateway.transparency(info.served,
