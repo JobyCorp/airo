@@ -11,7 +11,7 @@ defmodule Airo.Config do
   import Ecto.Query, warn: false
 
   alias Airo.Repo
-  alias Airo.Config.{Alias, ClientKey, Deployment, Provider, Secret}
+  alias Airo.Config.{Alias, AliasCandidate, ClientKey, Deployment, Provider, Secret}
 
   ## Secrets
 
@@ -87,6 +87,21 @@ defmodule Airo.Config do
 
   def delete_alias(%Alias{} = alias_), do: Repo.delete(alias_)
   def change_alias(%Alias{} = alias_, attrs \\ %{}), do: Alias.changeset(alias_, attrs)
+
+  @doc "An alias with its routing candidates (and their deployments) preloaded."
+  def get_alias_with_candidates!(id) do
+    Alias |> Repo.get!(id) |> Repo.preload(candidates: :deployment)
+  end
+
+  def add_alias_candidate(alias_id, attrs) do
+    %AliasCandidate{}
+    |> AliasCandidate.changeset(Map.put(attrs, "alias_id", alias_id))
+    |> Repo.insert()
+  end
+
+  def delete_alias_candidate(id) do
+    AliasCandidate |> Repo.get!(id) |> Repo.delete()
+  end
 
   ## Client keys
 

@@ -20,7 +20,17 @@ defmodule AiroWeb.Layouts do
     <div class="relative flex min-h-dvh flex-col bg-base-100">
       <div class="sticky top-0 z-40 border-b border-base-300/60 bg-base-100/80 backdrop-blur supports-[backdrop-filter]:bg-base-100/65">
         <div class="mx-auto flex w-full max-w-6xl items-center px-2 sm:px-4">
-          <JobyKit.NavComponent.simple_nav active={@active_nav} brand="Airo" />
+          <JobyKit.NavComponent.simple_nav
+            active={@active_nav}
+            brand="Airo"
+            links={[
+              %{key: "providers", label: "Providers", href: "/admin/providers"},
+              %{key: "deployments", label: "Deployments", href: "/admin/deployments"},
+              %{key: "aliases", label: "Aliases", href: "/admin/aliases"},
+              %{key: "keys", label: "Keys", href: "/admin/keys"},
+              %{key: "usage", label: "Usage", href: "/admin/usage"}
+            ]}
+          />
         </div>
       </div>
 
