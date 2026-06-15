@@ -11,8 +11,8 @@ defmodule AiroWeb.GatewayUsage do
     Usage.record_async(%{
       client_key: conn.assigns.client_key,
       served: info.served,
-      alias_name: plan.alias.name,
-      capability: plan.alias.capability,
+      alias_name: plan.model,
+      capability: plan.usage_capability,
       fallback_used: info.fallback_used,
       outcome: :success,
       response: opts[:response],

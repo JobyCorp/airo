@@ -30,8 +30,8 @@ defmodule Airo.Gateway.Params do
   config layers (`:provider`, `:deployment`, `:alias`, each a schema struct with
   a `default_params` map).
   """
-  @spec normalize(map(), %{provider: map(), deployment: map(), alias: map()}) :: map()
-  def normalize(params, %{provider: provider, deployment: deployment, alias: alias_})
+  @spec normalize(map(), %{provider: map(), deployment: map(), alias: map() | nil}) :: map()
+  def normalize(params, %{provider: provider, deployment: deployment} = layers)
       when is_map(params) do
     provider_params = Map.get(params, "provider_params", %{})
     request = Map.drop(params, @gateway_only_keys)
@@ -39,10 +39,14 @@ defmodule Airo.Gateway.Params do
     %{}
     |> deep_merge(provider.default_params || %{})
     |> deep_merge(deployment.default_params || %{})
-    |> deep_merge(alias_.default_params || %{})
+    |> deep_merge(alias_params(layers[:alias]))
     |> deep_merge(request)
     |> deep_merge(provider_params)
   end
+
+  # The alias param-layer is absent when resolving a concrete deployment model.
+  defp alias_params(nil), do: %{}
+  defp alias_params(alias_), do: alias_.default_params || %{}
 
   # Recursively merge `override` into `base`; for keys present in both where both
   # values are (non-struct) maps, merge recursively, else `override` wins.
