@@ -45,7 +45,7 @@ No provider calls yet; just the schema both apps converge onto.
 - First OpenAI-compatible adapter: **chat, non-streaming**
 - **DoD extra:** adapter unit-tested against a stubbed Req plug
 
-### [ ] S2 — Chat front door (first end-to-end slice)
+### [x] S2 — Chat front door (first end-to-end slice)
 - `POST /v1/chat/completions` (non-streaming): alias → normalize → adapter → response
 - Client-key auth plug (hashed lookup, `allowed_aliases` scope)
 - Param normalization v1: layered defaults (provider<deployment<alias<request),
