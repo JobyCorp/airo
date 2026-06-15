@@ -87,3 +87,5 @@ No provider calls yet; just the schema both apps converge onto.
 ## Status log
 
 _Append one line per merge: `S0 merged <sha> — note`._
+
+- S0 merged 9e4dc29 — Cloak vault + config-plane schemas (Provider/Deployment/Alias/ClientKey/Secret/UsageRecord), Airo.Config + Airo.Usage contexts, dev seeds; 39 tests, precommit green.
