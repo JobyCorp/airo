@@ -30,11 +30,14 @@ defmodule AiroWeb.ChatController do
     started = System.monotonic_time(:millisecond)
 
     case Gateway.run(plan) do
-      {:ok, response} ->
+      {:ok, response, info} ->
         latency = System.monotonic_time(:millisecond) - started
 
         conn
-        |> put_gateway_headers(plan, latency)
+        |> put_gateway_headers(info.served,
+          fallback_used: info.fallback_used,
+          latency_ms: latency
+        )
         |> json(response)
 
       {:error, reason} ->
@@ -43,51 +46,72 @@ defmodule AiroWeb.ChatController do
   end
 
   defp stream_completion(conn, plan) do
-    conn =
-      conn
-      |> put_resp_content_type("text/event-stream")
-      |> put_resp_header("cache-control", "no-cache")
-      |> put_gateway_headers(plan, nil)
-      |> send_chunked(200)
-
+    # Up-front headers reflect the routing primary; the authoritative served
+    # candidate (after any failover) lands in the trailing metadata event. The
+    # response is not committed until the first delta is chunked, so a pre-byte
+    # failover (or total failure) can still return a clean HTTP status.
+    conn = put_gateway_headers(conn, hd(plan.attempts), [])
     started = System.monotonic_time(:millisecond)
 
-    case Gateway.run_stream(plan, conn, &sse_delta/2) do
-      {:ok, conn} ->
+    case Gateway.run_stream(plan, conn, &sse_delta/2, &committed?/1) do
+      {:ok, conn, info} ->
         latency = System.monotonic_time(:millisecond) - started
-        meta = Gateway.transparency(plan, latency_ms: latency)
 
+        meta =
+          Gateway.transparency(info.served,
+            fallback_used: info.fallback_used,
+            latency_ms: latency
+          )
+
+        conn = ensure_chunked(conn)
         {:ok, conn} = sse_event(conn, "gateway.metadata", meta)
         {:ok, conn} = chunk(conn, "data: [DONE]\n\n")
         conn
 
-      {:error, reason} ->
-        # Headers are already sent; surface the failure as a terminal SSE event.
+      {:partial_error, reason, conn} ->
+        # Output already began — finish with a terminal error event.
         {:ok, conn} = sse_event(conn, "gateway.error", error_meta(reason))
         {:ok, conn} = chunk(conn, "data: [DONE]\n\n")
         conn
+
+      {:error, reason, _conn} ->
+        # Every attempt failed before emitting anything; nothing is committed.
+        send_error(conn, reason)
     end
   end
 
-  # Reducer: write one upstream delta chunk as an SSE `data:` line.
+  defp committed?(conn), do: conn.state == :chunked
+
+  # Reducer: lazily open the chunked response on the first delta, then write it
+  # as an SSE `data:` line. Deferring `send_chunked` keeps pre-byte failover open.
   defp sse_delta(chunk, conn) do
+    conn = ensure_chunked(conn)
     {:ok, conn} = chunk(conn, "data: " <> Jason.encode!(chunk) <> "\n\n")
     conn
+  end
+
+  defp ensure_chunked(%Plug.Conn{state: :chunked} = conn), do: conn
+
+  defp ensure_chunked(conn) do
+    conn
+    |> put_resp_content_type("text/event-stream")
+    |> put_resp_header("cache-control", "no-cache")
+    |> send_chunked(200)
   end
 
   defp sse_event(conn, event, payload) do
     chunk(conn, "event: " <> event <> "\ndata: " <> Jason.encode!(payload) <> "\n\n")
   end
 
-  defp put_gateway_headers(conn, plan, latency_ms) do
-    meta = Gateway.transparency(plan, latency_ms: latency_ms)
+  defp put_gateway_headers(conn, served, opts) do
+    meta = Gateway.transparency(served, opts)
 
     conn
     |> put_resp_header("x-gateway-provider", meta["provider"])
     |> put_resp_header("x-gateway-model", meta["model"])
     |> put_resp_header("x-gateway-deployment", to_string(meta["deployment_id"]))
     |> put_resp_header("x-gateway-fallback", to_string(meta["fallback_used"]))
-    |> maybe_latency_header(latency_ms)
+    |> maybe_latency_header(meta["latency_ms"])
   end
 
   defp maybe_latency_header(conn, nil), do: conn
@@ -139,6 +163,16 @@ defmodule AiroWeb.ChatController do
       "No healthy deployment is available for this model.",
       "api_error",
       "no_deployment_available"
+    )
+  end
+
+  defp send_error(conn, :selected_binding_unavailable) do
+    error(
+      conn,
+      409,
+      "The pinned deployment (route.binding) is not an available candidate for this model.",
+      "invalid_request_error",
+      "selected_binding_unavailable"
     )
   end
 
