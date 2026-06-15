@@ -9,6 +9,9 @@ defmodule Airo.Application do
   def start(_type, _args) do
     children = [
       AiroWeb.Telemetry,
+      # Vault before Repo: encrypted Ecto types crypto through it, including
+      # during migrations/seeds.
+      Airo.Vault,
       Airo.Repo,
       {DNSCluster, query: Application.get_env(:airo, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Airo.PubSub},

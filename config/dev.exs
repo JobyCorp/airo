@@ -10,6 +10,17 @@ config :airo, Airo.Repo,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 
+# Cloak vault key for development. Static, non-secret — fine to check in;
+# prod loads its key from CLOAK_KEY in config/runtime.exs.
+config :airo, Airo.Vault,
+  ciphers: [
+    default:
+      {Cloak.Ciphers.AES.GCM,
+       tag: "AES.GCM.V1",
+       key: Base.decode64!("b5UUYJgkw/cqtMnACosv+GGqgr9U1WnlSLnzGGSEFvQ="),
+       iv_length: 12}
+  ]
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #

@@ -56,6 +56,21 @@ if config_env() == :prod do
 
   config :airo, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  # Cloak vault key — a base64-encoded 32-byte key. Generate one with:
+  #   mix run -e 'IO.puts(32 |> :crypto.strong_rand_bytes() |> Base.encode64())'
+  cloak_key =
+    System.get_env("CLOAK_KEY") ||
+      raise """
+      environment variable CLOAK_KEY is missing.
+      Generate one with: mix run -e 'IO.puts(32 |> :crypto.strong_rand_bytes() |> Base.encode64())'
+      """
+
+  config :airo, Airo.Vault,
+    ciphers: [
+      default:
+        {Cloak.Ciphers.AES.GCM, tag: "AES.GCM.V1", key: Base.decode64!(cloak_key), iv_length: 12}
+    ]
+
   config :airo, AiroWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
