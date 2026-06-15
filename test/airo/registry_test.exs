@@ -10,8 +10,11 @@ defmodule Airo.RegistryTest do
     end
   end
 
+  test "fetch/1 maps anthropic to its bespoke adapter" do
+    assert Registry.fetch(:anthropic) == {:ok, Airo.Adapters.Anthropic}
+  end
+
   test "fetch/1 reports :no_adapter for unimplemented types" do
-    assert Registry.fetch(:anthropic) == {:error, :no_adapter}
     assert Registry.fetch(:infinity) == {:error, :no_adapter}
     assert Registry.fetch(:nonsense) == {:error, :no_adapter}
   end
@@ -19,8 +22,8 @@ defmodule Airo.RegistryTest do
   test "fetch!/1 raises for unimplemented types" do
     assert Registry.fetch!(:vllm) == OpenAICompatible
 
-    assert_raise ArgumentError, ~r/no adapter for :anthropic/, fn ->
-      Registry.fetch!(:anthropic)
+    assert_raise ArgumentError, ~r/no adapter for :infinity/, fn ->
+      Registry.fetch!(:infinity)
     end
   end
 
