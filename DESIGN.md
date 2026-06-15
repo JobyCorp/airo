@@ -99,9 +99,13 @@ Plus an admin/config surface (LiveView + JSON) and an OpenAPI spec
 
 ### 5.1 Extension mechanisms — layered by opt-in
 
-**1. `model` is a logical alias (zero opt-in).**
+**1. `model` is a logical alias *or* a concrete deployment id (zero opt-in).**
 `model: "chat-deep"` / `"embed-fast"` resolves via policy to a concrete
-`(provider, model)`. Pure OpenAI wire; works from any SDK. Covers ~90% of cases.
+`(provider, model)`. If the name isn't an alias, it falls back to a concrete
+deployment **model id** (e.g. `"BAAI/bge-m3"`) for the request's capability,
+health-ordered as failover candidates — so consumers can keep sending the real
+model ids they already store. Aliases win on a name collision. Pure OpenAI wire;
+works from any SDK. `GET /v1/models` lists both (key-scoped).
 
 **2. A `route` extension object in the body (opt-in, valid JSON).**
 `openai_ex` forwards unknown body keys, so power-cases ride along; strict clients

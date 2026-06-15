@@ -54,6 +54,22 @@ defmodule Airo.Config do
   def list_deployments, do: Repo.all(Deployment)
   def get_deployment!(id), do: Repo.get!(Deployment, id)
 
+  @doc """
+  Enabled deployments (with enabled providers) whose `model_name` matches and
+  whose capability is `capability` — for resolving a concrete model id directly.
+  Provider + credential preloaded.
+  """
+  def list_deployments_by_model(model_name, capability) do
+    Deployment
+    |> where(
+      [d],
+      d.model_name == ^model_name and d.capability == ^capability and d.enabled == true
+    )
+    |> preload(provider: :credential)
+    |> Repo.all()
+    |> Enum.filter(& &1.provider.enabled)
+  end
+
   def create_deployment(attrs) do
     %Deployment{} |> Deployment.changeset(attrs) |> Repo.insert()
   end

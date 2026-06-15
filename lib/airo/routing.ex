@@ -40,6 +40,18 @@ defmodule Airo.Routing do
     end
   end
 
+  @doc """
+  Candidates for a set of deployments resolved by concrete model id (no alias).
+  Health-ordered (`:up` first) so multiple deployments of the same model fail
+  over like alias candidates, but with no weight/priority strategy.
+  """
+  @spec deployment_candidates([Airo.Config.Deployment.t()]) :: [candidate()]
+  def deployment_candidates(deployments) do
+    deployments
+    |> Enum.sort_by(&health_rank(&1.id))
+    |> Enum.map(&%{deployment: &1, provider: &1.provider})
+  end
+
   ## Strict pin
 
   defp pinned_candidate(alias_, binding) do

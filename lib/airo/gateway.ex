@@ -30,7 +30,12 @@ defmodule Airo.Gateway do
           body: map()
         }
 
-  @type plan :: %{alias: Alias.t(), capability: atom(), attempts: [attempt(), ...]}
+  @type plan :: %{
+          model: String.t(),
+          capability: atom(),
+          usage_capability: atom(),
+          attempts: [attempt(), ...]
+        }
 
   @type info :: %{served: attempt(), fallback_used: boolean()}
 
@@ -46,19 +51,30 @@ defmodule Airo.Gateway do
           | {:transport_error, term()}
 
   @doc """
-  Resolve a request to a dispatch plan for `capability` (`:chat` | `:stream`):
-  validate the model, look up the alias, authorize scope, route to an ordered
-  candidate list, and build a dispatch attempt per candidate whose adapter
-  supports the capability. Returns a structured error otherwise.
+  Resolve a request to a dispatch plan for `capability` (`:chat` | `:stream` |
+  `:embed` | `:rerank` | `:speech` | `:transcribe`).
+
+  `model` may be either an **alias** name (resolved via `Airo.Routing` — strategy,
+  health, fallback, strict pin) or a **concrete deployment model id** (resolved to
+  the enabled deployment(s) of the matching capability, health-ordered as
+  failover candidates). Aliases win when the name matches one. After authorizing
+  the key's scope against `model`, builds a dispatch attempt per candidate whose
+  adapter supports the capability.
   """
   @spec resolve(map(), ClientKey.t(), atom()) :: {:ok, plan()} | {:error, error()}
   def resolve(params, %ClientKey{} = client_key, capability) when is_map(params) do
     with {:ok, model} <- fetch_model(params),
-         {:ok, alias_} <- fetch_alias(model),
          :ok <- authorize(client_key, model),
-         {:ok, candidates} <- route(alias_, params),
-         {:ok, attempts} <- build_attempts(candidates, alias_, params, capability) do
-      {:ok, %{alias: alias_, capability: capability, attempts: attempts}}
+         {:ok, resolution} <- resolve_target(model, params, capability),
+         {:ok, attempts} <-
+           build_attempts(resolution.candidates, resolution.alias, params, capability) do
+      {:ok,
+       %{
+         model: model,
+         capability: capability,
+         usage_capability: resolution.usage_capability,
+         attempts: attempts
+       }}
     end
   end
 
@@ -153,26 +169,57 @@ defmodule Airo.Gateway do
     end
   end
 
-  defp fetch_alias(model) do
-    case Config.get_alias_by_name(model) do
-      %Alias{} = alias_ -> {:ok, alias_}
-      nil -> {:error, {:model_not_found, model}}
-    end
-  end
-
   defp authorize(client_key, model) do
     if ClientKey.scoped?(client_key, model), do: :ok, else: {:error, {:forbidden, model}}
   end
 
-  defp route(alias_, params) do
+  # An alias name routes via policy; otherwise fall back to a concrete deployment
+  # model id for the request's capability. Returns candidates + the alias (or nil,
+  # for the param-layer) + the semantic capability used for usage records.
+  defp resolve_target(model, params, capability) do
+    case Config.get_alias_by_name(model) do
+      %Alias{} = alias_ -> alias_target(alias_, params)
+      nil -> concrete_target(model, capability)
+    end
+  end
+
+  defp alias_target(alias_, params) do
     route = if is_map(params["route"]), do: params["route"], else: %{}
 
     case Routing.candidates(alias_, route) do
-      {:ok, []} -> {:error, :no_deployment}
-      {:ok, candidates} -> {:ok, candidates}
-      {:error, _reason} = error -> error
+      {:ok, []} ->
+        {:error, :no_deployment}
+
+      {:ok, candidates} ->
+        {:ok, %{candidates: candidates, alias: alias_, usage_capability: alias_.capability}}
+
+      {:error, _reason} = error ->
+        error
     end
   end
+
+  defp concrete_target(model, capability) do
+    cfg_capability = config_capability(capability)
+
+    case Config.list_deployments_by_model(model, cfg_capability) do
+      [] ->
+        {:error, {:model_not_found, model}}
+
+      deployments ->
+        {:ok,
+         %{
+           candidates: Routing.deployment_candidates(deployments),
+           alias: nil,
+           usage_capability: cfg_capability
+         }}
+    end
+  end
+
+  # Adapter capability (callback name) → config capability (Deployment enum).
+  defp config_capability(:stream), do: :chat
+  defp config_capability(:embed), do: :embeddings
+  defp config_capability(:transcribe), do: :transcription
+  defp config_capability(other), do: other
 
   # One dispatch attempt per candidate whose adapter supports the capability,
   # preserving routing order. The body is normalized per-candidate (provider and
