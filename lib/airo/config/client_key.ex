@@ -61,4 +61,13 @@ defmodule Airo.Config.ClientKey do
   def hash_key(raw) when is_binary(raw) do
     :crypto.hash(:sha256, raw) |> Base.encode16(case: :lower)
   end
+
+  @doc """
+  Whether this key is authorized to use `alias_name`. `allowed_aliases` of
+  `["*"]` (or containing `"*"`) grants all; otherwise the alias must be listed.
+  """
+  @spec scoped?(t(), String.t()) :: boolean()
+  def scoped?(%__MODULE__{allowed_aliases: aliases}, alias_name) do
+    "*" in aliases or alias_name in aliases
+  end
 end

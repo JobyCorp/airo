@@ -14,6 +14,19 @@ defmodule AiroWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # Authenticated OpenAI-compatible surface. Client-key auth halts with a 401
+  # before reaching any controller.
+  pipeline :gateway_api do
+    plug :accepts, ["json"]
+    plug AiroWeb.Plugs.ClientKeyAuth
+  end
+
+  scope "/v1", AiroWeb do
+    pipe_through :gateway_api
+
+    post "/chat/completions", ChatController, :create
+  end
+
   scope "/", AiroWeb do
     pipe_through :browser
 
