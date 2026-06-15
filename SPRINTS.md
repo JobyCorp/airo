@@ -64,7 +64,7 @@ No provider calls yet; just the schema both apps converge onto.
 - Strict pin via `route.binding` → serve or `selected_binding_unavailable`
 - **DoD extra:** routing + failover unit-tested with a downed stub
 
-### [ ] S5 — Capability breadth
+### [x] S5 — Capability breadth
 - `/v1/embeddings`; unified `/v1/models` (aggregate healthy providers)
 - Anthropic adapter (Messages API + claude-code OAuth refresh, normalized out)
 - Infinity `/v1/rerank`; Speaches `/v1/audio/{speech,transcriptions}`
