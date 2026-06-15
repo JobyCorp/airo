@@ -30,7 +30,7 @@ defmodule Airo.Gateway do
           body: map()
         }
 
-  @type plan :: %{alias: Alias.t(), attempts: [attempt(), ...]}
+  @type plan :: %{alias: Alias.t(), capability: atom(), attempts: [attempt(), ...]}
 
   @type info :: %{served: attempt(), fallback_used: boolean()}
 
@@ -58,7 +58,7 @@ defmodule Airo.Gateway do
          :ok <- authorize(client_key, model),
          {:ok, candidates} <- route(alias_, params),
          {:ok, attempts} <- build_attempts(candidates, alias_, params, capability) do
-      {:ok, %{alias: alias_, attempts: attempts}}
+      {:ok, %{alias: alias_, capability: capability, attempts: attempts}}
     end
   end
 
@@ -75,21 +75,23 @@ defmodule Airo.Gateway do
   end
 
   @doc """
-  Execute a plan as a non-streaming chat completion, failing over across attempts
-  on retryable upstream errors. Returns the body plus `info` (served attempt +
-  whether a fallback fired).
+  Execute a plan as a non-streaming request, dispatching to the plan's capability
+  callback (`:chat`, `:embed`, `:rerank`, `:speech`, `:transcribe`) and failing
+  over across attempts on retryable upstream errors. Returns the body plus `info`
+  (served attempt + whether a fallback fired).
   """
-  @spec run(plan()) :: {:ok, map(), info()} | {:error, error()}
-  def run(%{attempts: attempts}), do: run_attempts(attempts, false)
+  @spec run(plan()) :: {:ok, term(), info()} | {:error, error()}
+  def run(%{capability: capability, attempts: attempts}),
+    do: run_attempts(attempts, capability, false)
 
-  defp run_attempts([attempt | rest], fallback_used) do
-    case attempt.adapter.chat(attempt.body, attempt.context) do
+  defp run_attempts([attempt | rest], capability, fallback_used) do
+    case apply(attempt.adapter, capability, [attempt.body, attempt.context]) do
       {:ok, body} ->
         {:ok, body, %{served: attempt, fallback_used: fallback_used}}
 
       {:error, reason} ->
         if retryable?(reason) and rest != [],
-          do: run_attempts(rest, true),
+          do: run_attempts(rest, capability, true),
           else: {:error, reason}
     end
   end

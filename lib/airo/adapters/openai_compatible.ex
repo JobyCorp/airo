@@ -32,6 +32,14 @@ defmodule Airo.Adapters.OpenAICompatible do
     |> then(&Transport.stream(ctx, "/chat/completions", &1, acc, reducer))
   end
 
+  @impl Airo.Adapter
+  def embed(params, %Context{} = ctx) when is_map(params) do
+    params
+    |> put_model(ctx.deployment)
+    |> then(&Transport.post(ctx, "/embeddings", &1))
+    |> handle_response()
+  end
+
   # When routing has chosen a concrete deployment, the upstream model is the
   # deployment's model_name — override whatever logical alias the client sent.
   defp put_model(params, %Deployment{model_name: model}) when is_binary(model),
