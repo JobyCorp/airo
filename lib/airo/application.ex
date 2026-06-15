@@ -25,6 +25,8 @@ defmodule Airo.Application do
       Airo.Health.Prober,
       # Off-path usage-record writes.
       {Task.Supervisor, name: Airo.Usage.TaskSupervisor},
+      # Oban — housekeeping jobs (UsageRecord prune).
+      {Oban, Application.fetch_env!(:airo, Oban)},
       # Start a worker by calling: Airo.Worker.start_link(arg)
       # {Airo.Worker, arg},
       # Start to serve requests, typically the last entry

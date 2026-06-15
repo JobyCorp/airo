@@ -11,6 +11,14 @@ config :airo,
   ecto_repos: [Airo.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# Oban — housekeeping only (UsageRecord prune). Daily cron at 03:00.
+config :airo, Oban,
+  repo: Airo.Repo,
+  queues: [maintenance: 1],
+  plugins: [
+    {Oban.Plugins.Cron, crontab: [{"0 3 * * *", Airo.Usage.PruneWorker}]}
+  ]
+
 # Configure the endpoint
 config :airo, AiroWeb.Endpoint,
   url: [host: "localhost"],

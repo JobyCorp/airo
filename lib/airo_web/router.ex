@@ -45,6 +45,8 @@ defmodule AiroWeb.Router do
 
     get "/design.json", JobyKit.ManifestController, :show,
       private: %{joby_kit_manifest: AiroWeb.DesignManifest}
+
+    get "/openapi", AiroWeb.OpenApiController, :show
   end
 
   if Application.compile_env(:airo, :dev_routes) do
