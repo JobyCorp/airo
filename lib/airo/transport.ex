@@ -103,9 +103,16 @@ defmodule Airo.Transport do
         decode_json: [keys: :strings]
       ]
       |> Keyword.merge(opts)
+      |> Keyword.merge(global_req_options())
       |> Keyword.merge(Keyword.get(ctx.opts, :req_options, []))
 
     Req.new(req_opts)
+  end
+
+  # App-env Req options merged into every request — used by the test env to
+  # install a `Req.Test` plug globally. Empty in dev/prod.
+  defp global_req_options do
+    Application.get_env(:airo, __MODULE__, []) |> Keyword.get(:req_options, [])
   end
 
   defp load_credential(%Provider{credential: %Secret{} = secret}), do: secret

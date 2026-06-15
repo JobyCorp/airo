@@ -13,6 +13,10 @@ config :airo, Airo.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
+# Route all upstream provider HTTP through a Req.Test plug in tests, so adapter
+# and controller tests stub responses with `Req.Test.stub(Airo.TestStub, ...)`.
+config :airo, Airo.Transport, req_options: [plug: {Req.Test, Airo.TestStub}]
+
 # Cloak vault key for the test env. Static, non-secret.
 config :airo, Airo.Vault,
   ciphers: [
