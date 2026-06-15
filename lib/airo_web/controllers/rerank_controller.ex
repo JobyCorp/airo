@@ -1,9 +1,8 @@
-defmodule AiroWeb.EmbeddingsController do
+defmodule AiroWeb.RerankController do
   @moduledoc """
-  OpenAI-compatible embeddings: `POST /v1/embeddings` (DESIGN §5). Resolves the
-  `model` alias to an embeddings deployment via `Airo.Gateway`, dispatches the
-  `:embed` capability, and returns the upstream OpenAI-shaped response with
-  `x-gateway-*` transparency headers.
+  Rerank: `POST /v1/rerank` (Jina/Cohere shape; OpenAI defines none — DESIGN §5).
+  Resolves the `model` alias to a rerank deployment via `Airo.Gateway`,
+  dispatches the `:rerank` capability, and returns the upstream response.
   """
   use AiroWeb, :controller
 
@@ -13,7 +12,7 @@ defmodule AiroWeb.EmbeddingsController do
   def create(conn, params) do
     started = System.monotonic_time(:millisecond)
 
-    with {:ok, plan} <- Gateway.resolve(params, conn.assigns.client_key, :embed),
+    with {:ok, plan} <- Gateway.resolve(params, conn.assigns.client_key, :rerank),
          {:ok, response, info} <- Gateway.run(plan) do
       latency = System.monotonic_time(:millisecond) - started
 

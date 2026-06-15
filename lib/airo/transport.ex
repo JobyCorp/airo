@@ -67,6 +67,20 @@ defmodule Airo.Transport do
   end
 
   @doc """
+  POST a `multipart/form-data` body (a list of `name`/value parts; a file part is
+  `{content, filename: ..., content_type: ...}`) — used for audio transcription
+  uploads. Returns the normalized response.
+  """
+  @spec post_multipart(Context.t(), String.t(), list(), keyword()) ::
+          {:ok, response()} | {:error, term()}
+  def post_multipart(%Context{} = ctx, path, parts, opts \\ []) do
+    ctx
+    |> build_request(opts)
+    |> Req.post(url: full_url(ctx.provider.base_url, path), form_multipart: parts)
+    |> normalize()
+  end
+
+  @doc """
   Stream a POST of `json` to `path`, parsing the upstream Server-Sent Events and
   folding each `data:` JSON event into `acc` via `reducer`. The SSE `[DONE]`
   sentinel terminates the stream and is not forwarded; malformed JSON events are
