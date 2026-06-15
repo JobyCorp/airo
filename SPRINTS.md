@@ -77,10 +77,24 @@ No provider calls yet; just the schema both apps converge onto.
 - **DoD extra:** admin CRUD works; spec served at `/openapi`; usage recorded
 
 ### [ ] S7 — Consumer migration
-- incogito: repoint `base_url` → Airo; map assignments to single-candidate aliases
+- incogito: repoint `base_url` → Airo; send concrete model ids or single-candidate aliases
 - orchester: delete resolver, repoint dispatch, translate strict pins → `route.binding`;
   keep Sink / agent loop / `:queued` Oban app-side
 - **DoD extra:** both apps green against Airo
+- _incogito validated: chat/embeddings/speech via concrete model ids; STT still direct (→ S8)._
+
+### [ ] S8 — Realtime proxy
+See [DESIGN-realtime-and-client.md](./DESIGN-realtime-and-client.md) §4.
+- `/v1/realtime` WebSocket (Bandit `WebSock` in, `Mint.WebSocket` out), Bearer auth
+- Connect-time resolution + health routing; internal/external provider brokering
+- Session-grained `UsageRecord`; `x-gateway-*` on the upgrade; transparent pass-through
+- **DoD extra:** an app server relays browser STT through Airo to Speaches end-to-end
+
+### [ ] S9 — `airo_client` hex package
+See [DESIGN-realtime-and-client.md](./DESIGN-realtime-and-client.md) §6.
+- HTTP capabilities (chat/embed/rerank/speech/transcribe/models) + streaming-as-messages
+- `airo_client_realtime` relay-to-Airo; replaces `openai_ex` in both apps
+- **DoD extra:** incogito/orchester drop per-provider transport code; both green on the package
 
 ---
 
