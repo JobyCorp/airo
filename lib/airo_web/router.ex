@@ -32,6 +32,18 @@ defmodule AiroWeb.Router do
     get "/models", ModelsController, :index
   end
 
+  # Realtime WebSocket surface — client-key auth, no :accepts (it's a WS upgrade,
+  # not a content-negotiated response).
+  pipeline :realtime_api do
+    plug AiroWeb.Plugs.ClientKeyAuth
+  end
+
+  scope "/v1", AiroWeb do
+    pipe_through :realtime_api
+
+    get "/realtime", RealtimeController, :connect
+  end
+
   scope "/", AiroWeb do
     pipe_through :browser
 
