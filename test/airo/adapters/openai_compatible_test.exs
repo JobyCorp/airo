@@ -245,4 +245,35 @@ defmodule Airo.Adapters.OpenAICompatibleTest do
                OpenAICompatible.transcribe(%{"model" => "stt"}, ctx)
     end
   end
+
+  describe "list_models/1" do
+    test "GETs /models and returns the catalog's ids" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        send(test_pid, {:method, conn.method, conn.request_path})
+
+        Req.Test.json(conn, %{
+          "object" => "list",
+          "data" => [
+            %{"id" => "qwen3.5-9b", "object" => "model"},
+            %{"id" => "nomic-embed", "object" => "model"}
+          ]
+        })
+      end)
+
+      assert {:ok, ["qwen3.5-9b", "nomic-embed"]} =
+               OpenAICompatible.list_models(context(__MODULE__))
+
+      assert_received {:method, "GET", "/v1/models"}
+    end
+
+    test "surfaces an upstream error status" do
+      Req.Test.stub(__MODULE__, fn conn ->
+        conn |> Plug.Conn.put_status(503) |> Req.Test.json(%{"error" => "down"})
+      end)
+
+      assert {:error, {:http_error, 503, _}} = OpenAICompatible.list_models(context(__MODULE__))
+    end
+  end
 end

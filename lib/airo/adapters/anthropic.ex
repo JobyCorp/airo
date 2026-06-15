@@ -60,6 +60,18 @@ defmodule Airo.Adapters.Anthropic do
     end
   end
 
+  @impl Airo.Adapter
+  def list_models(%Context{provider: provider} = ctx) do
+    with {:ok, headers} <- headers(provider),
+         {:ok, %{status: status, body: body}} when status in 200..299 <-
+           Transport.get(ctx, "/v1/models", headers: headers) do
+      {:ok, Airo.Adapter.model_ids(body)}
+    else
+      {:ok, %{status: status, body: body}} -> {:error, {:http_error, status, body}}
+      {:error, reason} -> {:error, {:transport_error, reason}}
+    end
+  end
+
   defp model(%Deployment{model_name: model}, _params) when is_binary(model), do: model
   defp model(_deployment, params), do: params["model"]
 

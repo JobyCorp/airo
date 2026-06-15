@@ -11,6 +11,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
      socket
      |> assign(page_title: "Deployments", form: nil, editing: nil)
      |> assign(capabilities: Deployment.capabilities(), classes: Deployment.classes())
+     |> assign(model_options: [], model_error: nil, models_provider_id: nil)
      |> assign_providers()
      |> stream(:deployments, list())}
   end
@@ -18,14 +19,18 @@ defmodule AiroWeb.Admin.DeploymentLive do
   @impl true
   def handle_event("new", _params, socket) do
     {:noreply,
-     assign(socket, editing: nil, form: to_form(Config.change_deployment(%Deployment{})))}
+     socket
+     |> assign(editing: nil, form: to_form(Config.change_deployment(%Deployment{})))
+     |> assign_models(nil)}
   end
 
   def handle_event("edit", %{"id" => id}, socket) do
     deployment = Config.get_deployment!(id)
 
     {:noreply,
-     assign(socket, editing: deployment, form: to_form(Config.change_deployment(deployment)))}
+     socket
+     |> assign(editing: deployment, form: to_form(Config.change_deployment(deployment)))
+     |> assign_models(deployment.provider_id)}
   end
 
   def handle_event("cancel", _params, socket),
@@ -33,7 +38,11 @@ defmodule AiroWeb.Admin.DeploymentLive do
 
   def handle_event("validate", %{"deployment" => params}, socket) do
     changeset = Config.change_deployment(socket.assigns.editing || %Deployment{}, clean(params))
-    {:noreply, assign(socket, form: to_form(changeset, action: :validate))}
+
+    {:noreply,
+     socket
+     |> assign(form: to_form(changeset, action: :validate))
+     |> assign_models(params["provider_id"])}
   end
 
   def handle_event("save", %{"deployment" => params}, socket) do
@@ -81,6 +90,50 @@ defmodule AiroWeb.Admin.DeploymentLive do
     assign(socket, provider_options: Enum.map(Config.list_providers(), &{&1.name, &1.id}))
   end
 
+  # Populate the model picker from the chosen provider's upstream catalog. Only
+  # refetch when the provider actually changes (validate fires on every keystroke),
+  # and degrade to a free-text field + hint when the upstream can't be listed.
+  defp assign_models(socket, provider_id) when provider_id in [nil, ""],
+    do: assign(socket, model_options: [], model_error: nil, models_provider_id: nil)
+
+  defp assign_models(%{assigns: %{models_provider_id: provider_id}} = socket, provider_id),
+    do: socket
+
+  defp assign_models(socket, provider_id) do
+    case Config.get_provider!(provider_id) |> Airo.Models.list() do
+      {:ok, models} ->
+        assign(socket,
+          model_options: models,
+          model_error: models == [] && empty_catalog_message(),
+          models_provider_id: provider_id
+        )
+
+      {:error, reason} ->
+        assign(socket,
+          model_options: [],
+          model_error: model_error_message(reason),
+          models_provider_id: provider_id
+        )
+    end
+  end
+
+  defp empty_catalog_message,
+    do: "This provider reports no models — load one upstream, or enter the model name manually."
+
+  defp model_error_message(:unsupported),
+    do: "This provider's adapter can't list models — enter the model name manually."
+
+  defp model_error_message(_reason),
+    do: "Couldn't reach the provider to list models — enter the model name manually."
+
+  # Make sure the current value is selectable even if the upstream no longer
+  # advertises it, so editing an existing deployment never silently drops it.
+  defp model_select_options(options, current) when current in [nil, ""], do: options
+
+  defp model_select_options(options, current) do
+    if current in options, do: options, else: [current | options]
+  end
+
   # Drop blanks so optional enum/number fields don't fail casting / clobber.
   defp clean(params), do: for({k, v} <- params, v != "", into: %{}, do: {k, v})
 
@@ -105,7 +158,20 @@ defmodule AiroWeb.Admin.DeploymentLive do
               options={@provider_options}
               prompt="Select a provider"
             />
-            <.input field={@form[:model_name]} label="Model name" />
+            <.input
+              :if={@model_options == []}
+              field={@form[:model_name]}
+              label="Model name"
+            />
+            <.input
+              :if={@model_options != []}
+              field={@form[:model_name]}
+              type="select"
+              label="Model name"
+              options={model_select_options(@model_options, @form[:model_name].value)}
+              prompt="Select a model"
+            />
+            <p :if={@model_error} class="text-sm text-warning">{@model_error}</p>
             <.input
               field={@form[:capability]}
               type="select"

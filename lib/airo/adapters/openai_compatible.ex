@@ -40,6 +40,11 @@ defmodule Airo.Adapters.OpenAICompatible do
     |> handle_response()
   end
 
+  @impl Airo.Adapter
+  def list_models(%Context{} = ctx) do
+    ctx |> Transport.get("/models") |> handle_response() |> to_model_ids()
+  end
+
   # Text-to-speech: JSON in, binary audio out (Speaches `/v1/audio/speech`).
   @impl Airo.Adapter
   def speech(params, %Context{} = ctx) when is_map(params) do
@@ -125,4 +130,7 @@ defmodule Airo.Adapters.OpenAICompatible do
   end
 
   defp handle_response({:error, reason}), do: {:error, {:transport_error, reason}}
+
+  defp to_model_ids({:ok, body}), do: {:ok, Airo.Adapter.model_ids(body)}
+  defp to_model_ids({:error, _} = error), do: error
 end
