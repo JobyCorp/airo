@@ -66,7 +66,15 @@ defmodule Airo.MixProject do
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+
+      # AI gateway — config plane, secrets, upstream transport.
+      # No openai_ex: upstream transport is our own thin wrappers over Req/Finch.
+      {:cloak, "~> 1.1"},
+      {:cloak_ecto, "~> 1.3"},
+      {:finch, "~> 0.22"},
+      {:open_api_spex, "~> 3.21"},
+      {:oban, "~> 2.23"}
     ]
   end
 

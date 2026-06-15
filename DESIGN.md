@@ -297,7 +297,30 @@ via `route.binding` when it needs strict-selection behavior.
 - Config plane: Ecto/Postgres + Cloak vault; LiveView admin (JobyKit wrappers) +
   `open_api_spex`.
 
-## 14. Open questions / next steps
+## 14. Dependencies
+
+We do **not** adopt `openai_ex` (used by both source apps). Airo is a normalizing
+gateway, not an app calling one provider — it wants direct control over SSE
+passthrough, header injection, and transparency trailers. Upstream transport is
+**our own thin wrappers over Req/Finch**, one transport for both OpenAI-compatible
+and bespoke (Anthropic, Infinity) adapters.
+
+Added to the scaffold:
+
+| Dep | Version | Why |
+|---|---|---|
+| `cloak` | `~> 1.1` | Secret vault (both apps: 1.1.4) |
+| `cloak_ecto` | `~> 1.3` | `EncryptedBinary` Ecto type (1.3.0) |
+| `finch` | `~> 0.22` | explicit, for per-Provider named pools (§13) |
+| `open_api_spex` | `~> 3.21` | OpenAPI spec; new — neither app had it |
+| `oban` | `~> 2.23` | housekeeping only: `UsageRecord` prune + health snapshots |
+
+Reused from the scaffold: `req`, `ecto_sql`/`postgrex`, `jason`, `telemetry_*`,
+`bandit`, `phoenix_live_dashboard`. `plug_crypto` arrives transitively
+(constant-time API-key compare — no bcrypt; keys are high-entropy → SHA-256).
+**No `openai_ex`.** Rate limiting (`hammer`/`ex_rated`) is v2.
+
+## 15. Open questions / next steps
 
 - [ ] Detail the OTP supervision tree and the `Airo.Adapter` behaviour contract.
 - [ ] Streaming: confirm OpenAI-delta normalization covers every orchester event
