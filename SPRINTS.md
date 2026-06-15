@@ -90,3 +90,4 @@ _Append one line per merge: `S0 merged <sha> — note`._
 
 - S0 merged 9e4dc29 — Cloak vault + config-plane schemas (Provider/Deployment/Alias/ClientKey/Secret/UsageRecord), Airo.Config + Airo.Usage contexts, dev seeds; 39 tests, precommit green.
 - S1 merged 11d60fd — Airo.Adapter behaviour + Context, Airo.Transport (Req/Finch wrapper, Airo.Finch pools), Airo.Registry, OpenAICompatible chat (non-streaming); 19 tests vs stubbed Req plug, precommit green.
+- S2 merged 6bc978e — POST /v1/chat/completions (non-streaming): ClientKeyAuth plug, Airo.Gateway (resolve/authorize/select/dispatch), Params normalization v1, OpenAI-shaped errors; 74 tests + real-socket smoke, precommit green. (No live vLLM/Ollama available — real-model check pending a running backend.)
