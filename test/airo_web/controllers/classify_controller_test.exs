@@ -1,9 +1,9 @@
-defmodule AiroWeb.RerankControllerTest do
+defmodule AiroWeb.ClassifyControllerTest do
   use AiroWeb.ConnCase, async: true
 
   alias Airo.Config
 
-  defp seed_rerank_alias do
+  defp seed_classify_alias do
     {:ok, provider} =
       Config.create_provider(%{
         name: "inf",
@@ -15,14 +15,14 @@ defmodule AiroWeb.RerankControllerTest do
     {:ok, deployment} =
       Config.create_deployment(%{
         provider_id: provider.id,
-        model_name: "bge-reranker",
-        capabilities: [:rerank]
+        model_name: "go-emotions",
+        capabilities: [:classify]
       })
 
     {:ok, _} =
       Config.create_alias(%{
-        name: "rerank-std",
-        capability: :rerank,
+        name: "classify-std",
+        capability: :classify,
         strategy: :priority,
         candidates: [%{deployment_id: deployment.id, weight: 100, priority: 0}]
       })
@@ -42,31 +42,32 @@ defmodule AiroWeb.RerankControllerTest do
 
   defp authed(conn, key), do: put_req_header(conn, "authorization", "Bearer " <> key)
 
-  test "POST /v1/rerank dispatches :rerank and returns results", %{conn: conn} do
-    seed_rerank_alias()
+  test "POST /v1/classify dispatches :classify and returns results", %{conn: conn} do
+    seed_classify_alias()
 
     Req.Test.stub(Airo.TestStub, fn upstream ->
-      Req.Test.json(upstream, %{"results" => [%{"index" => 1, "relevance_score" => 0.8}]})
+      Req.Test.json(upstream, %{
+        "object" => "classify",
+        "data" => [[%{"label" => "joy", "score" => 0.92}]],
+        "model" => "go-emotions"
+      })
     end)
 
     conn =
       conn
       |> authed(mint())
-      |> post(~p"/v1/rerank", %{
-        "model" => "rerank-std",
-        "query" => "q",
-        "documents" => ["a", "b"]
-      })
+      |> post(~p"/v1/classify", %{"model" => "classify-std", "input" => ["I am happy"]})
 
-    assert json_response(conn, 200)["results"] |> hd() |> Map.get("relevance_score") == 0.8
-    assert get_resp_header(conn, "x-gateway-model") == ["bge-reranker"]
+    body = json_response(conn, 200)
+    assert body["data"] |> hd() |> hd() |> Map.get("label") == "joy"
+    assert get_resp_header(conn, "x-gateway-model") == ["go-emotions"]
   end
 
-  test "404 for an unknown rerank model", %{conn: conn} do
+  test "404 for an unknown classify model", %{conn: conn} do
     conn =
       conn
       |> authed(mint())
-      |> post(~p"/v1/rerank", %{"model" => "ghost", "query" => "q", "documents" => []})
+      |> post(~p"/v1/classify", %{"model" => "ghost", "input" => ["x"]})
 
     assert json_response(conn, 404)["error"]["code"] == "model_not_found"
   end

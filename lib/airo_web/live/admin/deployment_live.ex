@@ -4,16 +4,37 @@ defmodule AiroWeb.Admin.DeploymentLive do
 
   alias Airo.Config
   alias Airo.Config.Deployment
+  alias Airo.Health
+  alias AiroWeb.CompositeComponents
+
+  # Re-poll per-deployment health (kept in ETS by Airo.Health.Prober) so the
+  # admin table reflects an upstream going down without a manual reload.
+  @health_refresh_ms 10_000
 
   @impl true
   def mount(_params, _session, socket) do
+    if connected?(socket), do: Process.send_after(self(), :refresh_health, @health_refresh_ms)
+    deployments = list()
+
     {:ok,
      socket
      |> assign(page_title: "Deployments", form: nil, editing: nil)
      |> assign(capabilities: Deployment.capabilities(), classes: Deployment.classes())
      |> assign(model_options: [], model_error: nil, models_provider_id: nil)
+     |> assign(health: health_map(deployments))
      |> assign_providers()
-     |> stream(:deployments, list())}
+     |> stream(:deployments, deployments)}
+  end
+
+  @impl true
+  def handle_info(:refresh_health, socket) do
+    Process.send_after(self(), :refresh_health, @health_refresh_ms)
+    deployments = list()
+
+    {:noreply,
+     socket
+     |> assign(health: health_map(deployments))
+     |> stream(:deployments, deployments, reset: true)}
   end
 
   @impl true
@@ -85,6 +106,9 @@ defmodule AiroWeb.Admin.DeploymentLive do
 
   defp list, do: Config.list_deployments() |> Airo.Repo.preload(:provider)
   defp with_provider(d), do: Airo.Repo.preload(d, :provider)
+
+  defp health_map(deployments),
+    do: Map.new(deployments, &{&1.id, to_string(Health.status(&1.id))})
 
   defp assign_providers(socket) do
     assign(socket, provider_options: Enum.map(Config.list_providers(), &{&1.name, &1.id}))
@@ -173,9 +197,10 @@ defmodule AiroWeb.Admin.DeploymentLive do
             />
             <p :if={@model_error} class="text-sm text-warning">{@model_error}</p>
             <.input
-              field={@form[:capability]}
+              field={@form[:capabilities]}
               type="select"
-              label="Capability"
+              multiple
+              label="Capabilities"
               options={@capabilities}
             />
             <.input
@@ -198,9 +223,12 @@ defmodule AiroWeb.Admin.DeploymentLive do
         <.table id="deployments" rows={@streams.deployments}>
           <:col :let={{_id, d}} label="Provider">{d.provider && d.provider.name}</:col>
           <:col :let={{_id, d}} label="Model">{d.model_name}</:col>
-          <:col :let={{_id, d}} label="Capability">{d.capability}</:col>
+          <:col :let={{_id, d}} label="Capabilities">{Enum.map_join(d.capabilities, ", ", &to_string/1)}</:col>
           <:col :let={{_id, d}} label="Class">{d.class}</:col>
           <:col :let={{_id, d}} label="Enabled">{d.enabled}</:col>
+          <:col :let={{_id, d}} label="Health">
+            <CompositeComponents.health_status status={@health[d.id] || "unknown"} />
+          </:col>
           <:action :let={{_id, d}}>
             <.button size="sm" phx-click="edit" phx-value-id={d.id}>Edit</.button>
             <.button

@@ -56,14 +56,17 @@ defmodule Airo.Config do
 
   @doc """
   Enabled deployments (with enabled providers) whose `model_name` matches and
-  whose capability is `capability` — for resolving a concrete model id directly.
-  Provider + credential preloaded.
+  whose `capabilities` include `capability` — for resolving a concrete model id
+  directly. Provider + credential preloaded.
   """
   def list_deployments_by_model(model_name, capability) do
+    cap = to_string(capability)
+
     Deployment
     |> where(
       [d],
-      d.model_name == ^model_name and d.capability == ^capability and d.enabled == true
+      d.model_name == ^model_name and fragment("? = ANY(?)", ^cap, d.capabilities) and
+        d.enabled == true
     )
     |> preload(provider: :credential)
     |> Repo.all()

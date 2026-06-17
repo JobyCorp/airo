@@ -22,7 +22,8 @@ defmodule Airo.Realtime do
           path: String.t(),
           headers: [{String.t(), String.t()}],
           deployment: Airo.Config.Deployment.t(),
-          provider: Airo.Config.Provider.t()
+          provider: Airo.Config.Provider.t(),
+          capability: atom()
         }
 
   @type error ::
@@ -43,7 +44,7 @@ defmodule Airo.Realtime do
     with {:ok, capability} <- capability_for(intent),
          :ok <- authorize(client_key, model),
          {:ok, candidate} <- first_candidate(model, capability) do
-      {:ok, target(candidate, model, intent)}
+      {:ok, target(candidate, capability, intent)}
     end
   end
 
@@ -61,13 +62,13 @@ defmodule Airo.Realtime do
   # Connect-time selection: the first health-ordered candidate (alias or concrete).
   defp first_candidate(model, capability) do
     case Config.get_alias_by_name(model) do
-      %Alias{} = alias_ -> alias_candidate(alias_)
+      %Alias{} = alias_ -> alias_candidate(alias_, capability)
       nil -> concrete_candidate(model, capability)
     end
   end
 
-  defp alias_candidate(alias_) do
-    case Routing.candidates(alias_, %{}) do
+  defp alias_candidate(alias_, capability) do
+    case Routing.candidates(alias_, %{}, capability) do
       {:ok, [candidate | _]} -> {:ok, candidate}
       {:ok, []} -> {:error, :no_deployment}
       {:error, _reason} -> {:error, :no_deployment}
@@ -81,7 +82,7 @@ defmodule Airo.Realtime do
     end
   end
 
-  defp target(%{deployment: deployment, provider: provider}, _model, intent) do
+  defp target(%{deployment: deployment, provider: provider}, capability, intent) do
     uri = realtime_uri(provider.base_url, deployment.model_name, intent)
 
     %{
@@ -91,7 +92,8 @@ defmodule Airo.Realtime do
       path: path_with_query(uri),
       headers: Transport.auth_headers(provider),
       deployment: deployment,
-      provider: provider
+      provider: provider,
+      capability: capability
     }
   end
 

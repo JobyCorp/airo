@@ -1,0 +1,27 @@
+defmodule AiroWeb.ClassifyController do
+  @moduledoc """
+  Classify: `POST /v1/classify` (Infinity shape; OpenAI defines none — DESIGN §5).
+  Resolves the `model` alias to a classify deployment via `Airo.Gateway`,
+  dispatches the `:classify` capability, and returns the upstream response.
+  """
+  use AiroWeb, :controller
+
+  alias Airo.Gateway
+  alias AiroWeb.{GatewayError, GatewayHeaders, GatewayUsage}
+
+  def create(conn, params) do
+    started = System.monotonic_time(:millisecond)
+
+    with {:ok, plan} <- Gateway.resolve(params, conn.assigns.client_key, :classify),
+         {:ok, response, info} <- Gateway.run(plan) do
+      latency = System.monotonic_time(:millisecond) - started
+      GatewayUsage.record(conn, plan, info, response: response, latency_ms: latency)
+
+      conn
+      |> GatewayHeaders.put(info.served, fallback_used: info.fallback_used, latency_ms: latency)
+      |> json(response)
+    else
+      {:error, reason} -> GatewayError.send_error(conn, reason)
+    end
+  end
+end

@@ -56,6 +56,9 @@ defmodule Airo.Adapter do
   @doc "Rerank. Jina/Cohere `/rerank` shaped (OpenAI defines none)."
   @callback rerank(params, Context.t()) :: result
 
+  @doc "Classify/score text. Infinity `/classify` shaped (OpenAI defines none)."
+  @callback classify(params, Context.t()) :: result
+
   @doc "Text-to-speech. OpenAI `/audio/speech` shaped."
   @callback speech(params, Context.t()) :: result
 
@@ -74,11 +77,12 @@ defmodule Airo.Adapter do
                       stream: 4,
                       embed: 2,
                       rerank: 2,
+                      classify: 2,
                       speech: 2,
                       transcribe: 2,
                       list_models: 1
 
-  @capabilities [:chat, :stream, :embed, :rerank, :speech, :transcribe]
+  @capabilities [:chat, :stream, :embed, :rerank, :classify, :speech, :transcribe]
 
   @doc "The capability callbacks an adapter may implement."
   def capabilities, do: @capabilities

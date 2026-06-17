@@ -29,7 +29,7 @@ defmodule AiroWeb.ChatControllerTest do
       Config.create_deployment(%{
         provider_id: provider.id,
         model_name: "qwen3.5-9b",
-        capability: :chat
+        capabilities: [:chat]
       })
 
     {:ok, _alias} =
@@ -236,10 +236,10 @@ defmodule AiroWeb.ChatControllerTest do
         })
 
       {:ok, dd} =
-        Config.create_deployment(%{provider_id: down.id, model_name: "md", capability: :chat})
+        Config.create_deployment(%{provider_id: down.id, model_name: "md", capabilities: [:chat]})
 
       {:ok, du} =
-        Config.create_deployment(%{provider_id: up.id, model_name: "mu", capability: :chat})
+        Config.create_deployment(%{provider_id: up.id, model_name: "mu", capabilities: [:chat]})
 
       {:ok, _} =
         Config.create_alias(%{

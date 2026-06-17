@@ -38,6 +38,21 @@ defmodule Airo.Adapters.InfinityTest do
     assert_received {:rerank, "/rerank", "bge-reranker"}
   end
 
+  test "classify/2 posts to /classify with the deployment model and returns the body" do
+    test_pid = self()
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, raw, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:classify, conn.request_path, Jason.decode!(raw)["model"]})
+      Req.Test.json(conn, %{"object" => "classify", "data" => [[%{"label" => "joy", "score" => 0.9}]]})
+    end)
+
+    assert {:ok, body} = Infinity.classify(%{"model" => "c", "input" => ["hi"]}, context())
+
+    assert body["data"] |> hd() |> hd() |> Map.get("label") == "joy"
+    assert_received {:classify, "/classify", "bge-reranker"}
+  end
+
   test "embed/2 posts to /embeddings" do
     test_pid = self()
 

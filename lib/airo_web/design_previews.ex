@@ -92,6 +92,16 @@ defmodule AiroWeb.DesignPreviews do
     """
   end
 
+  def health_status_preview(assigns) do
+    ~H"""
+    <div class="flex items-center gap-3">
+      <CompositeComponents.health_status status="up" />
+      <CompositeComponents.health_status status="down" />
+      <CompositeComponents.health_status status="unknown" />
+    </div>
+    """
+  end
+
   def empty_state_preview(assigns) do
     ~H"""
     <div class="grid gap-4 sm:grid-cols-2">

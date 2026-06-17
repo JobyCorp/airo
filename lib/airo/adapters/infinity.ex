@@ -1,9 +1,11 @@
 defmodule Airo.Adapters.Infinity do
   @moduledoc """
   Adapter for [Infinity](https://github.com/michaelfeil/infinity) — an
-  embeddings + rerank server (DESIGN §6). Embeddings are OpenAI-compatible
-  (`/embeddings`); rerank uses the de-facto Jina/Cohere `/rerank` shape, which
-  Airo exposes at `/v1/rerank`. Both are near-passthrough.
+  embeddings + rerank + classify server (DESIGN §6). Embeddings are
+  OpenAI-compatible (`/embeddings`); rerank uses the de-facto Jina/Cohere
+  `/rerank` shape (Airo exposes it at `/v1/rerank`); classify uses Infinity's
+  `/classify` (`{model, input}` → scored labels), exposed at `/v1/classify`.
+  All are near-passthrough.
   """
   @behaviour Airo.Adapter
 
@@ -24,6 +26,14 @@ defmodule Airo.Adapters.Infinity do
     params
     |> put_model(ctx.deployment)
     |> then(&Transport.post(ctx, "/rerank", &1))
+    |> handle_response()
+  end
+
+  @impl Airo.Adapter
+  def classify(params, %Context{} = ctx) when is_map(params) do
+    params
+    |> put_model(ctx.deployment)
+    |> then(&Transport.post(ctx, "/classify", &1))
     |> handle_response()
   end
 

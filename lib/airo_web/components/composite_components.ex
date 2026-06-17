@@ -30,6 +30,42 @@ defmodule AiroWeb.CompositeComponents do
   alias JobyKit.CoreComponents
 
   @doc """
+  An upstream-health pill: a colored dot plus the status word. Reads as a
+  compact status indicator inside admin tables (providers, deployments).
+
+      <.health_status status="up" />
+      <.health_status status="down" />
+
+  `status` mirrors `Airo.Health.status/1` — `up` (reachable), `down`
+  (unreachable / 5xx), or `unknown` (never probed or stale).
+  """
+  attr :status, :string, values: ~w(up down unknown), default: "unknown"
+  attr :rest, :global
+
+  def health_status(assigns) do
+    ~H"""
+    <span
+      data-component="AiroWeb.CompositeComponents.health_status"
+      class={[
+        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium capitalize",
+        @status == "up" && "bg-success/15 text-success",
+        @status == "down" && "bg-error/15 text-error",
+        @status == "unknown" && "bg-base-200 text-base-content/60"
+      ]}
+      {@rest}
+    >
+      <span class={[
+        "size-1.5 rounded-full",
+        @status == "up" && "bg-success",
+        @status == "down" && "bg-error",
+        @status == "unknown" && "bg-base-content/40"
+      ]} />
+      {@status}
+    </span>
+    """
+  end
+
+  @doc """
   An empty-state callout: centered icon, title, supporting text, and an
   optional action slot. Use to fill an otherwise-empty container — an
   unfilled list, a search with no results, a fresh dashboard.

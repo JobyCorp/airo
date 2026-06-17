@@ -21,7 +21,7 @@ defmodule Airo.RealtimeTest do
       Config.create_deployment(%{
         provider_id: provider.id,
         model_name: model,
-        capability: :transcription
+        capabilities: [:transcription]
       })
 
     d

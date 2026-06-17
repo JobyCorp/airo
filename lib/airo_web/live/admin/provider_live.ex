@@ -4,14 +4,35 @@ defmodule AiroWeb.Admin.ProviderLive do
 
   alias Airo.Config
   alias Airo.Config.Provider
+  alias Airo.Health
+  alias AiroWeb.CompositeComponents
+
+  # Re-poll provider health (aggregated from its deployments' ETS health) so a
+  # down upstream surfaces without a manual reload.
+  @health_refresh_ms 10_000
 
   @impl true
   def mount(_params, _session, socket) do
+    if connected?(socket), do: Process.send_after(self(), :refresh_health, @health_refresh_ms)
+    providers = list()
+
     {:ok,
      socket
      |> assign(page_title: "Providers", form: nil, editing: nil)
      |> assign(adapter_types: Provider.adapter_types(), auth_kinds: Provider.auth_kinds())
-     |> stream(:providers, Config.list_providers())}
+     |> assign(health: health_map(providers))
+     |> stream(:providers, providers)}
+  end
+
+  @impl true
+  def handle_info(:refresh_health, socket) do
+    Process.send_after(self(), :refresh_health, @health_refresh_ms)
+    providers = list()
+
+    {:noreply,
+     socket
+     |> assign(health: health_map(providers))
+     |> stream(:providers, providers, reset: true)}
   end
 
   @impl true
@@ -40,6 +61,22 @@ defmodule AiroWeb.Admin.ProviderLive do
     provider = Config.get_provider!(id)
     {:ok, _} = Config.delete_provider(provider)
     {:noreply, stream_delete(socket, :providers, provider)}
+  end
+
+  defp list, do: Config.list_providers() |> Airo.Repo.preload(:deployments)
+
+  defp health_map(providers), do: Map.new(providers, &{&1.id, provider_status(&1)})
+
+  # A provider is as healthy as its worst deployment: any :down → "down",
+  # else any :up → "up", else "unknown" (no deployments / never probed).
+  defp provider_status(provider) do
+    statuses = Enum.map(provider.deployments, &Health.status(&1.id))
+
+    cond do
+      Enum.any?(statuses, &(&1 == :down)) -> "down"
+      Enum.any?(statuses, &(&1 == :up)) -> "up"
+      true -> "unknown"
+    end
   end
 
   defp save(socket, nil, params) do
@@ -105,6 +142,9 @@ defmodule AiroWeb.Admin.ProviderLive do
           <:col :let={{_id, p}} label="Base URL">{p.base_url}</:col>
           <:col :let={{_id, p}} label="Auth">{p.auth_kind}</:col>
           <:col :let={{_id, p}} label="Enabled">{p.enabled}</:col>
+          <:col :let={{_id, p}} label="Health">
+            <CompositeComponents.health_status status={@health[p.id] || "unknown"} />
+          </:col>
           <:action :let={{_id, p}}>
             <.button size="sm" phx-click="edit" phx-value-id={p.id}>Edit</.button>
             <.button

@@ -19,6 +19,8 @@ defmodule Airo.Gateway do
   alias Airo.Config
   alias Airo.Config.{Alias, ClientKey, Deployment, Provider}
   alias Airo.Gateway.Params
+  alias Airo.Gateway.Vision
+  alias Airo.Health
   alias Airo.Registry
   alias Airo.Routing
 
@@ -63,9 +65,11 @@ defmodule Airo.Gateway do
   """
   @spec resolve(map(), ClientKey.t(), atom()) :: {:ok, plan()} | {:error, error()}
   def resolve(params, %ClientKey{} = client_key, capability) when is_map(params) do
+    resource = resource_capability(capability, params)
+
     with {:ok, model} <- fetch_model(params),
          :ok <- authorize(client_key, model),
-         {:ok, resolution} <- resolve_target(model, params, capability),
+         {:ok, resolution} <- resolve_target(model, params, resource),
          {:ok, attempts} <-
            build_attempts(resolution.candidates, resolution.alias, params, capability) do
       {:ok,
@@ -103,9 +107,12 @@ defmodule Airo.Gateway do
   defp run_attempts([attempt | rest], capability, fallback_used) do
     case apply(attempt.adapter, capability, [attempt.body, attempt.context]) do
       {:ok, body} ->
+        mark_health(attempt, :ok)
         {:ok, body, %{served: attempt, fallback_used: fallback_used}}
 
       {:error, reason} ->
+        mark_health(attempt, reason)
+
         if retryable?(reason) and rest != [],
           do: run_attempts(rest, capability, true),
           else: {:error, reason}
@@ -134,14 +141,31 @@ defmodule Airo.Gateway do
       {:error, reason, acc} ->
         cond do
           committed?.(acc) ->
+            # Output already began, so the host responded — count it healthy.
+            mark_health(attempt, :ok)
             {:partial_error, reason, acc}
 
-          retryable?(reason) and rest != [] ->
-            stream_attempts(rest, acc, reducer, committed?, true)
-
           true ->
-            {:error, reason, acc}
+            mark_health(attempt, reason)
+
+            if retryable?(reason) and rest != [],
+              do: stream_attempts(rest, acc, reducer, committed?, true),
+              else: {:error, reason, acc}
         end
+    end
+  end
+
+  # Live health feedback. A real dispatch is a stronger signal than the periodic
+  # prober, so record its outcome: a response (even 4xx) means the host is
+  # reachable → :up; a transport failure or 5xx → :down. Mirrors the prober's
+  # classify/2. Other reasons (e.g. config-shaped errors) carry no host signal.
+  defp mark_health(%{deployment: %{id: id}}, outcome) do
+    case outcome do
+      :ok -> Health.mark(id, :up)
+      {:http_error, status, _} when status >= 500 -> Health.mark(id, :down)
+      {:http_error, _status, _} -> Health.mark(id, :up)
+      {:transport_error, _} -> Health.mark(id, :down)
+      _ -> :ok
     end
   end
 
@@ -174,34 +198,33 @@ defmodule Airo.Gateway do
   end
 
   # An alias name routes via policy; otherwise fall back to a concrete deployment
-  # model id for the request's capability. Returns candidates + the alias (or nil,
-  # for the param-layer) + the semantic capability used for usage records.
-  defp resolve_target(model, params, capability) do
+  # model id. Both filter candidates by the `resource` capability (the resource
+  # the client is requesting). Returns candidates + the alias (or nil, for the
+  # param-layer) + the capability used for usage records.
+  defp resolve_target(model, params, resource) do
     case Config.get_alias_by_name(model) do
-      %Alias{} = alias_ -> alias_target(alias_, params)
-      nil -> concrete_target(model, capability)
+      %Alias{} = alias_ -> alias_target(alias_, params, resource)
+      nil -> concrete_target(model, resource)
     end
   end
 
-  defp alias_target(alias_, params) do
+  defp alias_target(alias_, params, resource) do
     route = if is_map(params["route"]), do: params["route"], else: %{}
 
-    case Routing.candidates(alias_, route) do
+    case Routing.candidates(alias_, route, resource) do
       {:ok, []} ->
         {:error, :no_deployment}
 
       {:ok, candidates} ->
-        {:ok, %{candidates: candidates, alias: alias_, usage_capability: alias_.capability}}
+        {:ok, %{candidates: candidates, alias: alias_, usage_capability: resource}}
 
       {:error, _reason} = error ->
         error
     end
   end
 
-  defp concrete_target(model, capability) do
-    cfg_capability = config_capability(capability)
-
-    case Config.list_deployments_by_model(model, cfg_capability) do
+  defp concrete_target(model, resource) do
+    case Config.list_deployments_by_model(model, resource) do
       [] ->
         {:error, {:model_not_found, model}}
 
@@ -210,16 +233,22 @@ defmodule Airo.Gateway do
          %{
            candidates: Routing.deployment_candidates(deployments),
            alias: nil,
-           usage_capability: cfg_capability
+           usage_capability: resource
          }}
     end
   end
 
-  # Adapter capability (callback name) → config capability (Deployment enum).
-  defp config_capability(:stream), do: :chat
-  defp config_capability(:embed), do: :embeddings
-  defp config_capability(:transcribe), do: :transcription
-  defp config_capability(other), do: other
+  # The resource a client is requesting — the Deployment capability to filter on,
+  # derived from the endpoint protocol + payload. Chat upgrades to `:vision` when
+  # the request carries image content (or `route.vision`); the rest map the
+  # adapter callback name to its Deployment-enum capability.
+  defp resource_capability(cap, params) when cap in [:chat, :stream] do
+    if Vision.requires_vision?(params), do: :vision, else: :chat
+  end
+
+  defp resource_capability(:embed, _params), do: :embeddings
+  defp resource_capability(:transcribe, _params), do: :transcription
+  defp resource_capability(other, _params), do: other
 
   # One dispatch attempt per candidate whose adapter supports the capability,
   # preserving routing order. The body is normalized per-candidate (provider and

@@ -72,7 +72,7 @@ defmodule AiroWeb.AdminLiveTest do
         Config.create_deployment(%{
           provider_id: provider().id,
           model_name: "qwen",
-          capability: :chat
+          capabilities: [:chat]
         })
 
       {:ok, view, _html} = live(conn, ~p"/admin/aliases")
