@@ -3,6 +3,7 @@ defmodule AiroWeb.Admin.UsageLive do
   use AiroWeb, :live_view
 
   alias Airo.Usage
+  alias AiroWeb.CompositeComponents
 
   @default_filters %{
     "range" => "24h",
@@ -84,10 +85,12 @@ defmodule AiroWeb.Admin.UsageLive do
     ~H"""
     <Layouts.app flash={@flash} active_nav="usage">
       <div class="mx-auto max-w-7xl space-y-6 px-6 py-8">
-        <.header>
-          Usage
-          <:subtitle>Traceable gateway traffic, failures, latency, and cost.</:subtitle>
-        </.header>
+        <CompositeComponents.page_header subtitle="Traceable gateway traffic, failures, latency, and cost.">
+          <:crumb>Usage</:crumb>
+          <:actions>
+            <.button id="usage-header-reset" size="sm" phx-click="reset">Reset filters</.button>
+          </:actions>
+        </CompositeComponents.page_header>
 
         <div class="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
           <.card variant="bordered">
@@ -160,12 +163,17 @@ defmodule AiroWeb.Admin.UsageLive do
             <.input field={@filter_form[:model]} label="Model" placeholder="alias or model id" />
             <.input field={@filter_form[:trace_id]} label="Trace" placeholder="gt_..." />
           </.form>
-          <:actions>
-            <.button id="usage-filters-reset" phx-click="reset">Reset</.button>
-          </:actions>
         </.card>
 
-        <.table id="usage" rows={@streams.records}>
+        <.table
+          id="usage"
+          rows={@streams.records}
+          row_click={
+            fn {_id, r} ->
+              r.trace_id && JS.push("trace", value: %{id: r.trace_id})
+            end
+          }
+        >
           <:col :let={{_id, r}} label="When">{r.inserted_at}</:col>
           <:col :let={{_id, r}} label="Client">{r.client_key && r.client_key.name}</:col>
           <:col :let={{_id, r}} label="Trace">
@@ -181,15 +189,13 @@ defmodule AiroWeb.Admin.UsageLive do
           <:col :let={{_id, r}} label="Fallback">{if r.fallback_used, do: "yes", else: "no"}</:col>
           <:col :let={{_id, r}} label="Cost">{r.cost}</:col>
           <:action :let={{_id, r}}>
-            <.button
+            <.icon_button
               :if={r.trace_id}
-              size="sm"
+              icon="hero-funnel"
+              label="Filter to this trace"
               phx-click="trace"
               phx-value-id={r.trace_id}
-              title="Filter to this trace"
-            >
-              Trace
-            </.button>
+            />
           </:action>
         </.table>
       </div>

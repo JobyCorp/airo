@@ -53,12 +53,23 @@ defmodule AiroWeb.Router do
     live "/custom-designs", CustomDesignsLive, :index
 
     live "/admin/models", Admin.ModelLive, :index
+    live "/admin/models/new", Admin.ModelLive, :new
     live "/admin/models/:id", Admin.ModelLive, :show
+    live "/admin/models/:id/edit", Admin.ModelLive, :edit
     live "/admin/providers", Admin.ProviderLive, :index
+    live "/admin/providers/new", Admin.ProviderLive, :new
     live "/admin/providers/:id", Admin.ProviderLive, :show
+    live "/admin/providers/:id/edit", Admin.ProviderLive, :edit
     live "/admin/deployments", Admin.DeploymentLive, :index
+    live "/admin/deployments/new", Admin.DeploymentLive, :new
+    live "/admin/deployments/:id", Admin.DeploymentLive, :show
+    live "/admin/deployments/:id/edit", Admin.DeploymentLive, :edit
     live "/admin/aliases", Admin.AliasLive, :index
+    live "/admin/aliases/new", Admin.AliasLive, :new
+    live "/admin/aliases/:id", Admin.AliasLive, :show
+    live "/admin/aliases/:id/edit", Admin.AliasLive, :edit
     live "/admin/keys", Admin.KeyLive, :index
+    live "/admin/keys/new", Admin.KeyLive, :new
     live "/admin/usage", Admin.UsageLive, :index
   end
 

@@ -8,29 +8,26 @@ defmodule AiroWeb.Admin.AliasLive do
 
   alias Airo.Config
   alias Airo.Config.Alias
+  alias AiroWeb.CompositeComponents
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(page_title: "Aliases", form: nil, editing: nil)
+     |> assign(page_title: "Aliases", form: nil, editing: nil, detail: nil)
      |> assign(capabilities: Alias.capabilities(), strategies: Alias.strategies())
      |> assign(deployment_options: deployment_options())
      |> stream(:aliases, list())}
   end
 
   @impl true
-  def handle_event("new", _params, socket) do
-    {:noreply, assign(socket, editing: nil, form: to_form(Config.change_alias(%Alias{})))}
+  def handle_params(params, _uri, socket) do
+    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
-  def handle_event("edit", %{"id" => id}, socket) do
-    alias_ = Config.get_alias_with_candidates!(id)
-    {:noreply, assign(socket, editing: alias_, form: to_form(Config.change_alias(alias_)))}
-  end
-
+  @impl true
   def handle_event("cancel", _params, socket),
-    do: {:noreply, assign(socket, form: nil, editing: nil)}
+    do: {:noreply, push_navigate(socket, to: alias_return_path(socket.assigns.editing))}
 
   def handle_event("validate", %{"alias" => params}, socket) do
     changeset = Config.change_alias(socket.assigns.editing || %Alias{}, normalize(params))
@@ -69,12 +66,8 @@ defmodule AiroWeb.Admin.AliasLive do
       {:ok, a} ->
         {:noreply,
          socket
-         |> stream_insert(:aliases, with_count(a))
-         |> assign(
-           editing: Config.get_alias_with_candidates!(a.id),
-           form: to_form(Config.change_alias(a))
-         )
-         |> put_flash(:info, "Alias created — add routing candidates below.")}
+         |> put_flash(:info, "Alias created — add routing candidates below.")
+         |> push_navigate(to: ~p"/admin/aliases/#{a.id}/edit")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
@@ -86,9 +79,9 @@ defmodule AiroWeb.Admin.AliasLive do
       {:ok, a} ->
         {:noreply,
          socket
-         |> stream_insert(:aliases, with_count(a))
          |> assign(form: nil, editing: nil)
-         |> put_flash(:info, "Alias updated.")}
+         |> put_flash(:info, "Alias updated.")
+         |> push_navigate(to: ~p"/admin/aliases/#{a.id}")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
@@ -97,6 +90,39 @@ defmodule AiroWeb.Admin.AliasLive do
 
   defp reload_editing(socket, id),
     do: assign(socket, editing: Config.get_alias_with_candidates!(id))
+
+  defp apply_action(socket, :index, _params) do
+    socket
+    |> assign(page_title: "Aliases", form: nil, editing: nil, detail: nil)
+    |> stream(:aliases, list(), reset: true)
+  end
+
+  defp apply_action(socket, :show, %{"id" => id}) do
+    socket
+    |> assign(
+      page_title: "Alias",
+      detail: Config.get_alias_with_candidates!(id),
+      form: nil,
+      editing: nil
+    )
+  end
+
+  defp apply_action(socket, :new, _params) do
+    socket
+    |> assign(page_title: "New alias", detail: nil, editing: nil)
+    |> assign(form: to_form(Config.change_alias(%Alias{})))
+  end
+
+  defp apply_action(socket, :edit, %{"id" => id}) do
+    alias_ = Config.get_alias_with_candidates!(id)
+
+    socket
+    |> assign(page_title: "Edit alias", detail: nil, editing: alias_)
+    |> assign(form: to_form(Config.change_alias(alias_)))
+  end
+
+  defp alias_return_path(%Alias{id: id}), do: ~p"/admin/aliases/#{id}"
+  defp alias_return_path(_alias), do: ~p"/admin/aliases"
 
   defp list, do: Config.list_aliases() |> Enum.map(&with_count/1)
   defp with_count(a), do: a |> Airo.Repo.preload(:candidates)
@@ -122,85 +148,196 @@ defmodule AiroWeb.Admin.AliasLive do
     end
   end
 
+  defp alias_header_subtitle(:index, _detail, _editing),
+    do: "Logical handles consumers call, routed to deployments."
+
+  defp alias_header_subtitle(:show, %Alias{} = alias_, _editing),
+    do: "#{alias_.capability} routed with #{alias_.strategy}"
+
+  defp alias_header_subtitle(:new, _detail, _editing), do: "Create a logical routing handle."
+
+  defp alias_header_subtitle(:edit, _detail, %Alias{}),
+    do: "Update routing behavior and candidate participation."
+
   @impl true
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} active_nav="aliases">
-      <div class="mx-auto max-w-6xl space-y-6 px-6 py-8">
-        <.header>
-          Aliases
-          <:subtitle>Logical handles consumers call, routed to deployments.</:subtitle>
-          <:actions><.button phx-click="new" variant="primary">New alias</.button></:actions>
-        </.header>
-
-        <.card :if={@form} variant="bordered">
-          <:title>{if @editing, do: "Edit alias", else: "New alias"}</:title>
-          <.form for={@form} phx-change="validate" phx-submit="save" class="space-y-4">
-            <.input field={@form[:name]} label="Name (e.g. chat-deep)" />
-            <.input
-              field={@form[:capability]}
-              type="select"
-              label="Capability"
-              options={@capabilities}
-            />
-            <.input field={@form[:strategy]} type="select" label="Strategy" options={@strategies} />
-            <.input
-              field={@form[:fallback]}
-              label="Fallback aliases"
-              value={Enum.join(@form[:fallback].value || [], ", ")}
-              placeholder="comma-separated alias names"
-            />
-            <.button variant="primary">Save</.button>
-          </.form>
-          <:actions><.button phx-click="cancel">Cancel</.button></:actions>
-        </.card>
-
-        <.card :if={@editing} variant="bordered">
-          <:title>Routing candidates — {@editing.name}</:title>
-
-          <.table id="candidates" rows={@editing.candidates}>
-            <:col :let={c} label="Deployment">{c.deployment && c.deployment.model_name}</:col>
-            <:col :let={c} label="Weight">{c.weight}</:col>
-            <:col :let={c} label="Priority">{c.priority}</:col>
-            <:action :let={c}>
-              <.button size="sm" phx-click="remove_candidate" phx-value-id={c.id}>Remove</.button>
-            </:action>
-          </.table>
-
-          <.form for={%{}} phx-submit="add_candidate" class="mt-4 flex flex-wrap items-end gap-3">
-            <.input
-              name="candidate[deployment_id]"
-              value=""
-              type="select"
-              label="Deployment"
-              options={@deployment_options}
-              prompt="Select a deployment"
-            />
-            <.input name="candidate[weight]" value="100" type="number" label="Weight" />
-            <.input name="candidate[priority]" value="0" type="number" label="Priority" />
-            <.button variant="primary">Add</.button>
-          </.form>
-        </.card>
-
-        <.table id="aliases" rows={@streams.aliases}>
-          <:col :let={{_id, a}} label="Name">{a.name}</:col>
-          <:col :let={{_id, a}} label="Capability">{a.capability}</:col>
-          <:col :let={{_id, a}} label="Strategy">{a.strategy}</:col>
-          <:col :let={{_id, a}} label="Candidates">{length(a.candidates)}</:col>
-          <:action :let={{_id, a}}>
-            <.button size="sm" phx-click="edit" phx-value-id={a.id}>Edit</.button>
-            <.button
-              size="sm"
-              phx-click="delete"
-              phx-value-id={a.id}
-              data-confirm="Delete this alias?"
-            >
-              Delete
+      <div class="mx-auto max-w-7xl space-y-6 px-6 py-8">
+        <CompositeComponents.page_header subtitle={
+          alias_header_subtitle(@live_action, @detail, @editing)
+        }>
+          <:crumb navigate={~p"/admin/aliases"}>Aliases</:crumb>
+          <:crumb :if={@live_action == :show}>{@detail.name}</:crumb>
+          <:crumb :if={@live_action == :new}>New alias</:crumb>
+          <:crumb :if={@live_action == :edit}>{@editing.name}</:crumb>
+          <:actions :if={@live_action == :index}>
+            <.button navigate={~p"/admin/aliases/new"} variant="primary">New alias</.button>
+          </:actions>
+          <:actions :if={@live_action == :show}>
+            <.button size="sm" navigate={~p"/admin/aliases/#{@detail.id}/edit"} variant="primary">
+              Edit alias
             </.button>
-          </:action>
-        </.table>
+          </:actions>
+          <:actions :if={@live_action in [:new, :edit]}>
+            <.button size="sm" navigate={alias_return_path(@editing)}>Back</.button>
+          </:actions>
+        </CompositeComponents.page_header>
+
+        <%= cond do %>
+          <% @form -> %>
+            <.alias_form
+              form={@form}
+              editing={@editing}
+              capabilities={@capabilities}
+              strategies={@strategies}
+              deployment_options={@deployment_options}
+            />
+          <% @detail -> %>
+            <.alias_detail alias={@detail} />
+          <% true -> %>
+            <.alias_table aliases={@streams.aliases} />
+        <% end %>
       </div>
     </Layouts.app>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :editing, :any, required: true
+  attr :capabilities, :list, required: true
+  attr :strategies, :list, required: true
+  attr :deployment_options, :list, required: true
+
+  defp alias_form(assigns) do
+    ~H"""
+    <div class="space-y-6">
+      <.card variant="bordered">
+        <:title>Alias settings</:title>
+        <.form for={@form} id="alias-form" phx-change="validate" phx-submit="save" class="space-y-4">
+          <.input field={@form[:name]} label="Name (e.g. chat-deep)" />
+          <.input field={@form[:capability]} type="select" label="Capability" options={@capabilities} />
+          <.input field={@form[:strategy]} type="select" label="Strategy" options={@strategies} />
+          <.input
+            field={@form[:fallback]}
+            label="Fallback aliases"
+            value={Enum.join(@form[:fallback].value || [], ", ")}
+            placeholder="comma-separated alias names"
+          />
+          <div class="flex gap-2">
+            <.button variant="primary">Save</.button>
+            <.button type="button" phx-click="cancel">Cancel</.button>
+          </div>
+        </.form>
+      </.card>
+
+      <.card :if={@editing} variant="bordered">
+        <:title>Routing candidates — {@editing.name}</:title>
+
+        <.table id="candidates" rows={@editing.candidates}>
+          <:col :let={c} label="Deployment">{c.deployment && c.deployment.model_name}</:col>
+          <:col :let={c} label="Weight">{c.weight}</:col>
+          <:col :let={c} label="Priority">{c.priority}</:col>
+          <:action :let={c}>
+            <.icon_button
+              icon="hero-x-mark"
+              label="Remove candidate"
+              variant="danger"
+              phx-click="remove_candidate"
+              phx-value-id={c.id}
+            />
+          </:action>
+        </.table>
+
+        <.form
+          for={%{}}
+          id="alias-candidate-form"
+          phx-submit="add_candidate"
+          class="mt-4 flex flex-wrap items-end gap-3"
+        >
+          <.input
+            name="candidate[deployment_id]"
+            value=""
+            type="select"
+            label="Deployment"
+            options={@deployment_options}
+            prompt="Select a deployment"
+          />
+          <.input name="candidate[weight]" value="100" type="number" label="Weight" />
+          <.input name="candidate[priority]" value="0" type="number" label="Priority" />
+          <.button variant="primary">Add</.button>
+        </.form>
+      </.card>
+    </div>
+    """
+  end
+
+  attr :aliases, :any, required: true
+
+  defp alias_table(assigns) do
+    ~H"""
+    <.table
+      id="aliases"
+      rows={@aliases}
+      row_click={fn {_id, a} -> JS.navigate(~p"/admin/aliases/#{a.id}") end}
+    >
+      <:col :let={{_id, a}} label="Name">{a.name}</:col>
+      <:col :let={{_id, a}} label="Capability">{a.capability}</:col>
+      <:col :let={{_id, a}} label="Strategy">{a.strategy}</:col>
+      <:col :let={{_id, a}} label="Candidates">{length(a.candidates)}</:col>
+      <:action :let={{_id, a}}>
+        <.icon_button
+          icon="hero-pencil-square"
+          label={"Edit #{a.name}"}
+          navigate={~p"/admin/aliases/#{a.id}/edit"}
+        />
+        <.icon_button
+          icon="hero-trash"
+          label={"Delete #{a.name}"}
+          variant="danger"
+          phx-click="delete"
+          phx-value-id={a.id}
+          data-confirm="Delete this alias?"
+        />
+      </:action>
+    </.table>
+    """
+  end
+
+  attr :alias, Alias, required: true
+
+  defp alias_detail(assigns) do
+    ~H"""
+    <div class="space-y-6">
+      <div class="grid gap-4 md:grid-cols-3">
+        <.card variant="bordered">
+          <:eyebrow>Capability</:eyebrow>
+          <:title>{@alias.capability}</:title>
+          Requested resource class.
+        </.card>
+        <.card variant="bordered">
+          <:eyebrow>Strategy</:eyebrow>
+          <:title>{@alias.strategy}</:title>
+          Candidate selection mode.
+        </.card>
+        <.card variant="bordered">
+          <:eyebrow>Candidates</:eyebrow>
+          <:title>{length(@alias.candidates)}</:title>
+          Active routing targets.
+        </.card>
+      </div>
+
+      <.card variant="bordered">
+        <:title>Routing candidates</:title>
+        <.table id="alias-candidates" rows={@alias.candidates}>
+          <:col :let={candidate} label="Deployment">
+            {candidate.deployment && candidate.deployment.model_name}
+          </:col>
+          <:col :let={candidate} label="Weight">{candidate.weight}</:col>
+          <:col :let={candidate} label="Priority">{candidate.priority}</:col>
+        </.table>
+      </.card>
+    </div>
     """
   end
 end

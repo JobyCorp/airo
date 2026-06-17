@@ -28,20 +28,8 @@ defmodule AiroWeb.Admin.ProviderLive do
   end
 
   @impl true
-  def handle_params(%{"id" => id}, _uri, socket) do
-    {:noreply,
-     socket
-     |> assign(detail: detail(id), form: nil, editing: nil, page_title: "Provider")}
-  end
-
-  def handle_params(_params, _uri, socket) do
-    providers = list()
-
-    {:noreply,
-     socket
-     |> assign(detail: nil, form: nil, editing: nil, page_title: "Providers")
-     |> assign(health: health_map(providers))
-     |> stream(:providers, providers, reset: true)}
+  def handle_params(params, _uri, socket) do
+    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
   @impl true
@@ -58,17 +46,8 @@ defmodule AiroWeb.Admin.ProviderLive do
   end
 
   @impl true
-  def handle_event("new", _params, socket) do
-    {:noreply, assign(socket, editing: nil, form: to_form(Config.change_provider(%Provider{})))}
-  end
-
-  def handle_event("edit", %{"id" => id}, socket) do
-    provider = Config.get_provider!(id)
-    {:noreply, assign(socket, editing: provider, form: to_form(Config.change_provider(provider)))}
-  end
-
   def handle_event("cancel", _params, socket),
-    do: {:noreply, assign(socket, form: nil, editing: nil)}
+    do: {:noreply, push_navigate(socket, to: provider_return_path(socket.assigns.editing))}
 
   def handle_event("validate", %{"provider" => params}, socket) do
     changeset = Config.change_provider(socket.assigns.editing || %Provider{}, params)
@@ -177,6 +156,37 @@ defmodule AiroWeb.Admin.ProviderLive do
 
   defp health_map(providers), do: Map.new(providers, &{&1.id, provider_status(&1)})
 
+  defp apply_action(socket, :index, _params) do
+    providers = list()
+
+    socket
+    |> assign(detail: nil, form: nil, editing: nil, page_title: "Providers")
+    |> assign(health: health_map(providers))
+    |> stream(:providers, providers, reset: true)
+  end
+
+  defp apply_action(socket, :show, %{"id" => id}) do
+    socket
+    |> assign(detail: detail(id), form: nil, editing: nil, page_title: "Provider")
+  end
+
+  defp apply_action(socket, :new, _params) do
+    socket
+    |> assign(detail: nil, editing: nil, page_title: "New provider")
+    |> assign(form: to_form(Config.change_provider(%Provider{})))
+  end
+
+  defp apply_action(socket, :edit, %{"id" => id}) do
+    provider = Config.get_provider!(id)
+
+    socket
+    |> assign(detail: nil, editing: provider, page_title: "Edit provider")
+    |> assign(form: to_form(Config.change_provider(provider)))
+  end
+
+  defp provider_return_path(%Provider{id: id}), do: ~p"/admin/providers/#{id}"
+  defp provider_return_path(_provider), do: ~p"/admin/providers"
+
   # A provider is as healthy as its worst deployment: any :down → "down",
   # else any :up → "up", else "unknown" (no deployments / never probed).
   defp provider_status(provider) do
@@ -195,9 +205,9 @@ defmodule AiroWeb.Admin.ProviderLive do
         {:ok, provider} ->
           {:noreply,
            socket
-           |> stream_insert(:providers, preload_index_provider(provider))
            |> assign(form: nil, secret_options: secret_options())
-           |> put_flash(:info, "Provider created.")}
+           |> put_flash(:info, "Provider created.")
+           |> push_navigate(to: ~p"/admin/providers/#{provider.id}")}
 
         {:error, changeset} ->
           {:noreply, assign(socket, form: to_form(changeset))}
@@ -217,9 +227,9 @@ defmodule AiroWeb.Admin.ProviderLive do
         {:ok, provider} ->
           {:noreply,
            socket
-           |> stream_insert(:providers, preload_index_provider(provider))
            |> assign(form: nil, editing: nil, secret_options: secret_options())
-           |> put_flash(:info, "Provider updated.")}
+           |> put_flash(:info, "Provider updated.")
+           |> push_navigate(to: ~p"/admin/providers/#{provider.id}")}
 
         {:error, changeset} ->
           {:noreply, assign(socket, form: to_form(changeset))}
@@ -284,9 +294,6 @@ defmodule AiroWeb.Admin.ProviderLive do
     |> then(&"Credential could not be saved: #{&1}")
   end
 
-  defp preload_index_provider(provider),
-    do: Repo.preload(provider, [:credential, :deployments], force: true)
-
   defp secret_options do
     Config.list_secrets()
     |> Enum.map(&{&1.name, &1.id})
@@ -295,80 +302,148 @@ defmodule AiroWeb.Admin.ProviderLive do
   defp credential_name(%{credential: %{name: name}}), do: name
   defp credential_name(_provider), do: "—"
 
+  defp provider_header_subtitle(:index, _detail, _editing),
+    do: "Physical upstream model backends."
+
+  defp provider_header_subtitle(:show, %{provider: provider}, _editing),
+    do: "#{provider.adapter_type} provider inventory and deployment posture"
+
+  defp provider_header_subtitle(:new, _detail, _editing),
+    do: "Register a local upstream provider."
+
+  defp provider_header_subtitle(:edit, _detail, %Provider{}),
+    do: "Update connection, auth, and routing eligibility."
+
   @impl true
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} active_nav="providers">
-      <div class="mx-auto max-w-6xl space-y-6 px-6 py-8">
-        <.header>
-          Providers
-          <:subtitle>Physical upstream model backends.</:subtitle>
-          <:actions><.button phx-click="new" variant="primary">New provider</.button></:actions>
-        </.header>
+      <div class="mx-auto max-w-7xl space-y-6 px-6 py-8">
+        <CompositeComponents.page_header subtitle={
+          provider_header_subtitle(@live_action, @detail, @editing)
+        }>
+          <:crumb navigate={~p"/admin/providers"}>Providers</:crumb>
+          <:crumb :if={@live_action == :show}>{@detail.provider.name}</:crumb>
+          <:crumb :if={@live_action == :new}>New provider</:crumb>
+          <:crumb :if={@live_action == :edit}>{@editing.name}</:crumb>
+          <:actions :if={@live_action == :index}>
+            <.button navigate={~p"/admin/providers/new"} variant="primary">New provider</.button>
+          </:actions>
+          <:actions :if={@live_action == :show}>
+            <.button size="sm" phx-click="refresh_detail">Refresh inventory</.button>
+            <.button
+              size="sm"
+              navigate={~p"/admin/providers/#{@detail.provider.id}/edit"}
+              variant="primary"
+            >
+              Edit provider
+            </.button>
+          </:actions>
+          <:actions :if={@live_action in [:new, :edit]}>
+            <.button size="sm" navigate={provider_return_path(@editing)}>Back</.button>
+          </:actions>
+        </CompositeComponents.page_header>
 
-        <.card :if={@form} variant="bordered">
-          <:title>{if @editing, do: "Edit provider", else: "New provider"}</:title>
-          <.form for={@form} phx-change="validate" phx-submit="save" class="space-y-4">
-            <.input field={@form[:name]} label="Name" />
-            <.input
-              field={@form[:adapter_type]}
-              type="select"
-              label="Adapter type"
-              options={@adapter_types}
+        <%= cond do %>
+          <% @form -> %>
+            <.provider_form
+              form={@form}
+              editing={@editing}
+              adapter_types={@adapter_types}
+              auth_kinds={@auth_kinds}
+              secret_options={@secret_options}
             />
-            <.input field={@form[:base_url]} label="Base URL" />
-            <.input field={@form[:auth_kind]} type="select" label="Auth kind" options={@auth_kinds} />
-            <.input
-              field={@form[:credential_id]}
-              type="select"
-              label="Credential"
-              options={@secret_options}
-              prompt="No credential"
-            />
-            <div class="grid gap-4 rounded border border-base-300 p-4 md:grid-cols-2">
-              <.input name="provider[new_credential_name]" label="New credential name" value="" />
-              <.input
-                name="provider[new_credential_value]"
-                type="password"
-                label="New credential value"
-                value=""
-              />
-            </div>
-            <.input field={@form[:enabled]} type="checkbox" label="Enabled" />
-            <.button variant="primary">Save</.button>
-          </.form>
-          <:actions><.button phx-click="cancel">Cancel</.button></:actions>
-        </.card>
-
-        <%= if @detail do %>
-          <.provider_detail detail={@detail} />
-        <% else %>
-          <.table id="providers" rows={@streams.providers}>
-            <:col :let={{_id, p}} label="Name">{p.name}</:col>
-            <:col :let={{_id, p}} label="Adapter">{p.adapter_type}</:col>
-            <:col :let={{_id, p}} label="Base URL">{p.base_url}</:col>
-            <:col :let={{_id, p}} label="Auth">{p.auth_kind}</:col>
-            <:col :let={{_id, p}} label="Credential">{credential_name(p)}</:col>
-            <:col :let={{_id, p}} label="Enabled">{p.enabled}</:col>
-            <:col :let={{_id, p}} label="Health">
-              <CompositeComponents.health_status status={@health[p.id] || "unknown"} />
-            </:col>
-            <:action :let={{_id, p}}>
-              <.button size="sm" href={~p"/admin/providers/#{p.id}"}>Open</.button>
-              <.button size="sm" phx-click="edit" phx-value-id={p.id}>Edit</.button>
-              <.button
-                size="sm"
-                phx-click="delete"
-                phx-value-id={p.id}
-                data-confirm="Delete this provider?"
-              >
-                Delete
-              </.button>
-            </:action>
-          </.table>
+          <% @detail -> %>
+            <.provider_detail detail={@detail} />
+          <% true -> %>
+            <.provider_table providers={@streams.providers} health={@health} />
         <% end %>
       </div>
     </Layouts.app>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :editing, :any, required: true
+  attr :adapter_types, :list, required: true
+  attr :auth_kinds, :list, required: true
+  attr :secret_options, :list, required: true
+
+  defp provider_form(assigns) do
+    ~H"""
+    <.card variant="bordered">
+      <:title>Provider settings</:title>
+      <.form for={@form} id="provider-form" phx-change="validate" phx-submit="save" class="space-y-4">
+        <.input field={@form[:name]} label="Name" />
+        <.input
+          field={@form[:adapter_type]}
+          type="select"
+          label="Adapter type"
+          options={@adapter_types}
+        />
+        <.input field={@form[:base_url]} label="Base URL" />
+        <.input field={@form[:auth_kind]} type="select" label="Auth kind" options={@auth_kinds} />
+        <.input
+          field={@form[:credential_id]}
+          type="select"
+          label="Credential"
+          options={@secret_options}
+          prompt="No credential"
+        />
+        <div class="grid gap-4 rounded border border-base-300 p-4 md:grid-cols-2">
+          <.input name="provider[new_credential_name]" label="New credential name" value="" />
+          <.input
+            name="provider[new_credential_value]"
+            type="password"
+            label="New credential value"
+            value=""
+          />
+        </div>
+        <.input field={@form[:enabled]} type="checkbox" label="Enabled" />
+        <div class="flex gap-2">
+          <.button variant="primary">Save</.button>
+          <.button type="button" phx-click="cancel">Cancel</.button>
+        </div>
+      </.form>
+    </.card>
+    """
+  end
+
+  attr :providers, :any, required: true
+  attr :health, :map, required: true
+
+  defp provider_table(assigns) do
+    ~H"""
+    <.table
+      id="providers"
+      rows={@providers}
+      row_click={fn {_id, p} -> JS.navigate(~p"/admin/providers/#{p.id}") end}
+    >
+      <:col :let={{_id, p}} label="Name">{p.name}</:col>
+      <:col :let={{_id, p}} label="Adapter">{p.adapter_type}</:col>
+      <:col :let={{_id, p}} label="Base URL">{p.base_url}</:col>
+      <:col :let={{_id, p}} label="Auth">{p.auth_kind}</:col>
+      <:col :let={{_id, p}} label="Credential">{credential_name(p)}</:col>
+      <:col :let={{_id, p}} label="Enabled">{p.enabled}</:col>
+      <:col :let={{_id, p}} label="Health">
+        <CompositeComponents.health_status status={@health[p.id] || "unknown"} />
+      </:col>
+      <:action :let={{_id, p}}>
+        <.icon_button
+          icon="hero-pencil-square"
+          label={"Edit #{p.name}"}
+          navigate={~p"/admin/providers/#{p.id}/edit"}
+        />
+        <.icon_button
+          icon="hero-trash"
+          label={"Delete #{p.name}"}
+          variant="danger"
+          phx-click="delete"
+          phx-value-id={p.id}
+          data-confirm="Delete this provider?"
+        />
+      </:action>
+    </.table>
     """
   end
 
@@ -377,16 +452,6 @@ defmodule AiroWeb.Admin.ProviderLive do
   defp provider_detail(assigns) do
     ~H"""
     <div class="space-y-6">
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <.button href={~p"/admin/providers"}>Back to providers</.button>
-        <div class="flex gap-2">
-          <.button phx-click="refresh_detail">Refresh inventory</.button>
-          <.button phx-click="edit" phx-value-id={@detail.provider.id} variant="primary">
-            Edit provider
-          </.button>
-        </div>
-      </div>
-
       <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <.card variant="bordered">
           <:eyebrow>Provider</:eyebrow>
@@ -445,7 +510,15 @@ defmodule AiroWeb.Admin.ProviderLive do
 
       <.card variant="bordered">
         <:title>Deployments</:title>
-        <.table id="provider-deployments" rows={@detail.provider.deployments}>
+        <.table
+          id="provider-deployments"
+          rows={@detail.provider.deployments}
+          row_click={
+            fn deployment ->
+              deployment.model && JS.navigate(~p"/admin/models/#{deployment.model.id}")
+            end
+          }
+        >
           <:col :let={deployment} label="Model">
             <div>{deployment.model_name}</div>
             <div :if={deployment.model} class="font-mono text-xs text-base-content/60">
@@ -462,17 +535,19 @@ defmodule AiroWeb.Admin.ProviderLive do
           </:col>
           <:col :let={deployment} label="Type">{metadata_value(deployment, "type")}</:col>
           <:action :let={deployment}>
-            <.button
+            <.icon_button
               :if={:inspect_model in @detail.capabilities}
-              size="sm"
+              icon="hero-arrow-path"
+              label={"Sync #{deployment.model_name}"}
               phx-click="sync_deployment"
               phx-value-id={deployment.id}
-            >
-              Sync
-            </.button>
-            <.button :if={deployment.model} size="sm" href={~p"/admin/models/#{deployment.model.id}"}>
-              Model
-            </.button>
+            />
+            <.icon_button
+              :if={deployment.model}
+              icon="hero-arrow-top-right-on-square"
+              label={"Open #{deployment.model.display_name}"}
+              href={~p"/admin/models/#{deployment.model.id}"}
+            />
           </:action>
         </.table>
       </.card>

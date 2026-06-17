@@ -66,9 +66,13 @@ defmodule AiroWeb do
     quote do
       import Phoenix.HTML
 
-      # JobyKit-shipped wrappers: <.button>, <.card>, <.icon>, <.input>,
-      # <.flash>, <.flash_group>, <.header>, <.list>, <.table>.
-      import JobyKit.CoreComponents
+      # JobyKit-shipped wrappers: <.card>, <.icon>, <.input>, <.flash>,
+      # <.flash_group>, <.header>, <.list>.
+      import JobyKit.CoreComponents, except: [button: 1, table: 1]
+
+      # Airo-specific wrappers.
+      import AiroWeb.CoreComponents,
+        only: [button: 1, checkbox_group: 1, icon_button: 1, table: 1]
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS

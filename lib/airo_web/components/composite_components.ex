@@ -116,4 +116,118 @@ defmodule AiroWeb.CompositeComponents do
     </div>
     """
   end
+
+  @doc """
+  The admin page header: compact breadcrumbs, a descriptor line, and optional
+  right-aligned actions.
+
+      <.page_header subtitle="Physical upstream model backends.">
+        <:crumb navigate={~p"/admin/providers"}>Providers</:crumb>
+        <:actions>
+          <CoreComponents.button variant="primary">New provider</CoreComponents.button>
+        </:actions>
+      </.page_header>
+
+  This intentionally replaces larger page-title headers inside the admin shell
+  so each page has one consistent control band below the primary navigation.
+  """
+  attr :subtitle, :string, default: nil
+  attr :class, :any, default: nil
+  attr :rest, :global
+
+  slot :crumb, required: true do
+    attr :navigate, :any
+  end
+
+  slot :actions
+
+  def page_header(assigns) do
+    assigns = assign(assigns, :crumb_count, length(assigns.crumb))
+
+    ~H"""
+    <header
+      data-component="AiroWeb.CompositeComponents.page_header"
+      class={[
+        "flex flex-col gap-3 border-y border-base-content/10 bg-base-200/25 py-3 sm:flex-row sm:items-center sm:justify-between",
+        @class
+      ]}
+      {@rest}
+    >
+      <div class="min-w-0 space-y-1">
+        <nav aria-label="Breadcrumb">
+          <ol class="flex min-w-0 items-center gap-2 text-sm text-base-content/60">
+            <%= for {crumb, index} <- Enum.with_index(@crumb) do %>
+              <li class="flex min-w-0 items-center gap-2">
+                <.link
+                  :if={crumb[:navigate] && index < @crumb_count - 1}
+                  navigate={crumb[:navigate]}
+                  class="shrink-0 transition-colors hover:text-base-content"
+                >
+                  {render_slot(crumb)}
+                </.link>
+                <span
+                  :if={!crumb[:navigate] || index == @crumb_count - 1}
+                  class={[
+                    "truncate",
+                    index == @crumb_count - 1 && "font-mono text-xs text-base-content/75"
+                  ]}
+                >
+                  {render_slot(crumb)}
+                </span>
+                <span :if={index < @crumb_count - 1} aria-hidden="true" class="text-base-content/35">
+                  /
+                </span>
+              </li>
+            <% end %>
+          </ol>
+        </nav>
+        <p :if={@subtitle} class="text-xs text-base-content/50">
+          {@subtitle}
+        </p>
+      </div>
+      <div :if={@actions != []} class="flex shrink-0 flex-wrap items-center gap-2">
+        {render_slot(@actions)}
+      </div>
+    </header>
+    """
+  end
+
+  @doc """
+  A flat content section with one header band and one content container.
+
+  Use this for dense admin sections where a card wrapper would create an extra
+  nested `card-body` surface around already-structured content.
+  """
+  attr :class, :any, default: nil
+  attr :body_class, :any, default: nil
+  attr :rest, :global
+
+  slot :title, required: true
+  slot :actions
+  slot :inner_block, required: true
+
+  def section_panel(assigns) do
+    ~H"""
+    <section
+      data-component="AiroWeb.CompositeComponents.section_panel"
+      class={[
+        "overflow-hidden rounded-lg border border-base-content/10 bg-base-200/80 shadow-[0_20px_55px_rgba(0,0,0,0.24)] ring-1 ring-white/5",
+        @class
+      ]}
+      {@rest}
+    >
+      <header class="flex flex-col gap-3 border-b border-base-content/10 bg-base-300/35 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <h2 class="text-base font-semibold leading-6 text-base-content">
+          {render_slot(@title)}
+        </h2>
+        <div :if={@actions != []} class="flex shrink-0 items-center gap-2">
+          {render_slot(@actions)}
+        </div>
+      </header>
+      <div class={["bg-base-200/45 p-5", @body_class]}>
+        {render_slot(@inner_block)}
+      </div>
+    </section>
+    """
+  end
 end

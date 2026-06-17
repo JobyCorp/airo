@@ -19,32 +19,13 @@ defmodule AiroWeb.Admin.ModelLive do
   end
 
   @impl true
-  def handle_params(%{"id" => id}, _uri, socket) do
-    {:noreply,
-     socket
-     |> assign(detail: ModelShelf.get_detail!(id), form: nil, editing: nil)
-     |> assign(page_title: "Model Shelf")}
-  end
-
-  def handle_params(_params, _uri, socket) do
-    {:noreply,
-     socket
-     |> assign(detail: nil, form: nil, editing: nil)
-     |> stream(:models, ModelShelf.list_summaries(), reset: true)}
+  def handle_params(params, _uri, socket) do
+    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
   @impl true
-  def handle_event("new", _params, socket) do
-    {:noreply, assign(socket, editing: nil, form: to_form(Config.change_model(%Model{})))}
-  end
-
-  def handle_event("edit", %{"id" => id}, socket) do
-    model = Config.get_model!(id)
-    {:noreply, assign(socket, editing: model, form: to_form(Config.change_model(model)))}
-  end
-
   def handle_event("cancel", _params, socket) do
-    {:noreply, assign(socket, editing: nil, form: nil)}
+    {:noreply, push_navigate(socket, to: model_return_path(socket.assigns.editing))}
   end
 
   def handle_event("validate", %{"model" => params}, socket) do
@@ -76,11 +57,11 @@ defmodule AiroWeb.Admin.ModelLive do
 
   defp save(socket, nil, params) do
     case Config.create_model(params) do
-      {:ok, _model} ->
+      {:ok, model} ->
         {:noreply,
          socket
-         |> refresh_after_save()
-         |> put_flash(:info, "Model created.")}
+         |> put_flash(:info, "Model created.")
+         |> push_navigate(to: ~p"/admin/models/#{model.id}")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
@@ -89,25 +70,41 @@ defmodule AiroWeb.Admin.ModelLive do
 
   defp save(socket, model, params) do
     case Config.update_model(model, params) do
-      {:ok, _model} ->
+      {:ok, model} ->
         {:noreply,
          socket
-         |> refresh_after_save()
-         |> put_flash(:info, "Model updated.")}
+         |> put_flash(:info, "Model updated.")
+         |> push_navigate(to: ~p"/admin/models/#{model.id}")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
     end
   end
 
-  defp refresh_after_save(socket) do
-    socket =
-      case socket.assigns.detail do
-        %{model: model} -> assign(socket, detail: ModelShelf.get_detail!(model.id))
-        _ -> stream(socket, :models, ModelShelf.list_summaries(), reset: true)
-      end
+  defp apply_action(socket, :index, _params) do
+    socket
+    |> assign(page_title: "Model Shelf", detail: nil, form: nil, editing: nil)
+    |> stream(:models, ModelShelf.list_summaries(), reset: true)
+  end
 
-    assign(socket, form: nil, editing: nil)
+  defp apply_action(socket, :show, %{"id" => id}) do
+    socket
+    |> assign(detail: ModelShelf.get_detail!(id), form: nil, editing: nil)
+    |> assign(page_title: "Model Shelf")
+  end
+
+  defp apply_action(socket, :new, _params) do
+    socket
+    |> assign(page_title: "New model", detail: nil, editing: nil)
+    |> assign(form: to_form(Config.change_model(%Model{})))
+  end
+
+  defp apply_action(socket, :edit, %{"id" => id}) do
+    model = Config.get_model!(id)
+
+    socket
+    |> assign(page_title: "Edit model", detail: nil, editing: model)
+    |> assign(form: to_form(Config.change_model(model)))
   end
 
   defp refresh_detail(%{assigns: %{detail: %{model: model}}} = socket) do
@@ -116,6 +113,9 @@ defmodule AiroWeb.Admin.ModelLive do
 
   defp refresh_detail(socket), do: socket
 
+  defp model_return_path(%Model{id: id}), do: ~p"/admin/models/#{id}"
+  defp model_return_path(_model), do: ~p"/admin/models"
+
   defp clean(params), do: for({k, v} <- params, v != "", into: %{}, do: {k, v})
 
   @impl true
@@ -123,56 +123,74 @@ defmodule AiroWeb.Admin.ModelLive do
     ~H"""
     <Layouts.app flash={@flash} active_nav="models">
       <div class="mx-auto max-w-7xl space-y-6 px-6 py-8">
-        <.header>
-          Model Shelf
-          <:subtitle>Model identity, deployment copies, routing posture, and performance.</:subtitle>
-          <:actions>
-            <.button phx-click="new" variant="primary">New model</.button>
+        <CompositeComponents.page_header subtitle={
+          model_header_subtitle(@live_action, @detail, @editing)
+        }>
+          <:crumb navigate={~p"/admin/models"}>Models</:crumb>
+          <:crumb :if={@live_action == :show}>{@detail.model.family || "unclassified"}</:crumb>
+          <:crumb :if={@live_action == :new}>New model</:crumb>
+          <:crumb :if={@live_action == :edit}>{@editing.display_name}</:crumb>
+          <:actions :if={@live_action == :index}>
+            <.button navigate={~p"/admin/models/new"} variant="primary">New model</.button>
           </:actions>
-        </.header>
+          <:actions :if={@live_action == :show}>
+            <.button size="sm" navigate={~p"/admin/models/#{@detail.model.id}/edit"} variant="primary">
+              Edit metadata
+            </.button>
+          </:actions>
+          <:actions :if={@live_action in [:new, :edit]}>
+            <.button size="sm" navigate={model_return_path(@editing)}>Back</.button>
+          </:actions>
+        </CompositeComponents.page_header>
 
-        <.card :if={@form} variant="bordered">
-          <:title>{if @editing, do: "Edit model", else: "New model"}</:title>
-          <.form
-            for={@form}
-            id="model-form"
-            phx-change="validate"
-            phx-submit="save"
-            class="grid gap-4 md:grid-cols-2"
-          >
-            <.input field={@form[:display_name]} label="Display name" />
-            <.input field={@form[:upstream_model_id]} label="Upstream model id" />
-            <.input field={@form[:family]} label="Family" />
-            <.input field={@form[:version]} label="Version" />
-            <.input field={@form[:revision]} label="Revision" />
-            <.input field={@form[:quantization]} label="Quantization" />
-            <.input field={@form[:size]} label="Size" />
-            <.input
-              field={@form[:status]}
-              type="select"
-              label="Lifecycle status"
-              options={@status_options}
-            />
-            <.input
-              field={@form[:notes]}
-              type="textarea"
-              label="Notes"
-              class="md:col-span-2"
-            />
-            <div class="flex gap-2 md:col-span-2">
-              <.button variant="primary">Save</.button>
-              <.button type="button" phx-click="cancel">Cancel</.button>
-            </div>
-          </.form>
-        </.card>
-
-        <%= if @detail do %>
-          <.detail detail={@detail} />
-        <% else %>
-          <.shelf models={@streams.models} />
+        <%= cond do %>
+          <% @form -> %>
+            <.model_form form={@form} editing={@editing} status_options={@status_options} />
+          <% @detail -> %>
+            <.detail detail={@detail} />
+          <% true -> %>
+            <.shelf models={@streams.models} />
         <% end %>
       </div>
     </Layouts.app>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :editing, :any, required: true
+  attr :status_options, :list, required: true
+
+  defp model_form(assigns) do
+    ~H"""
+    <.card variant="bordered">
+      <:title>Model metadata</:title>
+      <.form
+        for={@form}
+        id="model-form"
+        phx-change="validate"
+        phx-submit="save"
+        class="grid gap-4 md:grid-cols-2"
+      >
+        <.input field={@form[:display_name]} label="Display name" />
+        <.input field={@form[:upstream_model_id]} label="Upstream model id" />
+        <.input field={@form[:family]} label="Family" />
+        <.input field={@form[:version]} label="Version" />
+        <.input field={@form[:revision]} label="Revision" />
+        <.input field={@form[:quantization]} label="Quantization" />
+        <.input field={@form[:size]} label="Size" />
+        <.input
+          field={@form[:status]}
+          type="select"
+          label="Lifecycle status"
+          options={@status_options}
+        />
+        <.input field={@form[:notes]} type="textarea" label="Notes" class="md:col-span-2" />
+        <div class="flex gap-2 md:col-span-2">
+          <.button variant="primary">Save</.button>
+          <.button type="button" phx-click="cancel">Cancel</.button>
+        </div>
+      </.form>
+    </.card>
     """
   end
 
@@ -180,7 +198,11 @@ defmodule AiroWeb.Admin.ModelLive do
 
   defp shelf(assigns) do
     ~H"""
-    <.table id="models" rows={@models}>
+    <.table
+      id="models"
+      rows={@models}
+      row_click={fn {_id, summary} -> JS.navigate(~p"/admin/models/#{summary.model.id}") end}
+    >
       <:col :let={{_id, summary}} label="Model">
         <div class="font-medium">{summary.model.display_name}</div>
         <div class="font-mono text-xs text-base-content/60">{summary.model.upstream_model_id}</div>
@@ -202,8 +224,11 @@ defmodule AiroWeb.Admin.ModelLive do
       <:col :let={{_id, summary}} label="Fallbacks">{summary.fallback_rate}</:col>
       <:col :let={{_id, summary}} label="Cost">{summary.cost}</:col>
       <:action :let={{_id, summary}}>
-        <.button size="sm" href={~p"/admin/models/#{summary.model.id}"}>Open</.button>
-        <.button size="sm" phx-click="edit" phx-value-id={summary.model.id}>Edit</.button>
+        <.icon_button
+          icon="hero-pencil-square"
+          label={"Edit #{summary.model.display_name}"}
+          navigate={~p"/admin/models/#{summary.model.id}/edit"}
+        />
       </:action>
     </.table>
     """
@@ -214,21 +239,6 @@ defmodule AiroWeb.Admin.ModelLive do
   defp detail(assigns) do
     ~H"""
     <div class="space-y-5">
-      <div class="flex flex-col gap-3 border-y border-base-300 bg-base-200/45 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div class="min-w-0">
-          <div class="font-mono text-xs uppercase text-base-content/55">Model control</div>
-          <div class="mt-1 truncate text-sm text-base-content/70">
-            {@detail.model.family || "unclassified"} / {@detail.model.status}
-          </div>
-        </div>
-        <div class="flex shrink-0 gap-2">
-          <.button href={~p"/admin/models"}>Back to shelf</.button>
-          <.button phx-click="edit" phx-value-id={@detail.model.id} variant="primary">
-            Edit metadata
-          </.button>
-        </div>
-      </div>
-
       <div class="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         <.card variant="bordered" class="border-l-4 border-l-info">
           <:eyebrow>Deployments</:eyebrow>
@@ -264,59 +274,34 @@ defmodule AiroWeb.Admin.ModelLive do
         </.card>
       </div>
 
-      <.card variant="elevated" class="overflow-hidden">
+      <CompositeComponents.section_panel>
         <:title>
           <span class="font-mono text-base break-all md:text-lg">{@detail.model.display_name}</span>
         </:title>
-        <div class="grid gap-px overflow-hidden rounded border border-base-300 bg-base-300 text-sm md:grid-cols-2 xl:grid-cols-4">
-          <div>
-            <div class="h-full bg-base-100 p-3">
-              <span class="text-base-content/60">Upstream</span>
-              <br />
-              <span class="font-mono text-xs break-all">{@detail.model.upstream_model_id}</span>
-            </div>
+        <dl class="grid gap-x-10 gap-y-5 text-sm md:grid-cols-2 xl:grid-cols-4">
+          <div :for={field <- model_identity_fields(@detail)} class="min-w-0">
+            <dt class="text-xs uppercase tracking-wide text-base-content/50">{field.label}</dt>
+            <dd class={[
+              "mt-1 break-words text-base-content/90",
+              field.mono && "font-mono",
+              field.compact && "text-xs"
+            ]}>
+              {field.value}
+            </dd>
           </div>
-          <div>
-            <div class="h-full bg-base-100 p-3">
-              <span class="text-base-content/60">Family</span> <br />{@detail.model.family || "—"}
-            </div>
-          </div>
-          <div>
-            <div class="h-full bg-base-100 p-3">
-              <span class="text-base-content/60">Version</span> <br />{@detail.model.version || "—"}
-            </div>
-          </div>
-          <div>
-            <div class="h-full bg-base-100 p-3">
-              <span class="text-base-content/60">Revision</span> <br />{@detail.model.revision || "—"}
-            </div>
-          </div>
-          <div>
-            <div class="h-full bg-base-100 p-3">
-              <span class="text-base-content/60">Quantization</span>
-              <br />{@detail.model.quantization || "—"}
-            </div>
-          </div>
-          <div>
-            <div class="h-full bg-base-100 p-3">
-              <span class="text-base-content/60">Size</span> <br />{@detail.model.size || "—"}
-            </div>
-          </div>
-          <div>
-            <div class="h-full bg-base-100 p-3">
-              <span class="text-base-content/60">Status</span> <br />{@detail.model.status}
-            </div>
-          </div>
-          <div>
-            <div class="h-full bg-base-100 p-3">
-              <span class="text-base-content/60">Cost</span> <br />{@detail.summary.cost}
-            </div>
-          </div>
-        </div>
-        <p :if={@detail.model.notes} class="mt-4 text-sm">{@detail.model.notes}</p>
-      </.card>
+        </dl>
+        <p
+          :if={@detail.model.notes}
+          class="mt-5 border-t border-base-content/10 pt-4 text-sm text-base-content/70"
+        >
+          {@detail.model.notes}
+        </p>
+      </CompositeComponents.section_panel>
 
-      <.card :if={@detail.leading_deployment} variant="elevated" class="border-l-4 border-l-warning">
+      <CompositeComponents.section_panel
+        :if={@detail.leading_deployment}
+        class="border-l-4 border-l-warning"
+      >
         <:title>Deployment guidance</:title>
         <div class="grid gap-4 text-sm md:grid-cols-[1.1fr_1fr_1.5fr_0.7fr_1.5fr]">
           <div>
@@ -349,151 +334,323 @@ defmodule AiroWeb.Admin.ModelLive do
             <br />{@detail.leading_deployment.guidance_reason}
           </div>
         </div>
-      </.card>
+      </CompositeComponents.section_panel>
 
-      <.card variant="bordered">
+      <CompositeComponents.section_panel>
         <:title>Version performance</:title>
-        <div class="max-w-full overflow-x-auto">
-          <.table id="model-versions" rows={@detail.version_summaries} class="min-w-max">
-            <:col :let={row} label="Version">{row.version}</:col>
-            <:col :let={row} label="Revision">{row.revision || "—"}</:col>
-            <:col :let={row} label="First seen">{row.first_seen}</:col>
-            <:col :let={row} label="Last seen">{row.last_seen}</:col>
-            <:col :let={row} label="Requests">{row.requests}</:col>
-            <:col :let={row} label="Errors">{row.error_rate}</:col>
-            <:col :let={row} label="p50">{latency(row.p50_latency_ms)}</:col>
-            <:col :let={row} label="p95">{latency(row.p95_latency_ms)}</:col>
-            <:col :let={row} label="Fallbacks">{row.fallback_rate}</:col>
-            <:col :let={row} label="Cost">{row.cost}</:col>
-          </.table>
+        <div id="model-versions" class="space-y-3">
+          <div
+            :if={@detail.version_summaries == []}
+            class="rounded-md border border-dashed border-base-content/15 bg-base-100/45 px-4 py-5 text-sm text-base-content/60"
+          >
+            No version samples yet.
+          </div>
+          <div
+            :for={row <- @detail.version_summaries}
+            class="grid gap-4 rounded-md border border-base-content/10 bg-base-100/65 p-4 shadow-sm ring-1 ring-white/5 xl:grid-cols-[1.1fr_2fr]"
+          >
+            <div class="min-w-0">
+              <div class="font-mono text-xs uppercase tracking-[0.2em] text-base-content/50">
+                Version
+              </div>
+              <div class="mt-1 break-all font-mono text-base font-semibold text-base-content">
+                {row.version}
+              </div>
+              <div class="mt-2 text-sm text-base-content/60">
+                Revision <span class="font-mono">{row.revision || "—"}</span>
+              </div>
+            </div>
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">Requests</div>
+                <div class="mt-1 font-mono text-base text-base-content">{row.requests}</div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">Errors</div>
+                <div class="mt-1 font-mono text-base text-base-content">{row.error_rate}</div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">p50</div>
+                <div class="mt-1 font-mono text-base text-base-content">
+                  {latency(row.p50_latency_ms)}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">p95</div>
+                <div class="mt-1 font-mono text-base text-base-content">
+                  {latency(row.p95_latency_ms)}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">Fallbacks</div>
+                <div class="mt-1 font-mono text-base text-base-content">{row.fallback_rate}</div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">Cost</div>
+                <div class="mt-1 font-mono text-base text-base-content">{row.cost}</div>
+              </div>
+              <div class="sm:col-span-2">
+                <div class="text-xs uppercase tracking-wide text-base-content/50">First seen</div>
+                <div class="mt-1 font-mono text-sm text-base-content/80">{row.first_seen}</div>
+              </div>
+              <div class="sm:col-span-2">
+                <div class="text-xs uppercase tracking-wide text-base-content/50">Last seen</div>
+                <div class="mt-1 font-mono text-sm text-base-content/80">{row.last_seen}</div>
+              </div>
+            </div>
+          </div>
         </div>
-      </.card>
+      </CompositeComponents.section_panel>
 
-      <.card variant="bordered">
+      <CompositeComponents.section_panel>
         <:title>Deployment copies</:title>
-        <div class="max-w-full overflow-x-auto">
-          <.table id="model-deployments" rows={@detail.deployment_summaries} class="min-w-max">
-            <:col :let={row} label="Provider">{row.provider && row.provider.name}</:col>
-            <:col :let={row} label="Model id">
-              <span class="block max-w-80 break-all">{row.deployment.model_name}</span>
-            </:col>
-            <:col :let={row} label="Health">
-              <CompositeComponents.health_status status={to_string(row.health)} />
-            </:col>
-            <:col :let={row} label="Use">{row.recommendation}</:col>
-            <:col :let={row} label="Score">{row.guidance_score}/100</:col>
-            <:col :let={row} label="Reason">{row.guidance_reason}</:col>
-            <:col :let={row} label="Enabled">{row.deployment.enabled}</:col>
-            <:col :let={row} label="Capabilities">{join_values(row.deployment.capabilities)}</:col>
-            <:col :let={row} label="Requests">{row.requests}</:col>
-            <:col :let={row} label="Errors">{row.error_rate}</:col>
-            <:col :let={row} label="p50">{latency(row.p50_latency_ms)}</:col>
-            <:col :let={row} label="p95">{latency(row.p95_latency_ms)}</:col>
-            <:col :let={row} label="Fallbacks">{row.fallback_rate}</:col>
-            <:col :let={row} label="Synced">{metadata_value(row.deployment, "synced_at")}</:col>
-            <:action :let={row}>
+        <div id="model-deployments" class="space-y-3">
+          <div
+            :if={@detail.deployment_summaries == []}
+            class="rounded-md border border-dashed border-base-content/15 bg-base-100/45 px-4 py-5 text-sm text-base-content/60"
+          >
+            No deployment copies are linked to this model yet.
+          </div>
+          <div
+            :for={row <- @detail.deployment_summaries}
+            class="rounded-md border border-base-content/10 bg-base-100/65 p-4 shadow-sm ring-1 ring-white/5"
+          >
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-semibold text-base-content">
+                    {row.provider && row.provider.name}
+                  </span>
+                  <CompositeComponents.health_status status={to_string(row.health)} />
+                  <span class={[
+                    "inline-flex rounded border px-2 py-0.5 text-xs font-semibold",
+                    recommendation_class(row.recommendation)
+                  ]}>
+                    {row.recommendation}
+                  </span>
+                </div>
+                <div class="mt-2 break-all font-mono text-sm text-base-content/75">
+                  {row.deployment.model_name}
+                </div>
+              </div>
+              <div class="grid shrink-0 grid-cols-3 gap-3 text-sm lg:min-w-96">
+                <div>
+                  <div class="text-xs uppercase tracking-wide text-base-content/50">Score</div>
+                  <div class="mt-1 font-mono text-base text-base-content">
+                    {row.guidance_score}/100
+                  </div>
+                </div>
+                <div>
+                  <div class="text-xs uppercase tracking-wide text-base-content/50">Requests</div>
+                  <div class="mt-1 font-mono text-base text-base-content">{row.requests}</div>
+                </div>
+                <div>
+                  <div class="text-xs uppercase tracking-wide text-base-content/50">p95</div>
+                  <div class="mt-1 font-mono text-base text-base-content">
+                    {latency(row.p95_latency_ms)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+              <div class="xl:col-span-2">
+                <div class="text-xs uppercase tracking-wide text-base-content/50">Reason</div>
+                <div class="mt-1 text-base-content/80">{row.guidance_reason}</div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">Enabled</div>
+                <div class="mt-1 font-mono text-base-content/80">{row.deployment.enabled}</div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">Capabilities</div>
+                <div class="mt-1 text-base-content/80">
+                  {join_values(row.deployment.capabilities)}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">Errors</div>
+                <div class="mt-1 font-mono text-base-content/80">{row.error_rate}</div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">p50</div>
+                <div class="mt-1 font-mono text-base-content/80">
+                  {latency(row.p50_latency_ms)}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">Fallbacks</div>
+                <div class="mt-1 font-mono text-base-content/80">{row.fallback_rate}</div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-base-content/50">Synced</div>
+                <div class="mt-1 font-mono text-base-content/80">
+                  {metadata_value(row.deployment, "synced_at")}
+                </div>
+              </div>
+            </div>
+
+            <div :if={:inspect_model in row.local_capabilities} class="mt-4 flex justify-end">
               <.button
-                :if={:inspect_model in row.local_capabilities}
                 size="sm"
                 phx-click="sync_deployment"
                 phx-value-id={row.deployment.id}
               >
                 Sync
               </.button>
-            </:action>
-          </.table>
+            </div>
+          </div>
         </div>
-      </.card>
+      </CompositeComponents.section_panel>
 
-      <.card variant="bordered">
+      <CompositeComponents.section_panel>
         <:title>Provider metadata</:title>
-        <div class="max-w-full overflow-x-auto">
-          <.table id="provider-metadata" rows={@detail.deployment_summaries} class="min-w-max">
-            <:col :let={row} label="Provider">{row.provider && row.provider.name}</:col>
-            <:col :let={row} label="Runtime">
-              {metadata_value(row.deployment, "runtime_version")}
-            </:col>
-            <:col :let={row} label="Type">{metadata_value(row.deployment, "type")}</:col>
-            <:col :let={row} label="Backend">{metadata_value(row.deployment, "backend")}</:col>
-            <:col :let={row} label="Family">{metadata_value(row.deployment, "family")}</:col>
-            <:col :let={row} label="Parameters">
-              {metadata_value(row.deployment, "parameter_size")}
-            </:col>
-            <:col :let={row} label="Quantization">
-              {metadata_value(row.deployment, "quantization")}
-            </:col>
-            <:col :let={row} label="Format">{metadata_value(row.deployment, "format")}</:col>
-            <:col :let={row} label="Architecture">
-              {metadata_value(row.deployment, "architecture")}
-            </:col>
-            <:col :let={row} label="Context">
-              {metadata_value(row.deployment, "context_window")}
-            </:col>
-            <:col :let={row} label="Batch">{metadata_value(row.deployment, "batch_size")}</:col>
-            <:col :let={row} label="Queue">{metadata_value(row.deployment, "queue_absolute")}</:col>
-            <:col :let={row} label="Languages">
-              {metadata_value(row.deployment, "language_count")}
-            </:col>
-            <:col :let={row} label="Voices">{metadata_value(row.deployment, "voice_count")}</:col>
-            <:col :let={row} label="Sample rate">
-              {metadata_value(row.deployment, "sample_rate")}
-            </:col>
-            <:col :let={row} label="Running">{running_label(row.deployment)}</:col>
-          </.table>
-        </div>
-      </.card>
+        <div id="provider-metadata" class="space-y-3">
+          <div
+            :if={@detail.deployment_summaries == []}
+            class="rounded-md border border-dashed border-base-content/15 bg-base-100/45 px-4 py-5 text-sm text-base-content/60"
+          >
+            No provider metadata has been synced yet.
+          </div>
+          <div
+            :for={row <- @detail.deployment_summaries}
+            class="rounded-md border border-base-content/10 bg-base-100/65 p-4 shadow-sm ring-1 ring-white/5"
+          >
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div class="font-semibold text-base-content">
+                  {row.provider && row.provider.name}
+                </div>
+                <div class="mt-2 flex flex-wrap gap-2 font-mono text-xs text-base-content/65">
+                  <span
+                    :if={metadata_reported?(row.deployment, "type")}
+                    class="rounded-full border border-base-content/10 bg-base-300/40 px-2 py-1"
+                  >
+                    {metadata_value(row.deployment, "type")}
+                  </span>
+                  <span
+                    :if={metadata_reported?(row.deployment, "backend")}
+                    class="rounded-full border border-base-content/10 bg-base-300/40 px-2 py-1"
+                  >
+                    {metadata_value(row.deployment, "backend")}
+                  </span>
+                  <span
+                    :if={
+                      !metadata_reported?(row.deployment, "type") &&
+                        !metadata_reported?(row.deployment, "backend")
+                    }
+                    class="text-base-content/45"
+                  >
+                    No runtime type reported
+                  </span>
+                </div>
+              </div>
+              <span class={[
+                "inline-flex w-fit items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+                running_label(row.deployment) == "yes" &&
+                  "border-success/30 bg-success/10 text-success",
+                running_label(row.deployment) == "no" &&
+                  "border-base-content/10 bg-base-300/35 text-base-content/65",
+                running_label(row.deployment) == "—" &&
+                  "border-base-content/10 bg-base-300/20 text-base-content/45"
+              ]}>
+                Running {running_label(row.deployment)}
+              </span>
+            </div>
 
-      <.card variant="bordered">
+            <div class="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div
+                  :for={{label, value} <- provider_metadata_present_fields(row.deployment)}
+                  class="rounded-md border border-base-content/10 bg-base-300/30 p-3 shadow-sm ring-1 ring-white/5"
+                >
+                  <div class="text-xs uppercase tracking-wide text-base-content/50">{label}</div>
+                  <div class="mt-1 break-all font-mono text-base-content/85">{value}</div>
+                </div>
+
+                <div
+                  :if={provider_metadata_present_fields(row.deployment) == []}
+                  class="rounded-md border border-dashed border-base-content/15 bg-base-300/25 p-3 text-sm text-base-content/55"
+                >
+                  This provider has not reported detailed metadata yet.
+                </div>
+              </div>
+
+              <div
+                :if={provider_metadata_missing_labels(row.deployment) != []}
+                class="rounded-md border border-dashed border-base-content/10 bg-base-300/20 p-3"
+              >
+                <div class="text-xs uppercase tracking-wide text-base-content/45">Not reported</div>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <span
+                    :for={label <- provider_metadata_missing_labels(row.deployment)}
+                    class="rounded-full border border-base-content/10 bg-base-100/30 px-2 py-1 text-xs text-base-content/55"
+                  >
+                    {label}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </CompositeComponents.section_panel>
+
+      <CompositeComponents.section_panel body_class="p-4">
         <:title>Routing participation</:title>
-        <div class="max-w-full overflow-x-auto">
-          <.table id="model-aliases" rows={@detail.aliases} class="min-w-max">
-            <:col :let={candidate} label="Alias">{candidate.alias.name}</:col>
-            <:col :let={candidate} label="Capability">{candidate.alias.capability}</:col>
-            <:col :let={candidate} label="Strategy">{candidate.alias.strategy}</:col>
-            <:col :let={candidate} label="Provider">
-              {candidate.deployment.provider && candidate.deployment.provider.name}
-            </:col>
-            <:col :let={candidate} label="Weight">{candidate.weight}</:col>
-            <:col :let={candidate} label="Priority">{candidate.priority}</:col>
-          </.table>
-        </div>
-      </.card>
+        <.table id="model-aliases" rows={@detail.aliases}>
+          <:col :let={candidate} label="Alias">{candidate.alias.name}</:col>
+          <:col :let={candidate} label="Capability">{candidate.alias.capability}</:col>
+          <:col :let={candidate} label="Strategy">{candidate.alias.strategy}</:col>
+          <:col :let={candidate} label="Provider">
+            {candidate.deployment.provider && candidate.deployment.provider.name}
+          </:col>
+          <:col :let={candidate} label="Weight">{candidate.weight}</:col>
+          <:col :let={candidate} label="Priority">{candidate.priority}</:col>
+        </.table>
+      </CompositeComponents.section_panel>
 
-      <.card variant="bordered">
+      <CompositeComponents.section_panel body_class="p-4">
         <:title>Recent health transitions</:title>
-        <div class="max-w-full overflow-x-auto">
-          <.table id="model-health-events" rows={@detail.health_events} class="min-w-max">
-            <:col :let={event} label="When">{event.inserted_at}</:col>
-            <:col :let={event} label="Provider">{event.provider && event.provider.name}</:col>
-            <:col :let={event} label="Status">
-              <CompositeComponents.health_status status={to_string(event.status)} />
-            </:col>
-            <:col :let={event} label="Source">{event.source}</:col>
-            <:col :let={event} label="Latency">{latency(event.latency_ms)}</:col>
-            <:col :let={event} label="Reason">{event.reason || "—"}</:col>
-          </.table>
-        </div>
-      </.card>
+        <.table id="model-health-events" rows={@detail.health_events}>
+          <:col :let={event} label="When">{event.inserted_at}</:col>
+          <:col :let={event} label="Provider">{event.provider && event.provider.name}</:col>
+          <:col :let={event} label="Status">
+            <CompositeComponents.health_status status={to_string(event.status)} />
+          </:col>
+          <:col :let={event} label="Source">{event.source}</:col>
+          <:col :let={event} label="Latency">{latency(event.latency_ms)}</:col>
+          <:col :let={event} label="Reason">{event.reason || "—"}</:col>
+        </.table>
+      </CompositeComponents.section_panel>
 
-      <.card variant="bordered">
+      <CompositeComponents.section_panel body_class="p-4">
         <:title>Recent traces</:title>
-        <div class="max-w-full overflow-x-auto">
-          <.table id="model-traces" rows={@detail.recent_records} class="min-w-max">
-            <:col :let={record} label="When">{record.inserted_at}</:col>
-            <:col :let={record} label="Trace">
-              <span class="font-mono text-xs">{record.trace_id || "—"}</span>
-            </:col>
-            <:col :let={record} label="Client">{record.client_key && record.client_key.name}</:col>
-            <:col :let={record} label="Outcome">{record.outcome}</:col>
-            <:col :let={record} label="Error">{record.error_code || "—"}</:col>
-            <:col :let={record} label="Latency">{latency(record.latency_ms)}</:col>
-            <:col :let={record} label="Tokens">{record.tokens_in}/{record.tokens_out}</:col>
-          </.table>
-        </div>
-      </.card>
+        <.table id="model-traces" rows={@detail.recent_records}>
+          <:col :let={record} label="When">{record.inserted_at}</:col>
+          <:col :let={record} label="Trace">
+            <span class="font-mono text-xs">{record.trace_id || "—"}</span>
+          </:col>
+          <:col :let={record} label="Client">{record.client_key && record.client_key.name}</:col>
+          <:col :let={record} label="Outcome">{record.outcome}</:col>
+          <:col :let={record} label="Error">{record.error_code || "—"}</:col>
+          <:col :let={record} label="Latency">{latency(record.latency_ms)}</:col>
+          <:col :let={record} label="Tokens">{record.tokens_in}/{record.tokens_out}</:col>
+        </.table>
+      </CompositeComponents.section_panel>
     </div>
     """
   end
+
+  defp model_header_subtitle(:index, _detail, _editing),
+    do: "Model identity, deployment copies, routing posture, and performance."
+
+  defp model_header_subtitle(:show, %{model: model}, _editing),
+    do: "#{model.status} model metadata and deployment posture"
+
+  defp model_header_subtitle(:new, _detail, _editing), do: "Create a shelf identity for a model."
+
+  defp model_header_subtitle(:edit, _detail, %Model{}),
+    do: "Update shelf metadata and lifecycle status."
 
   defp optionize(values), do: Enum.map(values, &{humanize(&1), to_string(&1)})
 
@@ -505,11 +662,72 @@ defmodule AiroWeb.Admin.ModelLive do
   defp join_values(nil), do: "—"
   defp join_values(values), do: Enum.map_join(values, ", ", &to_string/1)
 
+  defp model_identity_fields(%{model: model, summary: summary}) do
+    [
+      %{
+        label: "Upstream",
+        value: display_value(model.upstream_model_id),
+        mono: true,
+        compact: true
+      },
+      %{label: "Family", value: display_value(model.family), mono: false, compact: false},
+      %{label: "Version", value: display_value(model.version), mono: true, compact: false},
+      %{label: "Revision", value: display_value(model.revision), mono: true, compact: false},
+      %{
+        label: "Quantization",
+        value: display_value(model.quantization),
+        mono: true,
+        compact: false
+      },
+      %{label: "Size", value: display_value(model.size), mono: true, compact: false},
+      %{label: "Status", value: display_value(model.status), mono: false, compact: false},
+      %{label: "Cost", value: display_value(summary.cost), mono: true, compact: false}
+    ]
+  end
+
+  defp display_value(value) when value in [nil, ""], do: "—"
+  defp display_value(value), do: value
+
   defp metadata_value(%{provider_metadata: metadata}, key) when is_map(metadata) do
     Map.get(metadata, key) || "—"
   end
 
   defp metadata_value(_deployment, _key), do: "—"
+
+  defp provider_metadata_fields(deployment) do
+    [
+      {"Runtime", metadata_value(deployment, "runtime_version")},
+      {"Family", metadata_value(deployment, "family")},
+      {"Parameters", metadata_value(deployment, "parameter_size")},
+      {"Quantization", metadata_value(deployment, "quantization")},
+      {"Format", metadata_value(deployment, "format")},
+      {"Architecture", metadata_value(deployment, "architecture")},
+      {"Context", metadata_value(deployment, "context_window")},
+      {"Batch", metadata_value(deployment, "batch_size")},
+      {"Queue", metadata_value(deployment, "queue_absolute")},
+      {"Languages", metadata_value(deployment, "language_count")},
+      {"Voices", metadata_value(deployment, "voice_count")},
+      {"Sample rate", metadata_value(deployment, "sample_rate")}
+    ]
+  end
+
+  defp provider_metadata_present_fields(deployment) do
+    Enum.reject(provider_metadata_fields(deployment), fn {_label, value} ->
+      missing_metadata?(value)
+    end)
+  end
+
+  defp provider_metadata_missing_labels(deployment) do
+    deployment
+    |> provider_metadata_fields()
+    |> Enum.filter(fn {_label, value} -> missing_metadata?(value) end)
+    |> Enum.map(fn {label, _value} -> label end)
+  end
+
+  defp metadata_reported?(deployment, key),
+    do: !missing_metadata?(metadata_value(deployment, key))
+
+  defp missing_metadata?(value), do: value in [nil, "", "—"]
 
   defp running_label(%{provider_metadata: metadata}) when is_map(metadata) do
     case Map.fetch(metadata, "running") do

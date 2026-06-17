@@ -103,4 +103,7 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
+/* Keep centered app shells from shifting between pages with and without scrollbars. */
+html { scrollbar-gutter: stable; }
+
 /* This file is for your main application CSS */

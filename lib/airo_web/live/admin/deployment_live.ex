@@ -18,7 +18,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
 
     {:ok,
      socket
-     |> assign(page_title: "Deployments", form: nil, editing: nil)
+     |> assign(page_title: "Deployments", form: nil, editing: nil, detail: nil)
      |> assign(capabilities: Deployment.capabilities(), classes: Deployment.classes())
      |> assign(model_options: [], model_error: nil, models_provider_id: nil)
      |> assign_model_id_options()
@@ -26,6 +26,11 @@ defmodule AiroWeb.Admin.DeploymentLive do
      |> stream(:health_events, Health.list_events(25))
      |> assign_providers()
      |> stream(:deployments, deployments)}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
   @impl true
@@ -41,24 +46,8 @@ defmodule AiroWeb.Admin.DeploymentLive do
   end
 
   @impl true
-  def handle_event("new", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(editing: nil, form: to_form(Config.change_deployment(%Deployment{})))
-     |> assign_models(nil)}
-  end
-
-  def handle_event("edit", %{"id" => id}, socket) do
-    deployment = Config.get_deployment!(id)
-
-    {:noreply,
-     socket
-     |> assign(editing: deployment, form: to_form(Config.change_deployment(deployment)))
-     |> assign_models(deployment.provider_id)}
-  end
-
   def handle_event("cancel", _params, socket),
-    do: {:noreply, assign(socket, form: nil, editing: nil)}
+    do: {:noreply, push_navigate(socket, to: deployment_return_path(socket.assigns.editing))}
 
   def handle_event("validate", %{"deployment" => params}, socket) do
     changeset = Config.change_deployment(socket.assigns.editing || %Deployment{}, clean(params))
@@ -84,9 +73,9 @@ defmodule AiroWeb.Admin.DeploymentLive do
       {:ok, d} ->
         {:noreply,
          socket
-         |> stream_insert(:deployments, with_provider(d))
          |> assign(form: nil)
-         |> put_flash(:info, "Deployment created.")}
+         |> put_flash(:info, "Deployment created.")
+         |> push_navigate(to: ~p"/admin/deployments/#{d.id}")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
@@ -98,9 +87,9 @@ defmodule AiroWeb.Admin.DeploymentLive do
       {:ok, d} ->
         {:noreply,
          socket
-         |> stream_insert(:deployments, with_provider(d))
          |> assign(form: nil, editing: nil)
-         |> put_flash(:info, "Deployment updated.")}
+         |> put_flash(:info, "Deployment updated.")
+         |> push_navigate(to: ~p"/admin/deployments/#{d.id}")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
@@ -108,7 +97,45 @@ defmodule AiroWeb.Admin.DeploymentLive do
   end
 
   defp list, do: Config.list_deployments() |> Airo.Repo.preload(:provider)
-  defp with_provider(d), do: Airo.Repo.preload(d, :provider)
+  defp with_detail(d), do: Airo.Repo.preload(d, [:provider, :model])
+
+  defp apply_action(socket, :index, _params) do
+    deployments = list()
+
+    socket
+    |> assign(page_title: "Deployments", detail: nil, form: nil, editing: nil)
+    |> assign(health: health_map(deployments))
+    |> stream(:health_events, Health.list_events(25), reset: true)
+    |> stream(:deployments, deployments, reset: true)
+    |> assign_models(nil)
+  end
+
+  defp apply_action(socket, :show, %{"id" => id}) do
+    deployment = id |> Config.get_deployment!() |> with_detail()
+
+    socket
+    |> assign(page_title: "Deployment", detail: deployment, form: nil, editing: nil)
+    |> assign_models(nil)
+  end
+
+  defp apply_action(socket, :new, _params) do
+    socket
+    |> assign(page_title: "New deployment", detail: nil, editing: nil)
+    |> assign(form: to_form(Config.change_deployment(%Deployment{})))
+    |> assign_models(nil)
+  end
+
+  defp apply_action(socket, :edit, %{"id" => id}) do
+    deployment = Config.get_deployment!(id)
+
+    socket
+    |> assign(page_title: "Edit deployment", detail: nil, editing: deployment)
+    |> assign(form: to_form(Config.change_deployment(deployment)))
+    |> assign_models(deployment.provider_id)
+  end
+
+  defp deployment_return_path(%Deployment{id: id}), do: ~p"/admin/deployments/#{id}"
+  defp deployment_return_path(_deployment), do: ~p"/admin/deployments"
 
   defp health_map(deployments),
     do: Map.new(deployments, &{&1.id, to_string(Health.status(&1.id))})
@@ -161,6 +188,18 @@ defmodule AiroWeb.Admin.DeploymentLive do
   defp model_error_message(_reason),
     do: "Couldn't reach the provider to list models — enter the model name manually."
 
+  defp deployment_header_subtitle(:index, _detail, _editing),
+    do: "A concrete model on a provider, with pricing."
+
+  defp deployment_header_subtitle(:show, %{provider: provider}, _editing),
+    do: "#{provider && provider.name} deployment configuration"
+
+  defp deployment_header_subtitle(:new, _detail, _editing),
+    do: "Attach a provider model to the gateway."
+
+  defp deployment_header_subtitle(:edit, _detail, %Deployment{}),
+    do: "Update routing eligibility, capabilities, and pricing."
+
   # Make sure the current value is selectable even if the upstream no longer
   # advertises it, so editing an existing deployment never silently drops it.
   defp model_select_options(options, current) when current in [nil, ""], do: options
@@ -170,119 +209,253 @@ defmodule AiroWeb.Admin.DeploymentLive do
   end
 
   # Drop blanks so optional enum/number fields don't fail casting / clobber.
-  defp clean(params), do: for({k, v} <- params, v != "", into: %{}, do: {k, v})
+  # Checkbox groups submit one blank sentinel so clearing all options validates
+  # as an empty list instead of preserving the old array value.
+  defp clean(params) do
+    params
+    |> Enum.map(fn {key, value} -> {key, clean_value(value)} end)
+    |> Enum.reject(fn {_key, value} -> value == "" end)
+    |> Map.new()
+  end
+
+  defp clean_value(values) when is_list(values),
+    do: Enum.reject(values, &(&1 in ["", nil]))
+
+  defp clean_value(value), do: value
 
   @impl true
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} active_nav="deployments">
-      <div class="mx-auto max-w-6xl space-y-6 px-6 py-8">
-        <.header>
-          Deployments
-          <:subtitle>A concrete model on a provider, with pricing.</:subtitle>
-          <:actions><.button phx-click="new" variant="primary">New deployment</.button></:actions>
-        </.header>
-
-        <.card :if={@form} variant="bordered">
-          <:title>{if @editing, do: "Edit deployment", else: "New deployment"}</:title>
-          <.form for={@form} phx-change="validate" phx-submit="save" class="space-y-4">
-            <.input
-              field={@form[:provider_id]}
-              type="select"
-              label="Provider"
-              options={@provider_options}
-              prompt="Select a provider"
-            />
-            <.input
-              :if={@model_options == []}
-              field={@form[:model_name]}
-              label="Model name"
-            />
-            <.input
-              :if={@model_options != []}
-              field={@form[:model_name]}
-              type="select"
-              label="Model name"
-              options={model_select_options(@model_options, @form[:model_name].value)}
-              prompt="Select a model"
-            />
-            <.input
-              field={@form[:model_id]}
-              type="select"
-              label="Shelf model"
-              options={@model_id_options}
-              prompt="Infer from model name"
-            />
-            <p :if={@model_error} class="text-sm text-warning">{@model_error}</p>
-            <.input
-              field={@form[:capabilities]}
-              type="select"
-              multiple
-              label="Capabilities"
-              options={@capabilities}
-            />
-            <.input
-              field={@form[:class]}
-              type="select"
-              label="Class"
-              options={@classes}
-              prompt="(none)"
-            />
-            <.input field={@form[:tool_use]} type="checkbox" label="Tool use" />
-            <.input field={@form[:context_window]} type="number" label="Context window" />
-            <.input field={@form[:price_input]} label="Price input (per 1k)" />
-            <.input field={@form[:price_output]} label="Price output (per 1k)" />
-            <.input field={@form[:enabled]} type="checkbox" label="Enabled" />
-            <.button variant="primary">Save</.button>
-          </.form>
-          <:actions><.button phx-click="cancel">Cancel</.button></:actions>
-        </.card>
-
-        <.table id="deployments" rows={@streams.deployments}>
-          <:col :let={{_id, d}} label="Provider">{d.provider && d.provider.name}</:col>
-          <:col :let={{_id, d}} label="Model">{d.model_name}</:col>
-          <:col :let={{_id, d}} label="Capabilities">
-            {Enum.map_join(d.capabilities, ", ", &to_string/1)}
-          </:col>
-          <:col :let={{_id, d}} label="Class">{d.class}</:col>
-          <:col :let={{_id, d}} label="Enabled">{d.enabled}</:col>
-          <:col :let={{_id, d}} label="Health">
-            <CompositeComponents.health_status status={@health[d.id] || "unknown"} />
-          </:col>
-          <:action :let={{_id, d}}>
-            <.button size="sm" phx-click="edit" phx-value-id={d.id}>Edit</.button>
+      <div class="mx-auto max-w-7xl space-y-6 px-6 py-8">
+        <CompositeComponents.page_header subtitle={
+          deployment_header_subtitle(@live_action, @detail, @editing)
+        }>
+          <:crumb navigate={~p"/admin/deployments"}>Deployments</:crumb>
+          <:crumb :if={@live_action == :show}>{@detail.model_name}</:crumb>
+          <:crumb :if={@live_action == :new}>New deployment</:crumb>
+          <:crumb :if={@live_action == :edit}>{@editing.model_name}</:crumb>
+          <:actions :if={@live_action == :index}>
+            <.button navigate={~p"/admin/deployments/new"} variant="primary">
+              New deployment
+            </.button>
+          </:actions>
+          <:actions :if={@live_action == :show}>
             <.button
               size="sm"
-              phx-click="delete"
-              phx-value-id={d.id}
-              data-confirm="Delete this deployment?"
+              navigate={~p"/admin/deployments/#{@detail.id}/edit"}
+              variant="primary"
             >
-              Delete
+              Edit deployment
             </.button>
-          </:action>
-        </.table>
+          </:actions>
+          <:actions :if={@live_action in [:new, :edit]}>
+            <.button size="sm" navigate={deployment_return_path(@editing)}>Back</.button>
+          </:actions>
+        </CompositeComponents.page_header>
 
-        <.card variant="bordered">
-          <:title>Health transitions</:title>
-          Recent deployment health changes from probes and live dispatches.
-          <.table id="health-events" rows={@streams.health_events}>
-            <:col :let={{_id, event}} label="When">{event.inserted_at}</:col>
-            <:col :let={{_id, event}} label="Provider">
-              {event.provider && event.provider.name}
-            </:col>
-            <:col :let={{_id, event}} label="Model">
-              {event.deployment && event.deployment.model_name}
-            </:col>
-            <:col :let={{_id, event}} label="Status">
-              <CompositeComponents.health_status status={to_string(event.status)} />
-            </:col>
-            <:col :let={{_id, event}} label="Source">{event.source}</:col>
-            <:col :let={{_id, event}} label="Latency">{latency(event.latency_ms)}</:col>
-            <:col :let={{_id, event}} label="Reason">{event.reason || "—"}</:col>
-          </.table>
-        </.card>
+        <%= cond do %>
+          <% @form -> %>
+            <.deployment_form
+              form={@form}
+              editing={@editing}
+              provider_options={@provider_options}
+              model_options={@model_options}
+              model_id_options={@model_id_options}
+              model_error={@model_error}
+              capabilities={@capabilities}
+              classes={@classes}
+            />
+          <% @detail -> %>
+            <.deployment_detail deployment={@detail} health={@health[@detail.id] || "unknown"} />
+          <% true -> %>
+            <.deployment_table deployments={@streams.deployments} health={@health} />
+            <.health_events events={@streams.health_events} />
+        <% end %>
       </div>
     </Layouts.app>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :editing, :any, required: true
+  attr :provider_options, :list, required: true
+  attr :model_options, :list, required: true
+  attr :model_id_options, :list, required: true
+  attr :model_error, :string, default: nil
+  attr :capabilities, :list, required: true
+  attr :classes, :list, required: true
+
+  defp deployment_form(assigns) do
+    ~H"""
+    <.card variant="bordered">
+      <:title>Deployment settings</:title>
+      <.form
+        for={@form}
+        id="deployment-form"
+        phx-change="validate"
+        phx-submit="save"
+        class="space-y-4"
+      >
+        <.input
+          field={@form[:provider_id]}
+          type="select"
+          label="Provider"
+          options={@provider_options}
+          prompt="Select a provider"
+        />
+        <.input :if={@model_options == []} field={@form[:model_name]} label="Model name" />
+        <.input
+          :if={@model_options != []}
+          field={@form[:model_name]}
+          type="select"
+          label="Model name"
+          options={model_select_options(@model_options, @form[:model_name].value)}
+          prompt="Select a model"
+        />
+        <.input
+          field={@form[:model_id]}
+          type="select"
+          label="Shelf model"
+          options={@model_id_options}
+          prompt="Infer from model name"
+        />
+        <p :if={@model_error} class="text-sm text-warning">{@model_error}</p>
+        <.checkbox_group field={@form[:capabilities]} label="Capabilities" options={@capabilities} />
+        <.input field={@form[:class]} type="select" label="Class" options={@classes} prompt="(none)" />
+        <.input field={@form[:tool_use]} type="checkbox" label="Tool use" />
+        <.input field={@form[:context_window]} type="number" label="Context window" />
+        <.input field={@form[:price_input]} label="Price input (per 1k)" />
+        <.input field={@form[:price_output]} label="Price output (per 1k)" />
+        <.input field={@form[:enabled]} type="checkbox" label="Enabled" />
+        <div class="flex gap-2">
+          <.button variant="primary">Save</.button>
+          <.button type="button" phx-click="cancel">Cancel</.button>
+        </div>
+      </.form>
+    </.card>
+    """
+  end
+
+  attr :deployments, :any, required: true
+  attr :health, :map, required: true
+
+  defp deployment_table(assigns) do
+    ~H"""
+    <.table
+      id="deployments"
+      rows={@deployments}
+      row_click={fn {_id, d} -> JS.navigate(~p"/admin/deployments/#{d.id}") end}
+    >
+      <:col :let={{_id, d}} label="Provider">{d.provider && d.provider.name}</:col>
+      <:col :let={{_id, d}} label="Model">{d.model_name}</:col>
+      <:col :let={{_id, d}} label="Capabilities">
+        {Enum.map_join(d.capabilities, ", ", &to_string/1)}
+      </:col>
+      <:col :let={{_id, d}} label="Class">{d.class}</:col>
+      <:col :let={{_id, d}} label="Enabled">{d.enabled}</:col>
+      <:col :let={{_id, d}} label="Health">
+        <CompositeComponents.health_status status={@health[d.id] || "unknown"} />
+      </:col>
+      <:action :let={{_id, d}}>
+        <.icon_button
+          icon="hero-pencil-square"
+          label={"Edit #{d.model_name}"}
+          navigate={~p"/admin/deployments/#{d.id}/edit"}
+        />
+        <.icon_button
+          icon="hero-trash"
+          label={"Delete #{d.model_name}"}
+          variant="danger"
+          phx-click="delete"
+          phx-value-id={d.id}
+          data-confirm="Delete this deployment?"
+        />
+      </:action>
+    </.table>
+    """
+  end
+
+  attr :deployment, Deployment, required: true
+  attr :health, :string, required: true
+
+  defp deployment_detail(assigns) do
+    ~H"""
+    <div class="space-y-6">
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <.card variant="bordered">
+          <:eyebrow>Provider</:eyebrow>
+          <:title>{@deployment.provider && @deployment.provider.name}</:title>
+          {@deployment.provider && @deployment.provider.adapter_type}
+        </.card>
+        <.card variant="bordered">
+          <:eyebrow>Health</:eyebrow>
+          <:title>{@health}</:title>
+          Current prober signal.
+        </.card>
+        <.card variant="bordered">
+          <:eyebrow>Enabled</:eyebrow>
+          <:title>{@deployment.enabled}</:title>
+          Routing eligibility.
+        </.card>
+        <.card variant="bordered">
+          <:eyebrow>Capabilities</:eyebrow>
+          <:title>{length(@deployment.capabilities)}</:title>
+          {Enum.map_join(@deployment.capabilities, ", ", &to_string/1)}
+        </.card>
+        <.card variant="bordered">
+          <:eyebrow>Class</:eyebrow>
+          <:title>{@deployment.class || "—"}</:title>
+          Routing tier.
+        </.card>
+      </div>
+
+      <.card variant="bordered">
+        <:title>{@deployment.model_name}</:title>
+        <div class="grid gap-4 text-sm md:grid-cols-2 xl:grid-cols-4">
+          <div>
+            <span class="text-base-content/60">Shelf model</span>
+            <br />{(@deployment.model && @deployment.model.display_name) || "—"}
+          </div>
+          <div>
+            <span class="text-base-content/60">Tool use</span>
+            <br />{@deployment.tool_use}
+          </div>
+          <div>
+            <span class="text-base-content/60">Context window</span>
+            <br />{@deployment.context_window || "—"}
+          </div>
+          <div>
+            <span class="text-base-content/60">Price input/output</span>
+            <br />{@deployment.price_input || "—"} / {@deployment.price_output || "—"}
+          </div>
+        </div>
+      </.card>
+    </div>
+    """
+  end
+
+  attr :events, :any, required: true
+
+  defp health_events(assigns) do
+    ~H"""
+    <.card variant="bordered">
+      <:title>Health transitions</:title>
+      Recent deployment health changes from probes and live dispatches.
+      <.table id="health-events" rows={@events}>
+        <:col :let={{_id, event}} label="When">{event.inserted_at}</:col>
+        <:col :let={{_id, event}} label="Provider">{event.provider && event.provider.name}</:col>
+        <:col :let={{_id, event}} label="Model">
+          {event.deployment && event.deployment.model_name}
+        </:col>
+        <:col :let={{_id, event}} label="Status">
+          <CompositeComponents.health_status status={to_string(event.status)} />
+        </:col>
+        <:col :let={{_id, event}} label="Source">{event.source}</:col>
+        <:col :let={{_id, event}} label="Latency">{latency(event.latency_ms)}</:col>
+        <:col :let={{_id, event}} label="Reason">{event.reason || "—"}</:col>
+      </.table>
+    </.card>
     """
   end
 

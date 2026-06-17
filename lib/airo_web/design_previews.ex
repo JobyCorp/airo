@@ -12,42 +12,93 @@ defmodule AiroWeb.DesignPreviews do
   don't collide with the imported component functions of the same name
   (e.g. `button` vs `button_preview`).
 
-  The previews call `JobyKit.CoreComponents` directly via the
-  `CoreComponents` alias so the rendered HTML matches what the manifest
-  declares — no dependency on the host's `<App>Web.CoreComponents`
-  resolution.
+  The previews call the registered component modules directly so the
+  rendered HTML matches what the manifest declares.
   """
 
   use AiroWeb, :html
 
-  alias JobyKit.CoreComponents
+  alias AiroWeb.CoreComponents
   alias AiroWeb.CompositeComponents
+  alias JobyKit.CoreComponents, as: JobyKitCoreComponents
 
   def button_preview(assigns) do
     ~H"""
     <div class="flex flex-wrap items-center gap-2">
-      <CoreComponents.button>Default</CoreComponents.button>
+      <CoreComponents.button>Secondary</CoreComponents.button>
       <CoreComponents.button variant="primary">Primary</CoreComponents.button>
+      <CoreComponents.button variant="ghost">Ghost</CoreComponents.button>
+      <CoreComponents.button variant="danger">Danger</CoreComponents.button>
       <CoreComponents.button size="sm">Small</CoreComponents.button>
       <CoreComponents.button size="lg">Large</CoreComponents.button>
     </div>
     """
   end
 
+  def icon_button_preview(assigns) do
+    ~H"""
+    <div class="flex flex-wrap items-center gap-2">
+      <CoreComponents.icon_button icon="hero-pencil-square" label="Edit" />
+      <CoreComponents.icon_button icon="hero-arrow-top-right-on-square" label="Open" />
+      <CoreComponents.icon_button icon="hero-trash" label="Delete" variant="danger" />
+    </div>
+    """
+  end
+
+  def checkbox_group_preview(assigns) do
+    assigns =
+      Map.put(
+        assigns,
+        :form,
+        Phoenix.Component.to_form(%{"capabilities" => ["chat"]}, as: :deployment)
+      )
+
+    ~H"""
+    <div class="max-w-3xl">
+      <CoreComponents.checkbox_group
+        field={@form[:capabilities]}
+        label="Capabilities"
+        options={[:chat, :embeddings, :rerank, :speech]}
+      />
+    </div>
+    """
+  end
+
+  def table_preview(assigns) do
+    assigns =
+      Map.put(assigns, :rows, [
+        %{id: 1, name: "BAAI/bge-m3", status: "up", latency: "38 ms"},
+        %{id: 2, name: "moondream:latest", status: "up", latency: "2560 ms"}
+      ])
+
+    ~H"""
+    <CoreComponents.table id="preview-models" rows={@rows}>
+      <:col :let={row} label="Model">
+        <div class="font-medium">{row.name}</div>
+      </:col>
+      <:col :let={row} label="Health">{row.status}</:col>
+      <:col :let={row} label="p95">{row.latency}</:col>
+      <:action :let={row}>
+        <CoreComponents.icon_button icon="hero-pencil-square" label={"Edit #{row.name}"} />
+      </:action>
+    </CoreComponents.table>
+    """
+  end
+
   def card_preview(assigns) do
     ~H"""
     <div class="grid gap-3 sm:grid-cols-2">
-      <CoreComponents.card>
+      <JobyKitCoreComponents.card>
         <:eyebrow>Bordered</:eyebrow>
         <:title>Default card</:title>
         Padded content surface backed by daisyUI's <code class="font-mono text-xs">card</code>.
         <:actions><CoreComponents.button>Action</CoreComponents.button></:actions>
-      </CoreComponents.card>
-      <CoreComponents.card variant="elevated">
+      </JobyKitCoreComponents.card>
+      <JobyKitCoreComponents.card variant="elevated">
         <:eyebrow>Elevated</:eyebrow>
         <:title>Card with shadow</:title>
         Lifts on hover via the wrapper's transition.
-      </CoreComponents.card>
+      </JobyKitCoreComponents.card>
     </div>
     """
   end
@@ -55,9 +106,9 @@ defmodule AiroWeb.DesignPreviews do
   def icon_preview(assigns) do
     ~H"""
     <div class="flex items-center gap-3 text-base-content/80">
-      <CoreComponents.icon name="hero-sparkles" />
-      <CoreComponents.icon name="hero-arrow-right" class="size-5" />
-      <CoreComponents.icon name="hero-bolt" class="size-7 text-primary" />
+      <JobyKitCoreComponents.icon name="hero-sparkles" />
+      <JobyKitCoreComponents.icon name="hero-arrow-right" class="size-5" />
+      <JobyKitCoreComponents.icon name="hero-bolt" class="size-7 text-primary" />
     </div>
     """
   end
@@ -69,8 +120,8 @@ defmodule AiroWeb.DesignPreviews do
 
     ~H"""
     <div class="flex max-w-md flex-col gap-3">
-      <CoreComponents.input field={@form[:email]} type="email" label="Email" />
-      <CoreComponents.input
+      <JobyKitCoreComponents.input field={@form[:email]} type="email" label="Email" />
+      <JobyKitCoreComponents.input
         name="bio"
         value=""
         type="textarea"
@@ -86,8 +137,8 @@ defmodule AiroWeb.DesignPreviews do
 
     ~H"""
     <div class="relative flex flex-col gap-2">
-      <CoreComponents.flash kind={:info} flash={@preview_flash} />
-      <CoreComponents.flash kind={:error} flash={@preview_flash} title="Heads up" />
+      <JobyKitCoreComponents.flash kind={:info} flash={@preview_flash} />
+      <JobyKitCoreComponents.flash kind={:error} flash={@preview_flash} title="Heads up" />
     </div>
     """
   end
@@ -119,6 +170,39 @@ defmodule AiroWeb.DesignPreviews do
         Connect your first integration to populate this dashboard.
       </CompositeComponents.empty_state>
     </div>
+    """
+  end
+
+  def page_header_preview(assigns) do
+    ~H"""
+    <CompositeComponents.page_header subtitle="Physical upstream model backends.">
+      <:crumb navigate="/admin/providers">Providers</:crumb>
+      <:actions>
+        <CoreComponents.button variant="primary" size="sm">New provider</CoreComponents.button>
+      </:actions>
+    </CompositeComponents.page_header>
+    """
+  end
+
+  def section_panel_preview(assigns) do
+    ~H"""
+    <CompositeComponents.section_panel>
+      <:title>Deployment copies</:title>
+      <div class="grid gap-3 sm:grid-cols-3">
+        <div class="rounded-md border border-base-content/10 bg-base-100/65 p-3 shadow-sm ring-1 ring-white/5">
+          <div class="text-xs uppercase tracking-wide text-base-content/50">Provider</div>
+          <div class="mt-1 font-semibold text-base-content">Ollama</div>
+        </div>
+        <div class="rounded-md border border-base-content/10 bg-base-100/65 p-3 shadow-sm ring-1 ring-white/5">
+          <div class="text-xs uppercase tracking-wide text-base-content/50">Health</div>
+          <div class="mt-1 font-semibold text-success">up</div>
+        </div>
+        <div class="rounded-md border border-base-content/10 bg-base-100/65 p-3 shadow-sm ring-1 ring-white/5">
+          <div class="text-xs uppercase tracking-wide text-base-content/50">p95</div>
+          <div class="mt-1 font-mono text-base-content">38 ms</div>
+        </div>
+      </div>
+    </CompositeComponents.section_panel>
     """
   end
 end

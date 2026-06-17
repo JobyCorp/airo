@@ -91,60 +91,76 @@ defmodule AiroWeb.AdminLiveTest do
 
   describe "providers" do
     test "create, list, and delete", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/admin/providers")
+      {:ok, view, _html} = live(conn, ~p"/admin/providers/new")
 
-      view |> element("button", "New provider") |> render_click()
-
-      html =
-        view
-        |> form("form",
-          provider: %{
-            name: "local-vllm",
-            adapter_type: "vllm",
-            base_url: "http://up/v1",
-            auth_kind: "none"
-          }
-        )
-        |> render_submit()
-
-      assert html =~ "local-vllm"
+      view
+      |> form("#provider-form",
+        provider: %{
+          name: "local-vllm",
+          adapter_type: "vllm",
+          base_url: "http://up/v1",
+          auth_kind: "none"
+        }
+      )
+      |> render_submit()
 
       provider = Config.get_provider_by_name("local-vllm")
-      view |> element("button[phx-value-id='#{provider.id}']", "Delete") |> render_click()
+      {path, _flash} = assert_redirect(view)
+      assert path == ~p"/admin/providers/#{provider.id}"
+
+      {:ok, view, html} = live(conn, ~p"/admin/providers")
+      assert html =~ "local-vllm"
+
+      view |> element("button[phx-value-id='#{provider.id}']") |> render_click()
       refute render(view) =~ "local-vllm"
     end
 
-    test "shows validation errors for an invalid provider", %{conn: conn} do
+    test "new provider link opens the routed create form", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/admin/providers")
-      view |> element("button", "New provider") |> render_click()
 
-      html = view |> form("form", provider: %{name: "", base_url: ""}) |> render_submit()
+      {:ok, _view, html} =
+        view
+        |> element("a", "New provider")
+        |> render_click()
+        |> follow_redirect(conn, ~p"/admin/providers/new")
+
+      assert html =~ "New provider"
+      assert html =~ "provider-form"
+    end
+
+    test "shows validation errors for an invalid provider", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/admin/providers/new")
+
+      html =
+        view |> form("#provider-form", provider: %{name: "", base_url: ""}) |> render_submit()
+
       assert html =~ "can&#39;t be blank" or html =~ "can't be blank"
     end
 
     test "creates an inline provider credential secret", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/admin/providers")
+      {:ok, view, _html} = live(conn, ~p"/admin/providers/new")
 
-      view |> element("button", "New provider") |> render_click()
-
-      html =
-        view
-        |> form("form",
-          provider: %{
-            name: "Unsloth test",
-            adapter_type: "unsloth",
-            base_url: "https://unsloth.local.joby.gg/v1",
-            auth_kind: "api_key",
-            new_credential_name: "Unsloth test API key",
-            new_credential_value: "secret-token"
-          }
-        )
-        |> render_submit()
+      view
+      |> form("#provider-form",
+        provider: %{
+          name: "Unsloth test",
+          adapter_type: "unsloth",
+          base_url: "https://unsloth.local.joby.gg/v1",
+          auth_kind: "api_key",
+          new_credential_name: "Unsloth test API key",
+          new_credential_value: "secret-token"
+        }
+      )
+      |> render_submit()
 
       provider = Config.get_provider_by_name("Unsloth test")
       secret = Config.get_secret_by_name("Unsloth test API key")
+      {path, _flash} = assert_redirect(view)
 
+      assert path == ~p"/admin/providers/#{provider.id}"
       assert provider.credential_id == secret.id
+
+      {:ok, _view, html} = live(conn, ~p"/admin/providers")
       assert html =~ "Unsloth test API key"
       refute html =~ "secret-token"
     end
@@ -189,14 +205,13 @@ defmodule AiroWeb.AdminLiveTest do
 
   describe "client keys" do
     test "minting shows the raw key once", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/admin/keys")
+      {:ok, view, _html} = live(conn, ~p"/admin/keys/new")
 
       html =
         view
-        |> form("form", client_key: %{name: "orchester", allowed_aliases: "*"})
+        |> form("#key-form", client_key: %{name: "orchester", allowed_aliases: "*"})
         |> render_submit()
 
-      assert html =~ "orchester"
       assert html =~ "airo_"
       assert Config.list_client_keys() |> Enum.any?(&(&1.name == "orchester"))
     end
@@ -211,20 +226,24 @@ defmodule AiroWeb.AdminLiveTest do
           capabilities: [:chat]
         })
 
-      {:ok, view, _html} = live(conn, ~p"/admin/aliases")
-
-      view |> element("button", "New alias") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/admin/aliases/new")
 
       view
-      |> form("form", alias: %{name: "chat-deep", capability: "chat", strategy: "priority"})
+      |> form("#alias-form",
+        alias: %{name: "chat-deep", capability: "chat", strategy: "priority"}
+      )
       |> render_submit()
 
       alias_ = Config.get_alias_by_name("chat-deep")
       assert alias_
+      {path, _flash} = assert_redirect(view)
+      assert path == ~p"/admin/aliases/#{alias_.id}/edit"
+
+      {:ok, view, _html} = live(conn, ~p"/admin/aliases/#{alias_.id}/edit")
 
       html =
         view
-        |> form("form[phx-submit=add_candidate]",
+        |> form("#alias-candidate-form",
           candidate: %{deployment_id: deployment.id, weight: "100", priority: "0"}
         )
         |> render_submit()
@@ -235,19 +254,30 @@ defmodule AiroWeb.AdminLiveTest do
   end
 
   describe "deployments" do
+    test "renders capabilities as visible checkbox choices", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/admin/deployments/new")
+
+      assert has_element?(view, "#deployment_capabilities-group")
+
+      assert has_element?(
+               view,
+               "input[type='checkbox'][name='deployment[capabilities][]'][value='chat']"
+             )
+
+      refute has_element?(view, "select[name='deployment[capabilities][]']")
+    end
+
     test "the model field becomes a picker of the provider's upstream models", %{conn: conn} do
       Req.Test.stub(Airo.TestStub, fn upstream ->
         Req.Test.json(upstream, %{"data" => [%{"id" => "qwen3.5-9b"}, %{"id" => "nomic-embed"}]})
       end)
 
       p = provider("vllm-models")
-      {:ok, view, _html} = live(conn, ~p"/admin/deployments")
-
-      view |> element("button", "New deployment") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/admin/deployments/new")
 
       html =
         view
-        |> form("form", deployment: %{provider_id: p.id})
+        |> form("#deployment-form", deployment: %{provider_id: p.id})
         |> render_change()
 
       assert html =~ ~s(<select)
@@ -261,11 +291,9 @@ defmodule AiroWeb.AdminLiveTest do
       end)
 
       p = provider("vllm-empty")
-      {:ok, view, _html} = live(conn, ~p"/admin/deployments")
+      {:ok, view, _html} = live(conn, ~p"/admin/deployments/new")
 
-      view |> element("button", "New deployment") |> render_click()
-
-      html = view |> form("form", deployment: %{provider_id: p.id}) |> render_change()
+      html = view |> form("#deployment-form", deployment: %{provider_id: p.id}) |> render_change()
       assert html =~ "reports no models"
     end
 
@@ -275,13 +303,11 @@ defmodule AiroWeb.AdminLiveTest do
       end)
 
       p = provider("vllm-down")
-      {:ok, view, _html} = live(conn, ~p"/admin/deployments")
-
-      view |> element("button", "New deployment") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/admin/deployments/new")
 
       html =
         view
-        |> form("form", deployment: %{provider_id: p.id})
+        |> form("#deployment-form", deployment: %{provider_id: p.id})
         |> render_change()
 
       assert html =~ "Couldn&#39;t reach the provider" or html =~ "Couldn't reach the provider"
@@ -297,23 +323,20 @@ defmodule AiroWeb.AdminLiveTest do
           status: :evaluating
         })
 
-      {:ok, view, _html} = live(conn, ~p"/admin/deployments")
+      {:ok, view, _html} = live(conn, ~p"/admin/deployments/new")
 
-      view |> element("button", "New deployment") |> render_click()
+      view
+      |> form("#deployment-form",
+        deployment: %{
+          provider_id: provider.id,
+          model_id: model.id,
+          model_name: "qwen3.5-9b",
+          capabilities: ["chat"]
+        }
+      )
+      |> render_submit()
 
-      html =
-        view
-        |> form("form",
-          deployment: %{
-            provider_id: provider.id,
-            model_id: model.id,
-            model_name: "qwen3.5-9b",
-            capabilities: ["chat"]
-          }
-        )
-        |> render_submit()
-
-      assert html =~ "qwen3.5-9b"
+      assert {_path, _flash} = assert_redirect(view)
       assert Config.list_deployments() |> Enum.any?(&(&1.model_id == model.id))
     end
   end
@@ -359,25 +382,28 @@ defmodule AiroWeb.AdminLiveTest do
     end
 
     test "creates model metadata from the shelf", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/admin/models")
+      {:ok, view, _html} = live(conn, ~p"/admin/models/new")
 
-      view |> element("button", "New model") |> render_click()
+      view
+      |> form("#model-form",
+        model: %{
+          display_name: "Mistral local",
+          upstream_model_id: "mistral-small",
+          family: "mistral",
+          version: "small",
+          status: "evaluating"
+        }
+      )
+      |> render_submit()
 
-      html =
-        view
-        |> form("#model-form",
-          model: %{
-            display_name: "Mistral local",
-            upstream_model_id: "mistral-small",
-            family: "mistral",
-            version: "small",
-            status: "evaluating"
-          }
-        )
-        |> render_submit()
+      model = Config.get_model_by_upstream_id("mistral-small")
+      {path, _flash} = assert_redirect(view)
 
+      assert path == ~p"/admin/models/#{model.id}"
+
+      {:ok, _view, html} = live(conn, path)
       assert html =~ "Mistral local"
-      assert Config.get_model_by_upstream_id("mistral-small")
+      assert model
     end
 
     test "syncs Ollama metadata into the model detail page", %{conn: conn} do
@@ -488,7 +514,7 @@ defmodule AiroWeb.AdminLiveTest do
 
       html =
         view
-        |> element("button[phx-value-id='gt_trace_target']", "Trace")
+        |> element("button[phx-value-id='gt_trace_target'][aria-label='Filter to this trace']")
         |> render_click()
 
       assert html =~ "gt_trace_target"
