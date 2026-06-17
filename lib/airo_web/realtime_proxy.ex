@@ -190,13 +190,29 @@ defmodule AiroWeb.RealtimeProxy do
   defp record_usage(%{usage_recorded: true}, _outcome), do: :ok
 
   defp record_usage(state, outcome) do
+    latency = System.monotonic_time(:millisecond) - state.started_at
+
+    Logger.info("gateway.realtime.closed",
+      gateway_trace_id: state[:trace_id],
+      client_key_id: state.client_key && state.client_key.id,
+      client_key_name: state.client_key && state.client_key.name,
+      request_model: state.model,
+      capability: state.target.capability,
+      provider: state.target.provider.name,
+      deployment_id: state.target.deployment.id,
+      model: state.target.deployment.model_name,
+      outcome: outcome,
+      latency_ms: latency
+    )
+
     Usage.record_async(%{
       client_key: state.client_key,
+      trace_id: state[:trace_id],
       served: %{deployment: state.target.deployment},
       alias_name: state.model,
       capability: state.target.capability,
       outcome: outcome,
-      latency_ms: System.monotonic_time(:millisecond) - state.started_at
+      latency_ms: latency
     })
   rescue
     # Usage accounting is best-effort — a recording failure must never tear down

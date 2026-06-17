@@ -22,6 +22,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
      |> assign(capabilities: Deployment.capabilities(), classes: Deployment.classes())
      |> assign(model_options: [], model_error: nil, models_provider_id: nil)
      |> assign(health: health_map(deployments))
+     |> stream(:health_events, Health.list_events(25))
      |> assign_providers()
      |> stream(:deployments, deployments)}
   end
@@ -34,6 +35,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
     {:noreply,
      socket
      |> assign(health: health_map(deployments))
+     |> stream(:health_events, Health.list_events(25), reset: true)
      |> stream(:deployments, deployments, reset: true)}
   end
 
@@ -243,8 +245,31 @@ defmodule AiroWeb.Admin.DeploymentLive do
             </.button>
           </:action>
         </.table>
+
+        <.card variant="bordered">
+          <:title>Health transitions</:title>
+          Recent deployment health changes from probes and live dispatches.
+          <.table id="health-events" rows={@streams.health_events}>
+            <:col :let={{_id, event}} label="When">{event.inserted_at}</:col>
+            <:col :let={{_id, event}} label="Provider">
+              {event.provider && event.provider.name}
+            </:col>
+            <:col :let={{_id, event}} label="Model">
+              {event.deployment && event.deployment.model_name}
+            </:col>
+            <:col :let={{_id, event}} label="Status">
+              <CompositeComponents.health_status status={to_string(event.status)} />
+            </:col>
+            <:col :let={{_id, event}} label="Source">{event.source}</:col>
+            <:col :let={{_id, event}} label="Latency">{latency(event.latency_ms)}</:col>
+            <:col :let={{_id, event}} label="Reason">{event.reason || "—"}</:col>
+          </.table>
+        </.card>
       </div>
     </Layouts.app>
     """
   end
+
+  defp latency(nil), do: "—"
+  defp latency(ms), do: "#{ms} ms"
 end

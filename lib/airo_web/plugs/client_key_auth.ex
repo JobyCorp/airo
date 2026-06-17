@@ -15,7 +15,7 @@ defmodule AiroWeb.Plugs.ClientKeyAuth do
 
   alias Airo.Config
   alias Airo.Config.ClientKey
-  alias AiroWeb.OpenAIError
+  alias AiroWeb.{GatewayUsage, OpenAIError}
 
   def init(opts), do: opts
 
@@ -37,6 +37,13 @@ defmodule AiroWeb.Plugs.ClientKeyAuth do
   end
 
   defp unauthorized(conn) do
+    GatewayUsage.record_error(
+      conn,
+      GatewayUsage.capability_for_path(conn.request_path),
+      :invalid_api_key,
+      request_model: request_model(conn)
+    )
+
     body =
       OpenAIError.body(
         "Invalid or missing client key.",
@@ -49,4 +56,8 @@ defmodule AiroWeb.Plugs.ClientKeyAuth do
     |> send_resp(401, Jason.encode!(body))
     |> halt()
   end
+
+  defp request_model(%Plug.Conn{params: %Plug.Conn.Unfetched{}}), do: nil
+  defp request_model(%Plug.Conn{params: params}) when is_map(params), do: params["model"]
+  defp request_model(_conn), do: nil
 end

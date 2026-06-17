@@ -4,6 +4,8 @@ defmodule Airo.GatewayFailoverTest do
   alias Airo.Config
   alias Airo.Gateway
   alias Airo.Health
+  alias Airo.Health.HealthEvent
+  alias Airo.Repo
 
   @completion %{
     "id" => "chatcmpl-1",
@@ -157,6 +159,12 @@ defmodule Airo.GatewayFailoverTest do
 
     assert Health.status(down.id) == :down
     assert Health.status(up.id) == :up
+
+    assert %HealthEvent{source: :dispatch, reason: "transport_econnrefused"} =
+             Repo.get_by(HealthEvent, deployment_id: down.id, status: :down)
+
+    assert %HealthEvent{source: :dispatch} =
+             Repo.get_by(HealthEvent, deployment_id: up.id, status: :up)
   end
 
   test "live health: a 4xx primary stays :up (reachable, not a host fault)" do
@@ -170,5 +178,8 @@ defmodule Airo.GatewayFailoverTest do
     assert {:error, {:http_error, 400, _}} = Gateway.run(plan)
 
     assert Health.status(down.id) == :up
+
+    assert %HealthEvent{source: :dispatch, reason: "http_400"} =
+             Repo.get_by(HealthEvent, deployment_id: down.id, status: :up)
   end
 end

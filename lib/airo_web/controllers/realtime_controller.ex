@@ -9,20 +9,34 @@ defmodule AiroWeb.RealtimeController do
   use AiroWeb, :controller
 
   alias Airo.Realtime
-  alias AiroWeb.{GatewayError, GatewayHeaders, RealtimeProxy}
+  alias AiroWeb.{GatewayError, GatewayHeaders, GatewayUsage, RealtimeProxy}
 
   def connect(conn, params) do
+    started = System.monotonic_time(:millisecond)
     model = params["model"]
     intent = params["intent"] || "transcription"
 
     cond do
       model in [nil, ""] ->
+        GatewayUsage.record_error(conn, :transcription, :missing_model,
+          request_model: model,
+          latency_ms: System.monotonic_time(:millisecond) - started
+        )
+
         GatewayError.send_error(conn, :missing_model)
 
       true ->
         case Realtime.resolve(model, conn.assigns.client_key, intent) do
-          {:ok, target} -> upgrade(conn, model, target)
-          {:error, reason} -> GatewayError.send_error(conn, reason)
+          {:ok, target} ->
+            upgrade(conn, model, target)
+
+          {:error, reason} ->
+            GatewayUsage.record_error(conn, :transcription, reason,
+              request_model: model,
+              latency_ms: System.monotonic_time(:millisecond) - started
+            )
+
+            GatewayError.send_error(conn, reason)
         end
     end
   end
@@ -38,6 +52,7 @@ defmodule AiroWeb.RealtimeController do
     %{
       target: target,
       client_key: conn.assigns.client_key,
+      trace_id: conn.assigns.gateway_trace_id,
       model: model,
       started_at: System.monotonic_time(:millisecond),
       conn: nil,

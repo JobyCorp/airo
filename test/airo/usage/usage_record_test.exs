@@ -4,16 +4,21 @@ defmodule Airo.Usage.UsageRecordTest do
   alias Airo.Usage
   alias Airo.Usage.UsageRecord
 
-  @valid %{capability: :chat, outcome: :success, tokens_in: 12, tokens_out: 34}
+  @valid %{
+    trace_id: "gt_test",
+    capability: :chat,
+    outcome: :success,
+    tokens_in: 12,
+    tokens_out: 34
+  }
 
   describe "changeset/2" do
     test "is valid with required fields" do
       assert UsageRecord.changeset(%UsageRecord{}, @valid).valid?
     end
 
-    test "requires capability and outcome" do
+    test "requires outcome" do
       errors = errors_on(UsageRecord.changeset(%UsageRecord{}, %{}))
-      assert "can't be blank" in errors.capability
       assert "can't be blank" in errors.outcome
     end
 
@@ -31,6 +36,7 @@ defmodule Airo.Usage.UsageRecordTest do
   describe "record_usage/1" do
     test "persists a record without requiring a deployment or client key" do
       assert {:ok, record} = Usage.record_usage(@valid)
+      assert record.trace_id == "gt_test"
       assert record.alias_name == nil
       assert record.outcome == :success
     end

@@ -67,16 +67,30 @@ defmodule Airo.Health.Prober do
     ctx = Context.new(provider, opts: [req_options: [receive_timeout: timeout_ms]])
 
     started = System.monotonic_time(:millisecond)
-    {status, latency} = classify(Transport.get(ctx, "/models"), started)
+    {status, latency, reason} = classify(Transport.get(ctx, "/models"), started)
 
-    for deployment <- provider.deployments, do: Airo.Health.mark(deployment.id, status, latency)
+    for deployment <- provider.deployments do
+      Airo.Health.mark_deployment(deployment, provider, status,
+        latency_ms: latency,
+        source: :probe,
+        reason: reason
+      )
+    end
+
     status
   end
 
   defp classify({:ok, %{status: code}}, started) when code < 500,
-    do: {:up, System.monotonic_time(:millisecond) - started}
+    do: {:up, System.monotonic_time(:millisecond) - started, nil}
 
-  defp classify(_other, _started), do: {:down, nil}
+  defp classify({:ok, %{status: code}}, _started), do: {:down, nil, "http_#{code}"}
+
+  defp classify({:error, reason}, _started), do: {:down, nil, reason_code(reason)}
+  defp classify(_other, _started), do: {:down, nil, "probe_failed"}
+
+  defp reason_code(%{reason: reason}), do: "transport_#{reason}"
+  defp reason_code(reason) when is_atom(reason), do: "transport_#{reason}"
+  defp reason_code(_reason), do: "transport_error"
 
   defp config do
     opts = Application.get_env(:airo, __MODULE__, [])

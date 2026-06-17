@@ -10,6 +10,8 @@ defmodule AiroWeb.Admin.HealthColumnTest do
 
   alias Airo.Config
   alias Airo.Health
+  alias Airo.Health.HealthEvent
+  alias Airo.Repo
 
   setup do
     {:ok, p} =
@@ -33,6 +35,27 @@ defmodule AiroWeb.Admin.HealthColumnTest do
     assert html =~ "Health"
     assert html =~ "AiroWeb.CompositeComponents.health_status"
     assert html =~ "text-error"
+  end
+
+  test "deployments admin renders recent health transitions", %{
+    conn: conn,
+    provider: p,
+    deployment: d
+  } do
+    {:ok, _event} =
+      Repo.insert(%HealthEvent{
+        provider_id: p.id,
+        deployment_id: d.id,
+        status: :down,
+        source: :probe,
+        reason: "http_500"
+      })
+
+    {:ok, view, html} = live(conn, "/admin/deployments")
+
+    assert has_element?(view, "#health-events")
+    assert html =~ "Health transitions"
+    assert html =~ "http_500"
   end
 
   test "providers admin aggregates deployment health to up", %{conn: conn, deployment: d} do

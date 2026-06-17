@@ -12,23 +12,22 @@ defmodule AiroWeb.ChatController do
   use AiroWeb, :controller
 
   alias Airo.Gateway
-  alias AiroWeb.{GatewayError, GatewayUsage}
+  alias AiroWeb.{GatewayError, GatewayTrace, GatewayUsage}
 
   def create(conn, params) do
+    started = System.monotonic_time(:millisecond)
     capability = if streaming?(params), do: :stream, else: :chat
 
     case Gateway.resolve(params, conn.assigns.client_key, capability) do
-      {:ok, plan} when capability == :stream -> stream_completion(conn, plan)
-      {:ok, plan} -> chat_completion(conn, plan)
-      {:error, reason} -> send_error(conn, reason)
+      {:ok, plan} when capability == :stream -> stream_completion(conn, plan, started)
+      {:ok, plan} -> chat_completion(conn, plan, started)
+      {:error, reason} -> send_error(conn, reason, :chat, params["model"], started)
     end
   end
 
   defp streaming?(params), do: params["stream"] == true
 
-  defp chat_completion(conn, plan) do
-    started = System.monotonic_time(:millisecond)
-
+  defp chat_completion(conn, plan, started) do
     case Gateway.run(plan) do
       {:ok, response, info} ->
         latency = System.monotonic_time(:millisecond) - started
@@ -42,17 +41,16 @@ defmodule AiroWeb.ChatController do
         |> json(response)
 
       {:error, reason} ->
-        send_error(conn, reason)
+        send_error(conn, reason, plan.usage_capability, plan.model, started)
     end
   end
 
-  defp stream_completion(conn, plan) do
+  defp stream_completion(conn, plan, started) do
     # Up-front headers reflect the routing primary; the authoritative served
     # candidate (after any failover) lands in the trailing metadata event. The
     # response is not committed until the first delta is chunked, so a pre-byte
     # failover (or total failure) can still return a clean HTTP status.
     conn = put_gateway_headers(conn, hd(plan.attempts), [])
-    started = System.monotonic_time(:millisecond)
 
     case Gateway.run_stream(plan, conn, &sse_delta/2, &committed?/1) do
       {:ok, conn, info} ->
@@ -64,6 +62,7 @@ defmodule AiroWeb.ChatController do
             fallback_used: info.fallback_used,
             latency_ms: latency
           )
+          |> GatewayTrace.put_meta(GatewayTrace.conn_trace_id(conn))
 
         conn = ensure_chunked(conn)
         {:ok, conn} = sse_event(conn, "gateway.metadata", meta)
@@ -72,13 +71,18 @@ defmodule AiroWeb.ChatController do
 
       {:partial_error, reason, conn} ->
         # Output already began — finish with a terminal error event.
+        GatewayUsage.record_error(conn, plan.usage_capability, reason,
+          request_model: plan.model,
+          latency_ms: System.monotonic_time(:millisecond) - started
+        )
+
         {:ok, conn} = sse_event(conn, "gateway.error", error_meta(reason))
         {:ok, conn} = chunk(conn, "data: [DONE]\n\n")
         conn
 
       {:error, reason, _conn} ->
         # Every attempt failed before emitting anything; nothing is committed.
-        send_error(conn, reason)
+        send_error(conn, reason, plan.usage_capability, plan.model, started)
     end
   end
 
@@ -113,15 +117,28 @@ defmodule AiroWeb.ChatController do
     |> put_resp_header("x-gateway-model", meta["model"])
     |> put_resp_header("x-gateway-deployment", to_string(meta["deployment_id"]))
     |> put_resp_header("x-gateway-fallback", to_string(meta["fallback_used"]))
+    |> maybe_trace_header(GatewayTrace.conn_trace_id(conn))
     |> maybe_latency_header(meta["latency_ms"])
   end
+
+  defp maybe_trace_header(conn, nil), do: conn
+
+  defp maybe_trace_header(conn, trace_id),
+    do: put_resp_header(conn, "x-gateway-trace-id", trace_id)
 
   defp maybe_latency_header(conn, nil), do: conn
 
   defp maybe_latency_header(conn, ms),
     do: put_resp_header(conn, "x-gateway-latency-ms", to_string(ms))
 
-  defp send_error(conn, reason), do: GatewayError.send_error(conn, reason)
+  defp send_error(conn, reason, capability, model, started) do
+    GatewayUsage.record_error(conn, capability, reason,
+      request_model: model,
+      latency_ms: System.monotonic_time(:millisecond) - started
+    )
+
+    GatewayError.send_error(conn, reason)
+  end
 
   defp error_meta({:transport_error, _}), do: %{"error" => "upstream_unavailable"}
 

@@ -10,8 +10,8 @@ defmodule AiroWeb.CompositeComponents do
   Every composite follows the JobyKit wrapper contract:
 
     1. Declare every prop with `attr` (use `values:` for variant enums).
-    2. Carry `data-component="AiroWeb.CompositeComponents.<name>"`
-       on the root element.
+    2. Carry a `data-component` attribute naming the module and function on the
+       root element.
     3. Accept `attr :rest, :global` for id/class/aria-*/phx-* pass-through.
     4. Internals compose `JobyKit.CoreComponents` (or other registered
        wrappers) — never raw `<button>`/`<input>`/`<textarea>`.

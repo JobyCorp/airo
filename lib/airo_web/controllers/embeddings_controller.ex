@@ -22,7 +22,13 @@ defmodule AiroWeb.EmbeddingsController do
       |> GatewayHeaders.put(info.served, fallback_used: info.fallback_used, latency_ms: latency)
       |> json(response)
     else
-      {:error, reason} -> GatewayError.send_error(conn, reason)
+      {:error, reason} ->
+        GatewayUsage.record_error(conn, :embeddings, reason,
+          request_model: params["model"],
+          latency_ms: System.monotonic_time(:millisecond) - started
+        )
+
+        GatewayError.send_error(conn, reason)
     end
   end
 end
