@@ -8,14 +8,14 @@ defmodule Airo.Registry do
   so callers fail loudly rather than silently mis-dispatching.
   """
 
-  alias Airo.Adapters.{Anthropic, Infinity, LMStudio, Ollama, OpenAICompatible, VLLM}
+  alias Airo.Adapters.{Anthropic, Infinity, LMStudio, Ollama, OpenAICompatible, Speaches, VLLM}
 
   @adapters %{
     openai: OpenAICompatible,
     vllm: VLLM,
     ollama: Ollama,
     lmstudio: LMStudio,
-    speaches: OpenAICompatible,
+    speaches: Speaches,
     anthropic: Anthropic,
     infinity: Infinity
   }

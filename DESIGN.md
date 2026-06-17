@@ -292,9 +292,10 @@ via `route.binding` when it needs strict-selection behavior.
   catalog/runtime/load-state discovery; vLLM uses `/v1/models` plus Prometheus
   `/metrics` for served-model/context/runtime posture. Infinity uses `/models`
   plus `/metrics` for embeddings/rerank/classify metadata, queue stats, backend,
-  and endpoint posture. Speaches is the remaining local specialized service for
-  speech/transcription/audio latency posture. Cloud providers remain
-  catalog-only/backlog for model management.
+  and endpoint posture. Speaches uses `/v1/models`, `/v1/models/{id}`, and
+  `/api/ps` for speech/transcription task, language, voice, sample-rate, and
+  loaded-model metadata. Cloud providers remain catalog-only/backlog for model
+  management.
 - **Transparency**: `x-gateway-*` headers + SSE trailing event (see §5.1).
 - Rate limits: **v2**.
 

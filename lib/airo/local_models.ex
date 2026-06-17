@@ -105,6 +105,7 @@ defmodule Airo.LocalModels do
       "max_context_window" => inspected[:max_context_window],
       "publisher" => inspected[:publisher],
       "type" => inspected[:type],
+      "task" => inspected[:task],
       "root" => inspected[:root],
       "owned_by" => inspected[:owned_by],
       "created" => inspected[:created],
@@ -122,6 +123,12 @@ defmodule Airo.LocalModels do
       "variants" => inspected[:variants],
       "selected_variant" => inspected[:selected_variant],
       "description" => inspected[:description],
+      "languages" => inspected[:languages],
+      "language_count" => inspected[:language_count],
+      "sample_rate" => inspected[:sample_rate],
+      "voices" => inspected[:voices],
+      "voice_count" => inspected[:voice_count],
+      "voice_languages" => inspected[:voice_languages],
       "stats" => inspected[:stats],
       "queue_fraction" => inspected[:queue_fraction],
       "queue_absolute" => inspected[:queue_absolute],
@@ -151,6 +158,8 @@ defmodule Airo.LocalModels do
       model["selected_variant"] == model_name or
       model[:root] == model_name or
       model["root"] == model_name or
+      model[:task] == model_name or
+      model["task"] == model_name or
       model_name in (model[:variants] || model["variants"] || []) or
       Enum.any?(model[:loaded_instances] || model["loaded_instances"] || [], fn instance ->
         instance[:id] == model_name or instance["id"] == model_name

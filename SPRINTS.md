@@ -164,7 +164,8 @@ posture across many local machines.
      with last sync status/error on the deployment row
   4. Infinity: embeddings/rerank/classify model metadata, queue stats, backend,
      and endpoint metrics implemented
-  5. Speaches: speech/transcription model metadata and audio-specific latency posture
+  5. Speaches: speech/transcription model metadata, language/voice/sample-rate
+     inventory, and loaded-model runtime state implemented
   6. Provider pages: local runtime inventory and currently loaded/running models,
      so machine-level capacity and duplicate failover copies are visible
   7. Evaluation layer: compare provider copy/version cohorts using existing

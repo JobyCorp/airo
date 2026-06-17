@@ -350,6 +350,13 @@ defmodule AiroWeb.Admin.ModelLive do
           </:col>
           <:col :let={row} label="Batch">{metadata_value(row.deployment, "batch_size")}</:col>
           <:col :let={row} label="Queue">{metadata_value(row.deployment, "queue_absolute")}</:col>
+          <:col :let={row} label="Languages">
+            {metadata_value(row.deployment, "language_count")}
+          </:col>
+          <:col :let={row} label="Voices">{metadata_value(row.deployment, "voice_count")}</:col>
+          <:col :let={row} label="Sample rate">
+            {metadata_value(row.deployment, "sample_rate")}
+          </:col>
           <:col :let={row} label="Running">{running_label(row.deployment)}</:col>
         </.table>
       </.card>

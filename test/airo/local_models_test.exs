@@ -136,6 +136,29 @@ defmodule Airo.LocalModelsTest do
     end)
   end
 
+  defp stub_speaches_native do
+    Req.Test.stub(Airo.TestStub, fn
+      %{request_path: "/v1/models/speaches-ai%2FKokoro-82M-v1.0-ONNX"} = conn ->
+        Req.Test.json(conn, %{
+          "id" => "speaches-ai/Kokoro-82M-v1.0-ONNX",
+          "created" => 1_778_979_749,
+          "object" => "model",
+          "owned_by" => "speaches-ai",
+          "language" => ["multilingual"],
+          "task" => "text-to-speech",
+          "sample_rate" => 24_000,
+          "voices" => [
+            %{"name" => "af_heart", "language" => "en-us", "gender" => "female"},
+            %{"name" => "am_echo", "language" => "en-us", "gender" => "male"},
+            %{"name" => "jf_alpha", "language" => "ja", "gender" => "female"}
+          ]
+        })
+
+      %{request_path: "/api/ps"} = conn ->
+        Req.Test.json(conn, %{"models" => ["speaches-ai/Kokoro-82M-v1.0-ONNX"]})
+    end)
+  end
+
   test "reports local management capabilities for Ollama providers" do
     {:ok, provider} =
       Config.create_provider(%{
@@ -192,6 +215,22 @@ defmodule Airo.LocalModelsTest do
         name: "infinity-mini",
         adapter_type: :infinity,
         base_url: "http://infinity:7997",
+        auth_kind: :none
+      })
+
+    assert LocalModels.capabilities(provider) == [
+             :catalog,
+             :inspect_model,
+             :runtime_info
+           ]
+  end
+
+  test "reports read-only local management capabilities for Speaches providers" do
+    {:ok, provider} =
+      Config.create_provider(%{
+        name: "speaches-mini",
+        adapter_type: :speaches,
+        base_url: "http://speaches:8000/v1",
         auth_kind: :none
       })
 
@@ -358,5 +397,40 @@ defmodule Airo.LocalModelsTest do
 
     model = Config.get_model!(deployment.model_id)
     assert model.family == "bge"
+  end
+
+  test "sync_deployment/1 stores Speaches audio model metadata" do
+    stub_speaches_native()
+
+    {:ok, provider} =
+      Config.create_provider(%{
+        name: "speaches-mini",
+        adapter_type: :speaches,
+        base_url: "http://speaches:8000/v1",
+        auth_kind: :none
+      })
+
+    {:ok, deployment} =
+      Config.create_deployment(%{
+        provider_id: provider.id,
+        model_name: "speaches-ai/Kokoro-82M-v1.0-ONNX",
+        capabilities: [:speech]
+      })
+
+    assert {:ok, synced} = LocalModels.sync_deployment(deployment)
+
+    assert synced.provider_metadata["provider_type"] == "speaches"
+    assert synced.provider_metadata["type"] == "speech"
+    assert synced.provider_metadata["task"] == "text-to-speech"
+    assert synced.provider_metadata["owned_by"] == "speaches-ai"
+    assert synced.provider_metadata["family"] == "kokoro"
+    assert synced.provider_metadata["sample_rate"] == 24_000
+    assert synced.provider_metadata["language_count"] == 1
+    assert synced.provider_metadata["voice_count"] == 3
+    assert synced.provider_metadata["voice_languages"] == ["en-us", "ja"]
+    assert synced.provider_metadata["running"] == true
+
+    model = Config.get_model!(deployment.model_id)
+    assert model.family == "kokoro"
   end
 end
