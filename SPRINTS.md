@@ -157,13 +157,16 @@ posture across many local machines.
 - Local-provider follow-up blueprint:
   1. LM Studio: catalog + runtime/download metadata implemented; load/unload UI
      remains a later control surface
-  2. vLLM: runtime/version, served-model metadata, tokenizer/context details,
-     and metrics endpoints where available; no pull/install workflow assumed
+  2. vLLM: served-model metadata, context length, conservative family/size/
+     quantization derivation, and selected Prometheus runtime metrics
+     implemented; no pull/install workflow assumed
   3. Background sync: scheduled metadata refresh per enabled local deployment,
      with last sync status/error on the deployment row
-  4. Provider pages: local runtime inventory and currently loaded/running models,
+  4. Infinity: embeddings/rerank/classify model metadata and performance posture
+  5. Speaches: speech/transcription model metadata and audio-specific latency posture
+  6. Provider pages: local runtime inventory and currently loaded/running models,
      so machine-level capacity and duplicate failover copies are visible
-  5. Evaluation layer: compare provider copy/version cohorts using existing
+  7. Evaluation layer: compare provider copy/version cohorts using existing
      `UsageRecord` latency/error/fallback/cost groups before adding subjective
      quality scoring
 - **DoD extra:** given two deployments of the same model on different providers,

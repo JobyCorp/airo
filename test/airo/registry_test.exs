@@ -1,16 +1,17 @@
 defmodule Airo.RegistryTest do
   use ExUnit.Case, async: true
 
-  alias Airo.Adapters.{LMStudio, Ollama, OpenAICompatible}
+  alias Airo.Adapters.{LMStudio, Ollama, OpenAICompatible, VLLM}
   alias Airo.Registry
 
   test "fetch/1 maps OpenAI-compatible types to the shared adapter" do
-    for type <- [:openai, :vllm, :speaches] do
+    for type <- [:openai, :speaches] do
       assert Registry.fetch(type) == {:ok, OpenAICompatible}
     end
   end
 
   test "fetch/1 maps the bespoke adapters" do
+    assert Registry.fetch(:vllm) == {:ok, VLLM}
     assert Registry.fetch(:ollama) == {:ok, Ollama}
     assert Registry.fetch(:lmstudio) == {:ok, LMStudio}
     assert Registry.fetch(:anthropic) == {:ok, Airo.Adapters.Anthropic}
@@ -22,7 +23,7 @@ defmodule Airo.RegistryTest do
   end
 
   test "fetch!/1 raises for unknown types" do
-    assert Registry.fetch!(:vllm) == OpenAICompatible
+    assert Registry.fetch!(:vllm) == VLLM
 
     assert_raise ArgumentError, ~r/no adapter for :nonsense/, fn ->
       Registry.fetch!(:nonsense)
