@@ -288,9 +288,10 @@ via `route.binding` when it needs strict-selection behavior.
   `quantization`, `architecture`, `context_window`, `runtime_version`,
   `running`, and raw inspect/runtime payloads) while updating the shared model
   identity only for stable metadata such as family, quantization, and size.
-  LM Studio follows with catalog/runtime/load-state discovery; vLLM follows with
-  served-model/runtime/tokenizer/metrics metadata. Cloud providers remain
-  catalog-only/backlog for model management.
+  LM Studio uses its native `/api/v1/models` and download endpoints for
+  catalog/runtime/load-state discovery; vLLM follows with served-model/runtime/
+  tokenizer/metrics metadata. Cloud providers remain catalog-only/backlog for
+  model management.
 - **Transparency**: `x-gateway-*` headers + SSE trailing event (see §5.1).
 - Rate limits: **v2**.
 

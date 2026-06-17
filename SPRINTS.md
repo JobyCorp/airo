@@ -155,8 +155,8 @@ posture across many local machines.
   quantization from native inspect output, and surface runtime/version/family/
   parameter/quantization/context/running details beside performance rows
 - Local-provider follow-up blueprint:
-  1. LM Studio: catalog + runtime/version first, then load/unload/download state
-     if exposed by the local server API
+  1. LM Studio: catalog + runtime/download metadata implemented; load/unload UI
+     remains a later control surface
   2. vLLM: runtime/version, served-model metadata, tokenizer/context details,
      and metrics endpoints where available; no pull/install workflow assumed
   3. Background sync: scheduled metadata refresh per enabled local deployment,

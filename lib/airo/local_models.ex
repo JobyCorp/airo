@@ -102,10 +102,21 @@ defmodule Airo.LocalModels do
       "parameter_size" => inspected[:parameter_size],
       "architecture" => inspected[:architecture],
       "context_window" => inspected[:context_window],
+      "max_context_window" => inspected[:max_context_window],
+      "publisher" => inspected[:publisher],
+      "type" => inspected[:type],
       "modelfile" => inspected[:modelfile],
       "template" => inspected[:template],
       "parameters" => inspected[:parameters],
       "license" => inspected[:license],
+      "loaded_instances" => inspected[:loaded_instances],
+      "capabilities" => inspected[:capabilities],
+      "vision" => inspected[:vision],
+      "trained_for_tool_use" => inspected[:trained_for_tool_use],
+      "reasoning" => inspected[:reasoning],
+      "variants" => inspected[:variants],
+      "selected_variant" => inspected[:selected_variant],
+      "description" => inspected[:description],
       "runtime_version" => runtime[:version],
       "running" => running?(runtime, deployment.model_name),
       "raw" => %{
@@ -117,10 +128,21 @@ defmodule Airo.LocalModels do
   end
 
   defp running?(%{running: running}, model_name) when is_list(running) do
-    Enum.any?(running, &(&1[:id] == model_name || &1["id"] == model_name))
+    Enum.any?(running, &running_model_match?(&1, model_name))
   end
 
   defp running?(_runtime, _model_name), do: false
+
+  defp running_model_match?(model, model_name) do
+    model[:id] == model_name or
+      model["id"] == model_name or
+      model[:selected_variant] == model_name or
+      model["selected_variant"] == model_name or
+      model_name in (model[:variants] || model["variants"] || []) or
+      Enum.any?(model[:loaded_instances] || model["loaded_instances"] || [], fn instance ->
+        instance[:id] == model_name or instance["id"] == model_name
+      end)
+  end
 
   defp drop_empty(map) do
     Map.reject(map, fn {_key, value} -> value in [nil, "", []] end)
