@@ -146,6 +146,10 @@ posture across many local machines.
 - Keep routing source-of-truth explicit: aliases still route traffic, but model
   pages expose which aliases/candidates currently lean on each model and where
   duplicate deployments provide failover
+- Local provider management first: add a provider-specific management contract
+  for local runtimes, implement Ollama native catalog/inspect/pull/runtime info,
+  then follow with LM Studio and vLLM runtime metadata; remote/cloud provider
+  management stays backlog
 - **DoD extra:** given two deployments of the same model on different providers,
   the shelf shows them as one model with separate operational rows and aggregate
   performance; updating a model version creates visible before/after comparison

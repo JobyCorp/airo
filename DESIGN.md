@@ -280,6 +280,10 @@ via `route.binding` when it needs strict-selection behavior.
   transitions, alias participation, and version-performance groups. Routing
   remains explicit in Alias; the shelf explains which models are safe to lean on
   and whether version changes improved observed behavior.
+- **Local provider management**: provider-specific management APIs are focused
+  on local runtimes first. Ollama exposes native catalog/inspect/pull/runtime
+  APIs; LM Studio and vLLM runtime metadata follow. Cloud providers remain
+  catalog-only/backlog for model management.
 - **Transparency**: `x-gateway-*` headers + SSE trailing event (see §5.1).
 - Rate limits: **v2**.
 
