@@ -282,6 +282,32 @@ defmodule AiroWeb.Admin.ModelLive do
         <p :if={@detail.model.notes} class="mt-4 text-sm">{@detail.model.notes}</p>
       </.card>
 
+      <.card :if={@detail.leading_deployment} variant="bordered">
+        <:title>Deployment guidance</:title>
+        <div class="grid gap-4 text-sm md:grid-cols-2 xl:grid-cols-5">
+          <div>
+            <span class="text-base-content/60">Recommendation</span>
+            <br />{@detail.leading_deployment.recommendation}
+          </div>
+          <div>
+            <span class="text-base-content/60">Provider</span>
+            <br />{@detail.leading_deployment.provider && @detail.leading_deployment.provider.name}
+          </div>
+          <div>
+            <span class="text-base-content/60">Model id</span>
+            <br />{@detail.leading_deployment.deployment.model_name}
+          </div>
+          <div>
+            <span class="text-base-content/60">Score</span>
+            <br />{@detail.leading_deployment.guidance_score}/100
+          </div>
+          <div>
+            <span class="text-base-content/60">Reason</span>
+            <br />{@detail.leading_deployment.guidance_reason}
+          </div>
+        </div>
+      </.card>
+
       <.card variant="bordered">
         <:title>Version performance</:title>
         <.table id="model-versions" rows={@detail.version_summaries}>
@@ -306,6 +332,9 @@ defmodule AiroWeb.Admin.ModelLive do
           <:col :let={row} label="Health">
             <CompositeComponents.health_status status={to_string(row.health)} />
           </:col>
+          <:col :let={row} label="Use">{row.recommendation}</:col>
+          <:col :let={row} label="Score">{row.guidance_score}/100</:col>
+          <:col :let={row} label="Reason">{row.guidance_reason}</:col>
           <:col :let={row} label="Enabled">{row.deployment.enabled}</:col>
           <:col :let={row} label="Capabilities">{join_values(row.deployment.capabilities)}</:col>
           <:col :let={row} label="Requests">{row.requests}</:col>

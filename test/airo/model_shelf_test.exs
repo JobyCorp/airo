@@ -97,6 +97,13 @@ defmodule Airo.ModelShelfTest do
 
     detail = ModelShelf.get_detail!(summary.model.id)
     assert length(detail.deployment_summaries) == 2
+    assert detail.leading_deployment.deployment.id == d1.id
+    assert detail.leading_deployment.recommendation == "Lean on"
+    assert detail.leading_deployment.guidance_score > 80
+
+    assert Enum.map(detail.deployment_summaries, & &1.deployment.id) == [d1.id, d2.id]
+    assert Enum.map(detail.deployment_summaries, & &1.recommendation) == ["Lean on", "Avoid"]
+
     assert detail.version_summaries |> Enum.map(& &1.version) |> Enum.sort() == ["v1", "v2"]
     assert [%{alias: %{name: "chat-deep"}}] = detail.aliases
 
