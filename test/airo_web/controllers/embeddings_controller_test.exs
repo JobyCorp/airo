@@ -23,7 +23,7 @@ defmodule AiroWeb.EmbeddingsControllerTest do
       Config.create_deployment(%{
         provider_id: provider.id,
         model_name: "bge-m3",
-        capability: :embeddings
+        capabilities: [:embeddings]
       })
 
     {:ok, _} =

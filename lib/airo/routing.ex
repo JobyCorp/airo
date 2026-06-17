@@ -7,6 +7,8 @@ defmodule Airo.Routing do
   Ordering rules, in effect:
 
     - **Enabled only** — disabled deployments/providers are dropped.
+    - **Capability** — only deployments whose `capabilities` include the requested
+      resource survive (skipped when no capability is passed).
     - **Route filters** — `route.class` and `route.tools` narrow the candidates.
     - **Strategy** — `:priority` (lowest first), `:weighted` (Efraimidis–Spirakis
       weighted shuffle), or `:round_robin` (rotated each call via an ETS counter).
@@ -29,13 +31,15 @@ defmodule Airo.Routing do
 
   @doc """
   Ordered candidates for an alias under `route` (a string-keyed map; `%{}` for
-  none). See the moduledoc for the ordering and the strict-pin behavior.
+  none), filtered to deployments whose `capabilities` include `capability` (the
+  resource being requested; pass `nil` to skip the capability filter). See the
+  moduledoc for the ordering and the strict-pin behavior.
   """
-  @spec candidates(Airo.Config.Alias.t(), map()) ::
+  @spec candidates(Airo.Config.Alias.t(), map(), atom() | nil) ::
           {:ok, [candidate()]} | {:error, :no_deployment | :selected_binding_unavailable}
-  def candidates(alias_, route) when is_map(route) do
+  def candidates(alias_, route, capability \\ nil) when is_map(route) do
     case route["binding"] do
-      nil -> chained_candidates(alias_, route)
+      nil -> chained_candidates(alias_, route, capability)
       binding -> pinned_candidate(alias_, binding)
     end
   end
@@ -70,12 +74,12 @@ defmodule Airo.Routing do
 
   ## Strategy + fallback chain
 
-  defp chained_candidates(alias_, route) do
+  defp chained_candidates(alias_, route, capability) do
     fallback_names = route["fallback"] || alias_.fallback
 
     ordered =
       [alias_ | fallback_aliases(fallback_names)]
-      |> Enum.flat_map(&ordered_alias_candidates(&1, route))
+      |> Enum.flat_map(&ordered_alias_candidates(&1, route, capability))
       |> Enum.uniq_by(& &1.deployment.id)
 
     case ordered do
@@ -84,11 +88,12 @@ defmodule Airo.Routing do
     end
   end
 
-  # Returns AliasCandidate structs (carrying weight/priority), filtered + ordered
-  # by strategy, then stably re-sorted by health preference.
-  defp ordered_alias_candidates(alias_, route) do
+  # Returns AliasCandidate structs (carrying weight/priority), filtered by
+  # capability + route, ordered by strategy, then stably re-sorted by health.
+  defp ordered_alias_candidates(alias_, route, capability) do
     alias_
     |> enabled_candidates()
+    |> filter_capability(capability)
     |> filter_route(route)
     |> strategy_order(alias_)
     |> Enum.sort_by(&health_rank(&1.deployment.id))
@@ -101,6 +106,13 @@ defmodule Airo.Routing do
   defp fallback_aliases(_), do: []
 
   ## Filters
+
+  # Capability is the resource the client requested; keep only deployments whose
+  # capability set serves it. `nil` skips the filter (e.g. strict pins).
+  defp filter_capability(candidates, nil), do: candidates
+
+  defp filter_capability(candidates, capability),
+    do: Enum.filter(candidates, &(capability in &1.deployment.capabilities))
 
   defp filter_route(candidates, route) do
     candidates

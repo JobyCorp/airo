@@ -22,8 +22,9 @@ defmodule AiroWeb.RealtimeProxyTest do
       port: @port,
       path: "/realtime?model=echo&intent=transcription",
       headers: [],
-      deployment: %Deployment{model_name: "echo", capability: :transcription},
-      provider: %Provider{name: "echo"}
+      deployment: %Deployment{model_name: "echo", capabilities: [:transcription]},
+      provider: %Provider{name: "echo"},
+      capability: :transcription
     }
 
     %{

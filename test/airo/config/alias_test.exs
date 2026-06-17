@@ -16,7 +16,7 @@ defmodule Airo.Config.AliasTest do
       Config.create_deployment(%{
         provider_id: provider.id,
         model_name: "qwen3.5-9b",
-        capability: :chat
+        capabilities: [:chat]
       })
 
     %{deployment: deployment}

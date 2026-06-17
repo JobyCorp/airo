@@ -68,7 +68,7 @@ defmodule Airo.UsageTest do
         Config.create_deployment(%{
           provider_id: provider.id,
           model_name: "m",
-          capability: :chat,
+          capabilities: [:chat],
           price_input: Decimal.new("0.001"),
           price_output: Decimal.new("0.002")
         })

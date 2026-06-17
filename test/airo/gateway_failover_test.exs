@@ -3,6 +3,7 @@ defmodule Airo.GatewayFailoverTest do
 
   alias Airo.Config
   alias Airo.Gateway
+  alias Airo.Health
 
   @completion %{
     "id" => "chatcmpl-1",
@@ -24,7 +25,7 @@ defmodule Airo.GatewayFailoverTest do
 
   defp deployment(provider, model) do
     {:ok, d} =
-      Config.create_deployment(%{provider_id: provider.id, model_name: model, capability: :chat})
+      Config.create_deployment(%{provider_id: provider.id, model_name: model, capabilities: [:chat]})
 
     d
   end
@@ -109,5 +110,61 @@ defmodule Airo.GatewayFailoverTest do
     assert {:ok, _body, info} = Gateway.run(resolve!(key))
     refute info.fallback_used
     assert info.served.provider.name == "down"
+  end
+
+  # A dispatch is stronger health signal than the periodic prober: record it.
+  defp health_alias(primary_host) do
+    down = deployment(provider(primary_host), "m-#{primary_host}")
+    up = deployment(provider("up-#{primary_host}"), "mu-#{primary_host}")
+    name = "ha-#{primary_host}"
+
+    {:ok, _} =
+      Config.create_alias(%{
+        name: name,
+        capability: :chat,
+        strategy: :priority,
+        candidates: [
+          %{deployment_id: down.id, weight: 100, priority: 0},
+          %{deployment_id: up.id, weight: 100, priority: 1}
+        ]
+      })
+
+    {:ok, key} =
+      Config.mint_client_key(%{
+        name: "k-#{System.unique_integer([:positive])}",
+        allowed_aliases: [name]
+      })
+
+    {key, name, down, up}
+  end
+
+  test "live health: a transport-error primary is marked :down, the server :up" do
+    {key, name, down, up} = health_alias("downh")
+
+    Req.Test.stub(Airo.TestStub, fn conn ->
+      case conn.host do
+        "downh" -> Req.Test.transport_error(conn, :econnrefused)
+        "up-downh" -> Req.Test.json(conn, @completion)
+      end
+    end)
+
+    {:ok, plan} = Gateway.resolve(%{"model" => name, "messages" => []}, key, :chat)
+    assert {:ok, _body, _info} = Gateway.run(plan)
+
+    assert Health.status(down.id) == :down
+    assert Health.status(up.id) == :up
+  end
+
+  test "live health: a 4xx primary stays :up (reachable, not a host fault)" do
+    {key, name, down, _up} = health_alias("badreq")
+
+    Req.Test.stub(Airo.TestStub, fn conn ->
+      conn |> Plug.Conn.put_status(400) |> Req.Test.json(%{"error" => "bad request"})
+    end)
+
+    {:ok, plan} = Gateway.resolve(%{"model" => name, "messages" => []}, key, :chat)
+    assert {:error, {:http_error, 400, _}} = Gateway.run(plan)
+
+    assert Health.status(down.id) == :up
   end
 end

@@ -22,7 +22,7 @@ defmodule Airo.GatewayConcreteModelTest do
       Config.create_deployment(%{
         provider_id: provider.id,
         model_name: model,
-        capability: capability
+        capabilities: [capability]
       })
 
     {:ok, key} =
@@ -80,7 +80,7 @@ defmodule Airo.GatewayConcreteModelTest do
       Config.create_deployment(%{
         provider_id: provider.id,
         model_name: "shared",
-        capability: :chat
+        capabilities: [:chat]
       })
 
     {:ok, _alias} =
@@ -103,5 +103,65 @@ defmodule Airo.GatewayConcreteModelTest do
 
     assert {:error, {:model_not_found, "ghost"}} =
              Gateway.resolve(%{"model" => "ghost", "messages" => []}, key, :chat)
+  end
+
+  defp image_request(model) do
+    %{
+      "model" => model,
+      "messages" => [
+        %{
+          "role" => "user",
+          "content" => [
+            %{"type" => "text", "text" => "what is this?"},
+            %{"type" => "image_url", "image_url" => %{"url" => "data:image/png;base64,AAAA"}}
+          ]
+        }
+      ]
+    }
+  end
+
+  test "a vision-only model is served on the chat endpoint when the request carries an image" do
+    key = setup_model("moondream:latest", :vision)
+    Req.Test.stub(Airo.TestStub, fn upstream -> Req.Test.json(upstream, @completion) end)
+
+    assert {:ok, plan} = Gateway.resolve(image_request("moondream:latest"), key, :chat)
+    assert plan.usage_capability == :vision
+
+    assert {:ok, _body, info} = Gateway.run(plan)
+    assert info.served.deployment.model_name == "moondream:latest"
+  end
+
+  test "a vision-only model is NOT served for a text-only chat request" do
+    key = setup_model("moondream:latest", :vision)
+    # No image → the resource capability is :chat, which [:vision] does not serve.
+    assert {:error, {:model_not_found, "moondream:latest"}} =
+             Gateway.resolve(%{"model" => "moondream:latest", "messages" => []}, key, :chat)
+  end
+
+  test "a multimodal model serves both a text chat and an image request" do
+    {:ok, provider} =
+      Config.create_provider(%{
+        name: "p-mm-#{System.unique_integer([:positive])}",
+        adapter_type: :vllm,
+        base_url: "http://up/v1",
+        auth_kind: :none
+      })
+
+    {:ok, _dep} =
+      Config.create_deployment(%{
+        provider_id: provider.id,
+        model_name: "qwen-mm",
+        capabilities: [:chat, :vision]
+      })
+
+    {:ok, key} = Config.mint_client_key(%{name: "k-mm", allowed_aliases: ["*"]})
+
+    assert {:ok, text_plan} =
+             Gateway.resolve(%{"model" => "qwen-mm", "messages" => []}, key, :chat)
+
+    assert text_plan.usage_capability == :chat
+
+    assert {:ok, image_plan} = Gateway.resolve(image_request("qwen-mm"), key, :chat)
+    assert image_plan.usage_capability == :vision
   end
 end

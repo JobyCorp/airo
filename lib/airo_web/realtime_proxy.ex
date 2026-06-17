@@ -194,7 +194,7 @@ defmodule AiroWeb.RealtimeProxy do
       client_key: state.client_key,
       served: %{deployment: state.target.deployment},
       alias_name: state.model,
-      capability: state.target.deployment.capability,
+      capability: state.target.capability,
       outcome: outcome,
       latency_ms: System.monotonic_time(:millisecond) - state.started_at
     })

@@ -21,7 +21,7 @@ defmodule Airo.RoutingTest do
       Config.create_deployment(%{
         provider_id: provider.id,
         model_name: model,
-        capability: :chat,
+        capabilities: Keyword.get(opts, :capabilities, [:chat]),
         class: opts[:class],
         tool_use: Keyword.get(opts, :tool_use, false),
         enabled: Keyword.get(opts, :enabled, true)
@@ -67,6 +67,32 @@ defmodule Airo.RoutingTest do
       al = alias_with("al", [cand(da, priority: 0), cand(db, priority: 1)])
 
       assert ids(Routing.candidates(al, %{})) == [da.id]
+    end
+  end
+
+  describe "capability filter" do
+    test "keeps only deployments whose capabilities include the requested resource" do
+      chat = deployment(provider("pc"), "mc", capabilities: [:chat])
+      vis = deployment(provider("pv"), "mv", capabilities: [:vision])
+      both = deployment(provider("pbo"), "mbo", capabilities: [:chat, :vision])
+
+      al =
+        alias_with("al", [
+          cand(chat, priority: 0),
+          cand(vis, priority: 1),
+          cand(both, priority: 2)
+        ])
+
+      assert ids(Routing.candidates(al, %{}, :vision)) == [vis.id, both.id]
+      assert ids(Routing.candidates(al, %{}, :chat)) == [chat.id, both.id]
+    end
+
+    test "a nil capability skips the filter" do
+      chat = deployment(provider("pc"), "mc", capabilities: [:chat])
+      vis = deployment(provider("pv"), "mv", capabilities: [:vision])
+      al = alias_with("al", [cand(chat, priority: 0), cand(vis, priority: 1)])
+
+      assert ids(Routing.candidates(al, %{}, nil)) == [chat.id, vis.id]
     end
   end
 

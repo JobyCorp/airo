@@ -1,9 +1,15 @@
 defmodule Airo.Config.Deployment do
   @moduledoc """
-  A concrete `(provider, model)` plus capability, class, and pricing — the
+  A concrete `(provider, model)` plus its capabilities, class, and pricing — the
   unit that health and usage attach to (DESIGN §8). Mirrors orchester's
   `CapabilityBinding`. Pricing (`price_input`/`price_output`, per 1k tokens)
   feeds cost attribution on `Airo.Usage.UsageRecord`.
+
+  `capabilities` is the set of resources this deployment serves — the thing a
+  client requests. It is multi-valued because models genuinely are: a multimodal
+  chat model serves `[:chat, :vision]`, a vision-only model `[:vision]`. Routing
+  filters candidates by membership; the wire protocol (which adapter callback)
+  is a separate concern handled in the adapter.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -17,7 +23,7 @@ defmodule Airo.Config.Deployment do
 
   schema "deployments" do
     field :model_name, :string
-    field :capability, Ecto.Enum, values: @capabilities
+    field :capabilities, {:array, Ecto.Enum}, values: @capabilities
     field :class, Ecto.Enum, values: @classes
     field :tool_use, :boolean, default: false
     field :context_window, :integer
@@ -31,7 +37,7 @@ defmodule Airo.Config.Deployment do
     timestamps()
   end
 
-  @doc "Enum values for `capability`."
+  @doc "All capability values a deployment may declare."
   def capabilities, do: @capabilities
 
   @doc "Enum values for `class`."
@@ -42,7 +48,7 @@ defmodule Airo.Config.Deployment do
     |> cast(attrs, [
       :provider_id,
       :model_name,
-      :capability,
+      :capabilities,
       :class,
       :tool_use,
       :context_window,
@@ -51,11 +57,12 @@ defmodule Airo.Config.Deployment do
       :default_params,
       :enabled
     ])
-    |> validate_required([:provider_id, :model_name, :capability])
+    |> validate_required([:provider_id, :model_name, :capabilities])
+    |> validate_length(:capabilities, min: 1)
     |> validate_number(:context_window, greater_than: 0)
     |> assoc_constraint(:provider)
-    |> unique_constraint([:provider_id, :model_name, :capability],
-      name: :deployments_provider_id_model_name_capability_index
+    |> unique_constraint([:provider_id, :model_name],
+      name: :deployments_provider_id_model_name_index
     )
   end
 end

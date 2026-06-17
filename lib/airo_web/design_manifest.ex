@@ -87,6 +87,11 @@ defmodule AiroWeb.DesignManifest do
   #     category: :domain,
   #     summary: "Message composer with response-length controls."
 
+  component CompositeComponents, :health_status,
+    category: :domain,
+    summary: "Upstream health pill (up/down/unknown) for admin tables.",
+    preview: &DesignPreviews.health_status_preview/1
+
   @doc """
   Tells `JobyKit.DaisyCatalogue` which daisyUI primitives this app has
   wrapped, so the catalogue rendering flips them to `:wrapped` and links

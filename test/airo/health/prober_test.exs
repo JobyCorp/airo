@@ -15,13 +15,13 @@ defmodule Airo.Health.ProberTest do
       })
 
     {:ok, d1} =
-      Config.create_deployment(%{provider_id: provider.id, model_name: "m1", capability: :chat})
+      Config.create_deployment(%{provider_id: provider.id, model_name: "m1", capabilities: [:chat]})
 
     {:ok, d2} =
       Config.create_deployment(%{
         provider_id: provider.id,
         model_name: "m2",
-        capability: :embeddings
+        capabilities: [:embeddings]
       })
 
     {provider, [d1, d2]}

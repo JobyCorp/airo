@@ -13,7 +13,7 @@ defmodule AiroWeb.ModelsControllerTest do
       })
 
     {:ok, d} =
-      Config.create_deployment(%{provider_id: p.id, model_name: model, capability: :chat})
+      Config.create_deployment(%{provider_id: p.id, model_name: model, capabilities: [:chat]})
 
     d
   end
@@ -55,6 +55,25 @@ defmodule AiroWeb.ModelsControllerTest do
     # both the aliases and the concrete deployment model ids are callable.
     assert ids(conn) == ["chat-deep", "chat-standard", "llama-70b", "qwen3.5-9b"]
     assert Enum.all?(body["data"], &(&1["object"] == "model"))
+    # each entry advertises its capabilities so a client knows the endpoint.
+    assert Enum.all?(body["data"], &(&1["capabilities"] == ["chat"]))
+  end
+
+  test "annotates a non-chat model id with its capability", %{conn: conn} do
+    {:ok, p} =
+      Config.create_provider(%{
+        name: "emb-#{System.unique_integer([:positive])}",
+        adapter_type: :infinity,
+        base_url: "http://emb/v1",
+        auth_kind: :none
+      })
+
+    {:ok, _} =
+      Config.create_deployment(%{provider_id: p.id, model_name: "bge", capabilities: [:embeddings]})
+
+    conn = conn |> authed(mint(["*"])) |> get(~p"/v1/models")
+    entry = json_response(conn, 200)["data"] |> Enum.find(&(&1["id"] == "bge"))
+    assert entry["capabilities"] == ["embeddings"]
   end
 
   test "lists only the names the client key is scoped to", %{conn: conn} do

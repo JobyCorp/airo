@@ -16,7 +16,7 @@ defmodule AiroWeb.RerankControllerTest do
       Config.create_deployment(%{
         provider_id: provider.id,
         model_name: "bge-reranker",
-        capability: :rerank
+        capabilities: [:rerank]
       })
 
     {:ok, _} =

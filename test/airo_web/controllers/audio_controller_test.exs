@@ -16,7 +16,7 @@ defmodule AiroWeb.AudioControllerTest do
       Config.create_deployment(%{
         provider_id: provider.id,
         model_name: model,
-        capability: capability
+        capabilities: [capability]
       })
 
     {:ok, _} =
