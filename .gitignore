@@ -35,6 +35,12 @@ airo-*.tar.gz
 # Ignore digested assets cache.
 /priv/static/cache_manifest.json
 
+# phx.digest output (from `mix assets.deploy`): gzipped + content-hashed copies.
+# Keep the source statics (favicon.ico, robots.txt, images/logo.svg); ignore the
+# generated digests so they never get committed again.
+/priv/static/**/*.gz
+/priv/static/**/*-????????????????????????????????.*
+
 # In case you use Node.js/npm, you want to ignore these.
 npm-debug.log
 /assets/node_modules/
