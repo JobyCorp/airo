@@ -69,7 +69,11 @@ defmodule AiroWeb.ModelsControllerTest do
       })
 
     {:ok, _} =
-      Config.create_deployment(%{provider_id: p.id, model_name: "bge", capabilities: [:embeddings]})
+      Config.create_deployment(%{
+        provider_id: p.id,
+        model_name: "bge",
+        capabilities: [:embeddings]
+      })
 
     conn = conn |> authed(mint(["*"])) |> get(~p"/v1/models")
     entry = json_response(conn, 200)["data"] |> Enum.find(&(&1["id"] == "bge"))

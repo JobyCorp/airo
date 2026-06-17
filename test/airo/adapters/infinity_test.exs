@@ -44,7 +44,11 @@ defmodule Airo.Adapters.InfinityTest do
     Req.Test.stub(__MODULE__, fn conn ->
       {:ok, raw, conn} = Plug.Conn.read_body(conn)
       send(test_pid, {:classify, conn.request_path, Jason.decode!(raw)["model"]})
-      Req.Test.json(conn, %{"object" => "classify", "data" => [[%{"label" => "joy", "score" => 0.9}]]})
+
+      Req.Test.json(conn, %{
+        "object" => "classify",
+        "data" => [[%{"label" => "joy", "score" => 0.9}]]
+      })
     end)
 
     assert {:ok, body} = Infinity.classify(%{"model" => "c", "input" => ["hi"]}, context())

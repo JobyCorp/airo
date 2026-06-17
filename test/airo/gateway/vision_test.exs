@@ -28,7 +28,14 @@ defmodule Airo.Gateway.VisionTest do
   end
 
   test "an explicit route.vision overrides auto-detection" do
-    refute Vision.requires_vision?(%{"messages" => [image_message()], "route" => %{"vision" => false}})
-    assert Vision.requires_vision?(%{"messages" => [text_message()], "route" => %{"vision" => true}})
+    refute Vision.requires_vision?(%{
+             "messages" => [image_message()],
+             "route" => %{"vision" => false}
+           })
+
+    assert Vision.requires_vision?(%{
+             "messages" => [text_message()],
+             "route" => %{"vision" => true}
+           })
   end
 end

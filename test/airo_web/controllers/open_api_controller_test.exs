@@ -29,7 +29,14 @@ defmodule AiroWeb.OpenApiControllerTest do
     assert Map.has_key?(route_props, "vision")
 
     # /v1/models entries advertise capabilities.
-    assert get_in(schemas, ["ModelList", "properties", "data", "items", "properties", "capabilities"])
+    assert get_in(schemas, [
+             "ModelList",
+             "properties",
+             "data",
+             "items",
+             "properties",
+             "capabilities"
+           ])
 
     # classify is fully described.
     assert schemas["ClassifyRequest"]

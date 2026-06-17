@@ -64,7 +64,10 @@ defmodule AiroWeb.ApiSpec do
             "OpenAI-compatible. `stream: true` returns SSE. Image content in " <>
               "`messages` auto-routes to a vision-capable deployment.",
             req("ChatCompletionRequest"),
-            resp("ChatCompletionResponse", "Chat completion (or an SSE stream when `stream: true`).")
+            resp(
+              "ChatCompletionResponse",
+              "Chat completion (or an SSE stream when `stream: true`)."
+            )
           )
       },
       "/v1/embeddings" => %PathItem{
@@ -106,7 +109,9 @@ defmodule AiroWeb.ApiSpec do
             req("SpeechRequest"),
             %Response{
               description: "Binary audio.",
-              content: %{"audio/mpeg" => %MediaType{schema: %Schema{type: :string, format: :binary}}}
+              content: %{
+                "audio/mpeg" => %MediaType{schema: %Schema{type: :string, format: :binary}}
+              }
             }
           )
       },
@@ -234,9 +239,16 @@ defmodule AiroWeb.ApiSpec do
         required: [:model, :messages],
         additionalProperties: true,
         properties: %{
-          model: %Schema{type: :string, description: "Alias (e.g. `chat-deep`) or concrete deployment id."},
+          model: %Schema{
+            type: :string,
+            description: "Alias (e.g. `chat-deep`) or concrete deployment id."
+          },
           messages: %Schema{type: :array, items: ref("ChatMessage")},
-          stream: %Schema{type: :boolean, default: false, description: "Stream the response as SSE."},
+          stream: %Schema{
+            type: :boolean,
+            default: false,
+            description: "Stream the response as SSE."
+          },
           route: ref("Route")
         },
         example: %{

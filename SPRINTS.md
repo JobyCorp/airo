@@ -76,12 +76,12 @@ No provider calls yet; just the schema both apps converge onto.
 - OpenAPI spec via `open_api_spex`; Oban prune worker for `UsageRecord`
 - **DoD extra:** admin CRUD works; spec served at `/openapi`; usage recorded
 
-### [ ] S7 — Consumer migration
+### [x] S7 — Consumer migration
 - incogito: repoint `base_url` → Airo; send concrete model ids or single-candidate aliases
 - orchester: delete resolver, repoint dispatch, translate strict pins → `route.binding`;
   keep Sink / agent loop / `:queued` Oban app-side
 - **DoD extra:** both apps green against Airo
-- _incogito validated: chat/embeddings/speech via concrete model ids; STT still direct (→ S8)._
+- _Complete: incogito and orchester now use Airo as the sole path to AI models._
 
 ### [x] S8 — Realtime proxy
 See [DESIGN-realtime-and-client.md](./DESIGN-realtime-and-client.md) §4.
@@ -117,5 +117,6 @@ _Append one line per merge: `S0 merged <sha> — note`._
 - S4 merged a050d91 — Routing core: Airo.Runtime.Store (ETS), Airo.Health + Prober (preference signal, ~90s staleness), Airo.Routing (priority/weighted/round_robin, health re-sort, class/tools filters, fallback chain, strict route.binding pin), Gateway failover (5xx/timeout not 4xx; streaming pre-byte), served-candidate transparency; 105 tests + real-socket failover smoke, precommit green.
 - S5 merged 5ca0bca — Capability breadth: generic Gateway.run dispatch; /v1/embeddings, /v1/models (scoped aliases), /v1/rerank, /v1/audio/{speech,transcriptions}; Anthropic adapter (Translate OpenAI↔Messages, claude-code OAuth refresh, chat+stream normalization), Infinity rerank/embed, Speaches audio; shared GatewayError/GatewayHeaders; 139 tests, precommit green. Each capability has an adapter + test.
 - S6 merged d9e9c21 — Observability & config UI: async Airo.Usage + cost (Task.Supervisor), GatewayUsage wired into all controllers; OpenAPI at /openapi (open_api_spex); Oban + UsageRecord PruneWorker; JobyKit admin LiveViews under /admin (Providers/Deployments/Aliases+candidates/Keys/Usage); 150 tests, joby_kit.lint green.
+- S7 completed operationally — incogito and orchester fully cut over; both now use Airo as the only gateway path to AI models, with app-specific orchestration remaining in the consumers.
 - S8 merged 813d86a — realtime WebSocket proxy: Airo.Realtime (alias/concrete resolution, connect-time health routing, intent→capability), AiroWeb.RealtimeProxy (WebSock in / Mint.WebSocket out, transparent frame relay, pre-open buffering, session UsageRecord), RealtimeController + :realtime_api pipeline + GET /v1/realtime, GatewayError :unsupported_intent, mint_web_socket dep; 6 tests (resolution + relay against a real echo upstream) + verified against the REAL Speaches endpoint (session.created relayed back), precommit green (169 tests).
 - S10 merged 190c042 — API docs: Swagger UI at /docs (OpenApiSpex.Plug.SwaggerUI over /openapi) + "Docs" nav link; enriched AiroWeb.ApiSpec with request/response schemas + examples, the route object (class/tools/vision), capabilities on /v1/models, /v1/classify, Error/Usage schemas, 401/404; 191 tests + /docs render test, joby_kit.lint green. (Interim work since S6, not numbered sprints: multi-valued deployment capabilities + vision routing, /v1/classify endpoint + adapter, health-visibility admin columns, release-based deploy to the airo VM.)

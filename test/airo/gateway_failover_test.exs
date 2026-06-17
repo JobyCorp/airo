@@ -25,7 +25,11 @@ defmodule Airo.GatewayFailoverTest do
 
   defp deployment(provider, model) do
     {:ok, d} =
-      Config.create_deployment(%{provider_id: provider.id, model_name: model, capabilities: [:chat]})
+      Config.create_deployment(%{
+        provider_id: provider.id,
+        model_name: model,
+        capabilities: [:chat]
+      })
 
     d
   end

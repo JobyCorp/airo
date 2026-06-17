@@ -223,7 +223,9 @@ defmodule AiroWeb.Admin.DeploymentLive do
         <.table id="deployments" rows={@streams.deployments}>
           <:col :let={{_id, d}} label="Provider">{d.provider && d.provider.name}</:col>
           <:col :let={{_id, d}} label="Model">{d.model_name}</:col>
-          <:col :let={{_id, d}} label="Capabilities">{Enum.map_join(d.capabilities, ", ", &to_string/1)}</:col>
+          <:col :let={{_id, d}} label="Capabilities">
+            {Enum.map_join(d.capabilities, ", ", &to_string/1)}
+          </:col>
           <:col :let={{_id, d}} label="Class">{d.class}</:col>
           <:col :let={{_id, d}} label="Enabled">{d.enabled}</:col>
           <:col :let={{_id, d}} label="Health">

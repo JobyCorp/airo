@@ -24,7 +24,9 @@ defmodule Airo.Config.DeploymentTest do
     end
 
     test "accepts multiple capabilities", %{provider: provider} do
-      changeset = Deployment.changeset(%Deployment{}, %{valid(provider) | capabilities: [:chat, :vision]})
+      changeset =
+        Deployment.changeset(%Deployment{}, %{valid(provider) | capabilities: [:chat, :vision]})
+
       assert changeset.valid?
     end
 
@@ -41,7 +43,9 @@ defmodule Airo.Config.DeploymentTest do
     end
 
     test "rejects an unknown capability", %{provider: provider} do
-      changeset = Deployment.changeset(%Deployment{}, %{valid(provider) | capabilities: [:nonsense]})
+      changeset =
+        Deployment.changeset(%Deployment{}, %{valid(provider) | capabilities: [:nonsense]})
+
       assert "is invalid" in errors_on(changeset).capabilities
     end
 

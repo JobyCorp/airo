@@ -6,7 +6,7 @@ defmodule AiroWeb do
   resolve to the kit-shipped wrappers.
   """
 
-  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
+  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt sw.js)
 
   def router do
     quote do
