@@ -3,7 +3,7 @@ defmodule AiroWeb.AdminLiveTest do
 
   import Phoenix.LiveViewTest
 
-  alias Airo.Config
+  alias Airo.{Config, Usage}
 
   defp provider(name \\ "vllm-1") do
     {:ok, p} =
@@ -154,9 +154,71 @@ defmodule AiroWeb.AdminLiveTest do
 
   describe "usage" do
     test "renders the usage view", %{conn: conn} do
-      {:ok, _view, html} = live(conn, ~p"/admin/usage")
+      {:ok, view, html} = live(conn, ~p"/admin/usage")
       assert html =~ "Usage"
-      assert html =~ "Total cost"
+      assert has_element?(view, "#usage-filters")
+      assert html =~ "Trace"
+      assert html =~ "Error rate"
+    end
+
+    test "filters usage records by outcome", %{conn: conn} do
+      {:ok, _} =
+        Usage.record_usage(%{
+          trace_id: "gt_success_row",
+          request_model: "chat-ok",
+          capability: :chat,
+          outcome: :success
+        })
+
+      {:ok, _} =
+        Usage.record_usage(%{
+          trace_id: "gt_error_row",
+          request_model: "chat-error",
+          capability: :chat,
+          outcome: :error,
+          error_code: "model_not_found",
+          http_status: 404
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/admin/usage")
+      assert render(view) =~ "gt_error_row"
+      assert render(view) =~ "gt_success_row"
+
+      html =
+        view
+        |> form("#usage-filters", filters: %{outcome: "error"})
+        |> render_change()
+
+      assert html =~ "gt_error_row"
+      refute html =~ "gt_success_row"
+    end
+
+    test "filters usage records by trace action", %{conn: conn} do
+      {:ok, _} =
+        Usage.record_usage(%{
+          trace_id: "gt_trace_target",
+          request_model: "chat-target",
+          capability: :chat,
+          outcome: :success
+        })
+
+      {:ok, _} =
+        Usage.record_usage(%{
+          trace_id: "gt_trace_other",
+          request_model: "chat-other",
+          capability: :chat,
+          outcome: :success
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/admin/usage")
+
+      html =
+        view
+        |> element("button[phx-value-id='gt_trace_target']", "Trace")
+        |> render_click()
+
+      assert html =~ "gt_trace_target"
+      refute html =~ "gt_trace_other"
     end
   end
 end

@@ -14,6 +14,8 @@ defmodule Airo.Gateway do
   `fallback_used` set when an earlier attempt was skipped.
   """
 
+  require Logger
+
   alias Airo.Adapter
   alias Airo.Adapter.Context
   alias Airo.Config
@@ -105,13 +107,20 @@ defmodule Airo.Gateway do
     do: run_attempts(attempts, capability, false)
 
   defp run_attempts([attempt | rest], capability, fallback_used) do
+    log_attempt(:info, "gateway.attempt.started", attempt, capability, fallback_used)
+
     case apply(attempt.adapter, capability, [attempt.body, attempt.context]) do
       {:ok, body} ->
         mark_health(attempt, :ok)
+        log_attempt(:info, "gateway.attempt.succeeded", attempt, capability, fallback_used)
         {:ok, body, %{served: attempt, fallback_used: fallback_used}}
 
       {:error, reason} ->
         mark_health(attempt, reason)
+
+        log_attempt(:warning, "gateway.attempt.failed", attempt, capability, fallback_used,
+          error: inspect(reason)
+        )
 
         if retryable?(reason) and rest != [],
           do: run_attempts(rest, capability, true),
@@ -134,8 +143,11 @@ defmodule Airo.Gateway do
   end
 
   defp stream_attempts([attempt | rest], acc, reducer, committed?, fallback_used) do
+    log_attempt(:info, "gateway.stream_attempt.started", attempt, :stream, fallback_used)
+
     case attempt.adapter.stream(attempt.body, attempt.context, acc, reducer) do
       {:ok, acc} ->
+        log_attempt(:info, "gateway.stream_attempt.succeeded", attempt, :stream, fallback_used)
         {:ok, acc, %{served: attempt, fallback_used: fallback_used}}
 
       {:error, reason, acc} ->
@@ -143,10 +155,29 @@ defmodule Airo.Gateway do
           committed?.(acc) ->
             # Output already began, so the host responded — count it healthy.
             mark_health(attempt, :ok)
+
+            log_attempt(
+              :warning,
+              "gateway.stream_attempt.partial_error",
+              attempt,
+              :stream,
+              fallback_used,
+              error: inspect(reason)
+            )
+
             {:partial_error, reason, acc}
 
           true ->
             mark_health(attempt, reason)
+
+            log_attempt(
+              :warning,
+              "gateway.stream_attempt.failed",
+              attempt,
+              :stream,
+              fallback_used,
+              error: inspect(reason)
+            )
 
             if retryable?(reason) and rest != [],
               do: stream_attempts(rest, acc, reducer, committed?, true),
@@ -159,13 +190,31 @@ defmodule Airo.Gateway do
   # prober, so record its outcome: a response (even 4xx) means the host is
   # reachable → :up; a transport failure or 5xx → :down. Mirrors the prober's
   # classify/2. Other reasons (e.g. config-shaped errors) carry no host signal.
-  defp mark_health(%{deployment: %{id: id}}, outcome) do
+  defp mark_health(%{deployment: deployment, provider: provider}, outcome) do
     case outcome do
-      :ok -> Health.mark(id, :up)
-      {:http_error, status, _} when status >= 500 -> Health.mark(id, :down)
-      {:http_error, _status, _} -> Health.mark(id, :up)
-      {:transport_error, _} -> Health.mark(id, :down)
-      _ -> :ok
+      :ok ->
+        Health.mark_deployment(deployment, provider, :up, source: :dispatch)
+
+      {:http_error, status, _} when status >= 500 ->
+        Health.mark_deployment(deployment, provider, :down,
+          source: :dispatch,
+          reason: "http_#{status}"
+        )
+
+      {:http_error, status, _} ->
+        Health.mark_deployment(deployment, provider, :up,
+          source: :dispatch,
+          reason: "http_#{status}"
+        )
+
+      {:transport_error, reason} ->
+        Health.mark_deployment(deployment, provider, :down,
+          source: :dispatch,
+          reason: reason_code(reason)
+        )
+
+      _ ->
+        :ok
     end
   end
 
@@ -292,6 +341,23 @@ defmodule Airo.Gateway do
   defp retryable?({:transport_error, _}), do: true
   defp retryable?({:http_error, status, _}) when status >= 500, do: true
   defp retryable?(_), do: false
+
+  defp log_attempt(level, event, attempt, capability, fallback_used, extra \\ []) do
+    metadata =
+      [
+        capability: capability,
+        provider: attempt.provider.name,
+        deployment_id: attempt.deployment.id,
+        model: attempt.deployment.model_name,
+        fallback_used: fallback_used
+      ] ++ extra
+
+    Logger.log(level, event, metadata)
+  end
+
+  defp reason_code(%{reason: reason}), do: "transport_#{reason}"
+  defp reason_code(reason) when is_atom(reason), do: "transport_#{reason}"
+  defp reason_code(_reason), do: "transport_error"
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)

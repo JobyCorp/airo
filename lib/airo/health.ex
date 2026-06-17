@@ -9,7 +9,11 @@ defmodule Airo.Health do
   `Airo.Health.Prober` writes the snapshots; everyone else reads.
   """
 
-  alias Airo.Runtime.Store
+  import Ecto.Query, warn: false
+
+  alias Airo.Config.{Deployment, Provider}
+  alias Airo.Health.HealthEvent
+  alias Airo.{Repo, Runtime.Store}
 
   @staleness_ms 90_000
 
@@ -22,6 +26,46 @@ defmodule Airo.Health do
     record = %{status: status, latency_ms: latency_ms, checked_at: now()}
     :ets.insert(Store.health_table(), {deployment_id, record})
     :ok
+  end
+
+  @doc """
+  Record a deployment health snapshot and persist an event only when effective
+  health transitions. Runtime health remains ETS; the DB is incident history.
+  """
+  @spec mark_deployment(Deployment.t(), Provider.t(), status(), keyword()) :: :ok
+  def mark_deployment(%Deployment{} = deployment, %Provider{} = provider, status, opts \\ [])
+      when status in [:up, :down, :unknown] do
+    previous = status(deployment.id)
+    latency_ms = opts[:latency_ms]
+
+    :ok = mark(deployment.id, status, latency_ms)
+
+    if previous != status do
+      record_event(%{
+        provider_id: provider.id,
+        deployment_id: deployment.id,
+        status: status,
+        source: opts[:source] || :probe,
+        latency_ms: latency_ms,
+        reason: opts[:reason]
+      })
+    end
+
+    :ok
+  end
+
+  @doc "Persist one health event."
+  def record_event(attrs) do
+    %HealthEvent{} |> HealthEvent.changeset(attrs) |> Repo.insert()
+  end
+
+  @doc "Recent health transition events, newest first."
+  def list_events(limit \\ 100) do
+    HealthEvent
+    |> order_by(desc: :inserted_at)
+    |> limit(^limit)
+    |> preload([:provider, :deployment])
+    |> Repo.all()
   end
 
   @doc "Raw snapshot for a deployment, or `nil` if never probed."

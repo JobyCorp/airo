@@ -19,12 +19,17 @@ defmodule Airo.Usage.UsageRecord do
   @type t :: %__MODULE__{}
 
   schema "usage_records" do
+    field :trace_id, :string
+    field :request_model, :string
     field :alias_name, :string
     field :capability, Ecto.Enum, values: @capabilities
     field :tokens_in, :integer, default: 0
     field :tokens_out, :integer, default: 0
     field :latency_ms, :integer
     field :outcome, Ecto.Enum, values: @outcomes
+    field :error_code, :string
+    field :http_status, :integer
+    field :upstream_status, :integer
     field :finish_reason, :string
     field :fallback_used, :boolean, default: false
     field :cost, :decimal
@@ -45,6 +50,8 @@ defmodule Airo.Usage.UsageRecord do
     record
     |> cast(attrs, [
       :client_key_id,
+      :trace_id,
+      :request_model,
       :alias_name,
       :deployment_id,
       :capability,
@@ -52,13 +59,18 @@ defmodule Airo.Usage.UsageRecord do
       :tokens_out,
       :latency_ms,
       :outcome,
+      :error_code,
+      :http_status,
+      :upstream_status,
       :finish_reason,
       :fallback_used,
       :cost
     ])
-    |> validate_required([:capability, :outcome])
+    |> validate_required([:outcome])
     |> validate_number(:tokens_in, greater_than_or_equal_to: 0)
     |> validate_number(:tokens_out, greater_than_or_equal_to: 0)
+    |> validate_number(:http_status, greater_than_or_equal_to: 100, less_than: 600)
+    |> validate_number(:upstream_status, greater_than_or_equal_to: 100, less_than: 600)
     |> assoc_constraint(:client_key)
     |> assoc_constraint(:deployment)
   end

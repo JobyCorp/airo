@@ -14,10 +14,61 @@ defmodule Airo.Usage do
 
   @doc "List recent usage records, newest first."
   def list_usage_records(limit \\ 100) do
-    UsageRecord
+    list_usage_records(%{}, limit)
+  end
+
+  @doc "List recent usage records matching UI filter params, newest first."
+  def list_usage_records(filters, limit) when is_map(filters) do
+    filters
+    |> usage_query()
     |> order_by(desc: :inserted_at)
     |> limit(^limit)
     |> Repo.all()
+  end
+
+  @doc "Summarize usage records matching UI filter params."
+  def usage_summary(filters \\ %{}) do
+    records = filters |> usage_query() |> Repo.all()
+
+    total = length(records)
+    errors = Enum.count(records, &(&1.outcome == :error))
+    fallbacks = Enum.count(records, & &1.fallback_used)
+
+    %{
+      total: total,
+      errors: errors,
+      error_rate: percent(errors, total),
+      fallback_count: fallbacks,
+      total_cost: sum_cost(records),
+      p50_latency_ms: percentile_latency(records, 0.50),
+      p95_latency_ms: percentile_latency(records, 0.95)
+    }
+  end
+
+  @doc "Total cost across the recorded usage (Decimal)."
+  def total_cost do
+    Repo.one(from r in UsageRecord, select: coalesce(sum(r.cost), 0))
+  end
+
+  def client_options do
+    from(k in Airo.Config.ClientKey, order_by: [asc: k.name], select: {k.name, k.id})
+    |> Repo.all()
+  end
+
+  def capability_options, do: UsageRecord.capabilities()
+  def outcome_options, do: UsageRecord.outcomes()
+
+  defp usage_query(filters) do
+    UsageRecord
+    |> join(:left, [r], d in assoc(r, :deployment))
+    |> join(:left, [r, d], k in assoc(r, :client_key))
+    |> preload([r, d, k], deployment: d, client_key: k)
+    |> filter_outcome(filters["outcome"])
+    |> filter_capability(filters["capability"])
+    |> filter_client(filters["client_key_id"])
+    |> filter_model(filters["model"])
+    |> filter_trace(filters["trace_id"])
+    |> filter_time_range(filters["range"])
   end
 
   @doc "Persist a single usage record synchronously."
@@ -60,6 +111,8 @@ defmodule Airo.Usage do
 
     %{
       client_key_id: context[:client_key] && context[:client_key].id,
+      trace_id: context[:trace_id],
+      request_model: context[:request_model] || context[:alias_name],
       deployment_id: deployment && deployment.id,
       alias_name: context[:alias_name],
       capability: context[:capability],
@@ -67,18 +120,95 @@ defmodule Airo.Usage do
       tokens_out: tokens_out,
       latency_ms: context[:latency_ms],
       outcome: context[:outcome] || :success,
+      error_code: context[:error_code],
+      http_status: context[:http_status],
+      upstream_status: context[:upstream_status],
       finish_reason: finish_reason(context[:response]),
       fallback_used: context[:fallback_used] || false,
       cost: cost(deployment, tokens_in, tokens_out)
     }
   end
 
-  @doc "Total cost across the recorded usage (Decimal)."
-  def total_cost do
-    Repo.one(from r in UsageRecord, select: coalesce(sum(r.cost), 0))
+  ## Internal
+
+  defp filter_outcome(query, outcome) when outcome in ["success", "error", "timeout"] do
+    where(query, [r], r.outcome == ^outcome)
   end
 
-  ## Internal
+  defp filter_outcome(query, _), do: query
+
+  defp filter_capability(query, capability) when is_binary(capability) and capability != "" do
+    where(query, [r], r.capability == ^capability)
+  end
+
+  defp filter_capability(query, _), do: query
+
+  defp filter_client(query, id) when is_binary(id) and id != "" do
+    case Integer.parse(id) do
+      {id, ""} -> where(query, [r], r.client_key_id == ^id)
+      _ -> query
+    end
+  end
+
+  defp filter_client(query, _), do: query
+
+  defp filter_model(query, model) when is_binary(model) and model != "" do
+    pattern = "%#{model}%"
+
+    where(
+      query,
+      [r, d],
+      ilike(r.request_model, ^pattern) or ilike(r.alias_name, ^pattern) or
+        ilike(d.model_name, ^pattern)
+    )
+  end
+
+  defp filter_model(query, _), do: query
+
+  defp filter_trace(query, trace_id) when is_binary(trace_id) and trace_id != "" do
+    where(query, [r], ilike(r.trace_id, ^"%#{trace_id}%"))
+  end
+
+  defp filter_trace(query, _), do: query
+
+  defp filter_time_range(query, "1h"), do: since(query, -3_600)
+  defp filter_time_range(query, "24h"), do: since(query, -86_400)
+  defp filter_time_range(query, "7d"), do: since(query, -604_800)
+  defp filter_time_range(query, _), do: query
+
+  defp since(query, seconds) do
+    cutoff = NaiveDateTime.utc_now() |> NaiveDateTime.add(seconds, :second)
+    where(query, [r], r.inserted_at >= ^cutoff)
+  end
+
+  defp percent(_part, 0), do: "0.0%"
+
+  defp percent(part, total) do
+    :erlang.float_to_binary(part / total * 100, decimals: 1) <> "%"
+  end
+
+  defp sum_cost(records) do
+    Enum.reduce(records, Decimal.new(0), fn record, acc ->
+      Decimal.add(acc, record.cost || Decimal.new(0))
+    end)
+  end
+
+  defp percentile_latency(records, percentile) do
+    latencies =
+      records
+      |> Enum.map(& &1.latency_ms)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.sort()
+
+    case latencies do
+      [] ->
+        nil
+
+      list ->
+        index = ceil(length(list) * percentile) - 1
+        Enum.at(list, max(index, 0))
+    end
+  end
 
   defp tokens(%{"usage" => usage}) when is_map(usage),
     do: {usage["prompt_tokens"] || 0, usage["completion_tokens"] || 0}

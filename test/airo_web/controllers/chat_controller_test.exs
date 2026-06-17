@@ -1,7 +1,8 @@
 defmodule AiroWeb.ChatControllerTest do
   use AiroWeb.ConnCase, async: true
 
-  alias Airo.Config
+  alias Airo.{Config, Repo}
+  alias Airo.Usage.UsageRecord
 
   @completion %{
     "id" => "chatcmpl-1",
@@ -96,20 +97,60 @@ defmodule AiroWeb.ChatControllerTest do
         })
       end)
 
-      conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body())
+      conn =
+        conn
+        |> put_req_header("x-gateway-trace-id", "gt_upstream_error")
+        |> authed(mint())
+        |> post(~p"/v1/chat/completions", body())
+
       assert json_response(conn, 503)["error"]["message"] == "overloaded"
+
+      assert %UsageRecord{
+               trace_id: "gt_upstream_error",
+               request_model: "chat-standard",
+               outcome: :error,
+               error_code: nil,
+               http_status: 503,
+               upstream_status: 503
+             } = Repo.get_by(UsageRecord, trace_id: "gt_upstream_error")
     end
   end
 
   describe "POST /v1/chat/completions — auth & resolution errors" do
     test "401 without a client key", %{conn: conn} do
-      conn = post(conn, ~p"/v1/chat/completions", body())
+      conn =
+        conn
+        |> put_req_header("x-gateway-trace-id", "gt_auth_error")
+        |> post(~p"/v1/chat/completions", body())
+
       assert json_response(conn, 401)["error"]["code"] == "invalid_api_key"
+
+      assert %UsageRecord{
+               trace_id: "gt_auth_error",
+               request_model: "chat-standard",
+               capability: :chat,
+               outcome: :error,
+               error_code: "invalid_api_key",
+               http_status: 401
+             } = Repo.get_by(UsageRecord, trace_id: "gt_auth_error")
     end
 
     test "404 for an unknown model/alias", %{conn: conn} do
-      conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body(%{"model" => "ghost"}))
+      conn =
+        conn
+        |> put_req_header("x-gateway-trace-id", "gt_model_error")
+        |> authed(mint())
+        |> post(~p"/v1/chat/completions", body(%{"model" => "ghost"}))
+
       assert json_response(conn, 404)["error"]["code"] == "model_not_found"
+
+      assert %UsageRecord{
+               trace_id: "gt_model_error",
+               request_model: "ghost",
+               outcome: :error,
+               error_code: "model_not_found",
+               http_status: 404
+             } = Repo.get_by(UsageRecord, trace_id: "gt_model_error")
     end
 
     test "403 when the client key is not scoped to the alias", %{conn: conn} do
@@ -133,14 +174,22 @@ defmodule AiroWeb.ChatControllerTest do
     test "attaches x-gateway-* headers including latency", %{conn: conn} do
       Req.Test.stub(Airo.TestStub, fn upstream -> Req.Test.json(upstream, @completion) end)
 
-      conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body())
+      conn =
+        conn
+        |> put_req_header("x-gateway-trace-id", "gt_chat_test")
+        |> authed(mint())
+        |> post(~p"/v1/chat/completions", body())
 
       assert json_response(conn, 200)
+      assert get_resp_header(conn, "x-gateway-trace-id") == ["gt_chat_test"]
       assert get_resp_header(conn, "x-gateway-provider") == ["local"]
       assert get_resp_header(conn, "x-gateway-model") == ["qwen3.5-9b"]
       assert get_resp_header(conn, "x-gateway-fallback") == ["false"]
       assert [latency] = get_resp_header(conn, "x-gateway-latency-ms")
       assert String.to_integer(latency) >= 0
+
+      assert %UsageRecord{trace_id: "gt_chat_test"} =
+               Repo.get_by(UsageRecord, alias_name: "chat-standard")
     end
   end
 
@@ -170,12 +219,17 @@ defmodule AiroWeb.ChatControllerTest do
         |> Plug.Conn.send_resp(200, @sse)
       end)
 
-      conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body(%{"stream" => true}))
+      conn =
+        conn
+        |> put_req_header("x-gateway-trace-id", "gt_stream_test")
+        |> authed(mint())
+        |> post(~p"/v1/chat/completions", body(%{"stream" => true}))
 
       assert conn.status == 200
       assert ["text/event-stream" <> _] = get_resp_header(conn, "content-type")
 
       # Up-front transparency headers (latency only lands in the trailer here).
+      assert get_resp_header(conn, "x-gateway-trace-id") == ["gt_stream_test"]
       assert get_resp_header(conn, "x-gateway-model") == ["qwen3.5-9b"]
       assert get_resp_header(conn, "x-gateway-latency-ms") == []
 
@@ -185,6 +239,7 @@ defmodule AiroWeb.ChatControllerTest do
       refute body =~ "[DONE]\"]"
       # Trailer metadata event with latency, then the OpenAI sentinel last.
       assert body =~ "event: gateway.metadata"
+      assert body =~ ~s("trace_id":"gt_stream_test")
       assert body =~ "latency_ms"
       assert String.ends_with?(String.trim_trailing(body), "data: [DONE]")
     end
@@ -198,10 +253,23 @@ defmodule AiroWeb.ChatControllerTest do
         |> Req.Test.json(%{"error" => %{"message" => "boom", "type" => "server_error"}})
       end)
 
-      conn = conn |> authed(mint()) |> post(~p"/v1/chat/completions", body(%{"stream" => true}))
+      conn =
+        conn
+        |> put_req_header("x-gateway-trace-id", "gt_stream_prebyte_error")
+        |> authed(mint())
+        |> post(~p"/v1/chat/completions", body(%{"stream" => true}))
 
       assert json_response(conn, 500)["error"]["message"] == "boom"
       refute conn.resp_body =~ "event:"
+
+      assert %UsageRecord{
+               trace_id: "gt_stream_prebyte_error",
+               request_model: "chat-standard",
+               outcome: :error,
+               error_code: nil,
+               http_status: 500,
+               upstream_status: 500
+             } = Repo.get_by(UsageRecord, trace_id: "gt_stream_prebyte_error")
     end
 
     test "401 still applies on the streaming path (auth runs before streaming)", %{conn: conn} do

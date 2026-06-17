@@ -12,12 +12,25 @@ defmodule AiroWeb.GatewayError do
 
   @doc "Render `reason` (an `Airo.Gateway.error`) onto `conn`."
   def send_error(conn, reason) do
-    {status, body} = to_response(reason)
+    {status, body} = response(reason)
 
     conn
     |> put_status(status)
     |> json(body)
   end
+
+  @doc "Map a gateway error reason to `{http_status, OpenAI-shaped body}`."
+  def response(reason), do: to_response(reason)
+
+  @doc "The OpenAI-compatible error code for a gateway error reason."
+  def code(reason) do
+    {_status, body} = response(reason)
+    get_in(body, ["error", "code"])
+  end
+
+  @doc "The upstream HTTP status embedded in a gateway error reason, if any."
+  def upstream_status({:http_error, status, _body}), do: status
+  def upstream_status(_reason), do: nil
 
   # Upstream error already in OpenAI shape → pass through verbatim.
   defp to_response({:http_error, status, %{"error" => _} = body}), do: {status, body}
@@ -34,6 +47,15 @@ defmodule AiroWeb.GatewayError do
          "Failed to reach the upstream provider.",
          "api_error",
          "upstream_unavailable"
+       )}
+
+  defp to_response(:invalid_api_key),
+    do:
+      {401,
+       OpenAIError.body(
+         "Invalid or missing client key.",
+         "invalid_request_error",
+         "invalid_api_key"
        )}
 
   defp to_response(:missing_model),
