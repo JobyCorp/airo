@@ -19,6 +19,37 @@ defmodule Airo.Adapters.InfinityTest do
     )
   end
 
+  defp models_payload do
+    %{
+      "data" => [
+        %{
+          "id" => "BAAI/bge-reranker-v2-m3",
+          "stats" => %{
+            "queue_fraction" => 0.0,
+            "queue_absolute" => 0,
+            "results_pending" => 0,
+            "batch_size" => 32
+          },
+          "object" => "model",
+          "owned_by" => "infinity",
+          "created" => 1_781_703_287,
+          "backend" => "torch",
+          "capabilities" => ["rerank"]
+        }
+      ],
+      "object" => "list"
+    }
+  end
+
+  defp metrics_body do
+    """
+    http_requests_total{handler="/rerank",method="POST",status="2xx"} 250.0
+    http_request_duration_seconds_count{handler="/rerank",method="POST"} 250.0
+    http_request_duration_seconds_sum{handler="/rerank",method="POST"} 8.0
+    http_requests_total{handler="/embeddings",method="POST",status="2xx"} 470.0
+    """
+  end
+
   test "rerank/2 posts to /rerank with the deployment model and returns the body" do
     test_pid = self()
 
@@ -76,5 +107,51 @@ defmodule Airo.Adapters.InfinityTest do
 
     assert {:error, {:http_error, 500, _}} =
              Infinity.rerank(%{"query" => "q", "documents" => []}, context())
+  end
+
+  test "catalog/1 uses /models and normalizes model metadata" do
+    test_pid = self()
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      send(test_pid, {:request, conn.method, conn.request_path})
+      Req.Test.json(conn, models_payload())
+    end)
+
+    assert {:ok, [model]} = Infinity.catalog(context())
+    assert model.id == "BAAI/bge-reranker-v2-m3"
+    assert model.family == "bge"
+    assert model.type == "rerank"
+    assert model.backend == "torch"
+    assert model.batch_size == 32
+    assert model.capabilities == ["rerank"]
+    assert_received {:request, "GET", "/models"}
+  end
+
+  test "inspect_model/2 finds model metadata by id" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      Req.Test.json(conn, models_payload())
+    end)
+
+    assert {:ok, metadata} = Infinity.inspect_model("BAAI/bge-reranker-v2-m3", context())
+    assert metadata.type == "rerank"
+    assert metadata.queue_absolute == 0
+  end
+
+  test "runtime_info/1 combines catalog and endpoint metrics" do
+    Req.Test.stub(__MODULE__, fn
+      %{request_path: "/models"} = conn ->
+        Req.Test.json(conn, models_payload())
+
+      %{request_path: "/metrics"} = conn ->
+        Req.Test.text(conn, metrics_body())
+    end)
+
+    assert {:ok, %{running: [running], metrics: %{"rerank" => metrics}}} =
+             Infinity.runtime_info(context())
+
+    assert running.id == "BAAI/bge-reranker-v2-m3"
+    assert metrics["requests_post_2xx"] == 250.0
+    assert metrics["duration_post_count"] == 250.0
+    assert metrics["duration_post_seconds_sum"] == 8.0
   end
 end

@@ -290,10 +290,11 @@ via `route.binding` when it needs strict-selection behavior.
   identity only for stable metadata such as family, quantization, and size.
   LM Studio uses its native `/api/v1/models` and download endpoints for
   catalog/runtime/load-state discovery; vLLM uses `/v1/models` plus Prometheus
-  `/metrics` for served-model/context/runtime posture. Infinity and Speaches are
-  local specialized services next: embeddings/rerank/classify metadata for
-  Infinity, and speech/transcription/audio latency posture for Speaches. Cloud
-  providers remain catalog-only/backlog for model management.
+  `/metrics` for served-model/context/runtime posture. Infinity uses `/models`
+  plus `/metrics` for embeddings/rerank/classify metadata, queue stats, backend,
+  and endpoint posture. Speaches is the remaining local specialized service for
+  speech/transcription/audio latency posture. Cloud providers remain
+  catalog-only/backlog for model management.
 - **Transparency**: `x-gateway-*` headers + SSE trailing event (see §5.1).
 - Rate limits: **v2**.
 

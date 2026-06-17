@@ -332,6 +332,8 @@ defmodule AiroWeb.Admin.ModelLive do
         <.table id="provider-metadata" rows={@detail.deployment_summaries}>
           <:col :let={row} label="Provider">{row.provider && row.provider.name}</:col>
           <:col :let={row} label="Runtime">{metadata_value(row.deployment, "runtime_version")}</:col>
+          <:col :let={row} label="Type">{metadata_value(row.deployment, "type")}</:col>
+          <:col :let={row} label="Backend">{metadata_value(row.deployment, "backend")}</:col>
           <:col :let={row} label="Family">{metadata_value(row.deployment, "family")}</:col>
           <:col :let={row} label="Parameters">
             {metadata_value(row.deployment, "parameter_size")}
@@ -346,6 +348,8 @@ defmodule AiroWeb.Admin.ModelLive do
           <:col :let={row} label="Context">
             {metadata_value(row.deployment, "context_window")}
           </:col>
+          <:col :let={row} label="Batch">{metadata_value(row.deployment, "batch_size")}</:col>
+          <:col :let={row} label="Queue">{metadata_value(row.deployment, "queue_absolute")}</:col>
           <:col :let={row} label="Running">{running_label(row.deployment)}</:col>
         </.table>
       </.card>

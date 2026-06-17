@@ -102,6 +102,40 @@ defmodule Airo.LocalModelsTest do
     end)
   end
 
+  defp stub_infinity_native do
+    Req.Test.stub(Airo.TestStub, fn
+      %{request_path: "/models"} = conn ->
+        Req.Test.json(conn, %{
+          "data" => [
+            %{
+              "id" => "BAAI/bge-reranker-v2-m3",
+              "stats" => %{
+                "queue_fraction" => 0.0,
+                "queue_absolute" => 0,
+                "results_pending" => 0,
+                "batch_size" => 32
+              },
+              "object" => "model",
+              "owned_by" => "infinity",
+              "created" => 1_781_703_287,
+              "backend" => "torch",
+              "capabilities" => ["rerank"]
+            }
+          ]
+        })
+
+      %{request_path: "/metrics"} = conn ->
+        Req.Test.text(
+          conn,
+          """
+          http_requests_total{handler="/rerank",method="POST",status="2xx"} 250.0
+          http_request_duration_seconds_count{handler="/rerank",method="POST"} 250.0
+          http_request_duration_seconds_sum{handler="/rerank",method="POST"} 8.0
+          """
+        )
+    end)
+  end
+
   test "reports local management capabilities for Ollama providers" do
     {:ok, provider} =
       Config.create_provider(%{
@@ -142,6 +176,22 @@ defmodule Airo.LocalModelsTest do
         name: "vllm-mini",
         adapter_type: :vllm,
         base_url: "http://vllm:8000/v1",
+        auth_kind: :none
+      })
+
+    assert LocalModels.capabilities(provider) == [
+             :catalog,
+             :inspect_model,
+             :runtime_info
+           ]
+  end
+
+  test "reports read-only local management capabilities for Infinity providers" do
+    {:ok, provider} =
+      Config.create_provider(%{
+        name: "infinity-mini",
+        adapter_type: :infinity,
+        base_url: "http://infinity:7997",
         auth_kind: :none
       })
 
@@ -273,5 +323,40 @@ defmodule Airo.LocalModelsTest do
     assert model.family == "qwen3.5"
     assert model.quantization == "AWQ"
     assert model.size == "9B"
+  end
+
+  test "sync_deployment/1 stores Infinity model metadata and endpoint metrics" do
+    stub_infinity_native()
+
+    {:ok, provider} =
+      Config.create_provider(%{
+        name: "infinity-mini",
+        adapter_type: :infinity,
+        base_url: "http://infinity:7997",
+        auth_kind: :none
+      })
+
+    {:ok, deployment} =
+      Config.create_deployment(%{
+        provider_id: provider.id,
+        model_name: "BAAI/bge-reranker-v2-m3",
+        capabilities: [:rerank]
+      })
+
+    assert {:ok, synced} = LocalModels.sync_deployment(deployment)
+
+    assert synced.provider_metadata["provider_type"] == "infinity"
+    assert synced.provider_metadata["family"] == "bge"
+    assert synced.provider_metadata["type"] == "rerank"
+    assert synced.provider_metadata["backend"] == "torch"
+    assert synced.provider_metadata["owned_by"] == "infinity"
+    assert synced.provider_metadata["running"] == true
+    assert synced.provider_metadata["batch_size"] == 32
+    assert synced.provider_metadata["queue_absolute"] == 0
+    assert synced.provider_metadata["metrics"]["requests_post_2xx"] == 250.0
+    assert synced.provider_metadata["metrics"]["duration_post_count"] == 250.0
+
+    model = Config.get_model!(deployment.model_id)
+    assert model.family == "bge"
   end
 end

@@ -108,6 +108,7 @@ defmodule Airo.LocalModels do
       "root" => inspected[:root],
       "owned_by" => inspected[:owned_by],
       "created" => inspected[:created],
+      "backend" => inspected[:backend],
       "modelfile" => inspected[:modelfile],
       "template" => inspected[:template],
       "parameters" => inspected[:parameters],
@@ -121,9 +122,14 @@ defmodule Airo.LocalModels do
       "variants" => inspected[:variants],
       "selected_variant" => inspected[:selected_variant],
       "description" => inspected[:description],
+      "stats" => inspected[:stats],
+      "queue_fraction" => inspected[:queue_fraction],
+      "queue_absolute" => inspected[:queue_absolute],
+      "results_pending" => inspected[:results_pending],
+      "batch_size" => inspected[:batch_size],
       "runtime_version" => runtime[:version],
       "running" => running?(runtime, deployment.model_name),
-      "metrics" => metrics_for(runtime[:metrics], deployment.model_name),
+      "metrics" => metrics_for(runtime[:metrics], deployment),
       "raw" => %{
         "inspect" => stringify(inspected[:raw] || %{}),
         "runtime" => stringify(runtime)
@@ -151,11 +157,22 @@ defmodule Airo.LocalModels do
       end)
   end
 
-  defp metrics_for(metrics, model_name) when is_map(metrics) do
-    Map.get(metrics, model_name) || Map.get(metrics, to_string(model_name))
+  defp metrics_for(metrics, deployment) when is_map(metrics) do
+    Map.get(metrics, deployment.model_name) ||
+      Map.get(metrics, to_string(deployment.model_name)) ||
+      Map.get(metrics, capability_handler(deployment.capabilities))
   end
 
-  defp metrics_for(_metrics, _model_name), do: nil
+  defp metrics_for(_metrics, _deployment), do: nil
+
+  defp capability_handler([:embeddings | _]), do: "embeddings"
+  defp capability_handler(["embeddings" | _]), do: "embeddings"
+  defp capability_handler([:rerank | _]), do: "rerank"
+  defp capability_handler(["rerank" | _]), do: "rerank"
+  defp capability_handler([:classify | _]), do: "classify"
+  defp capability_handler(["classify" | _]), do: "classify"
+  defp capability_handler([capability | _]), do: to_string(capability)
+  defp capability_handler(_capabilities), do: nil
 
   defp drop_empty(map) do
     Map.reject(map, fn {_key, value} -> value in [nil, "", []] end)

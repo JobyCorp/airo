@@ -162,7 +162,8 @@ posture across many local machines.
      implemented; no pull/install workflow assumed
   3. Background sync: scheduled metadata refresh per enabled local deployment,
      with last sync status/error on the deployment row
-  4. Infinity: embeddings/rerank/classify model metadata and performance posture
+  4. Infinity: embeddings/rerank/classify model metadata, queue stats, backend,
+     and endpoint metrics implemented
   5. Speaches: speech/transcription model metadata and audio-specific latency posture
   6. Provider pages: local runtime inventory and currently loaded/running models,
      so machine-level capacity and duplicate failover copies are visible
