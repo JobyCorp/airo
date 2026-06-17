@@ -213,85 +213,121 @@ defmodule AiroWeb.Admin.ModelLive do
 
   defp detail(assigns) do
     ~H"""
-    <div class="space-y-6">
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <.button href={~p"/admin/models"}>Back to shelf</.button>
-        <.button phx-click="edit" phx-value-id={@detail.model.id} variant="primary">
-          Edit metadata
-        </.button>
+    <div class="space-y-5">
+      <div class="flex flex-col gap-3 border-y border-base-300 bg-base-200/45 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="min-w-0">
+          <div class="font-mono text-xs uppercase text-base-content/55">Model control</div>
+          <div class="mt-1 truncate text-sm text-base-content/70">
+            {@detail.model.family || "unclassified"} / {@detail.model.status}
+          </div>
+        </div>
+        <div class="flex shrink-0 gap-2">
+          <.button href={~p"/admin/models"}>Back to shelf</.button>
+          <.button phx-click="edit" phx-value-id={@detail.model.id} variant="primary">
+            Edit metadata
+          </.button>
+        </div>
       </div>
 
       <div class="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <.card variant="bordered">
+        <.card variant="bordered" class="border-l-4 border-l-info">
           <:eyebrow>Deployments</:eyebrow>
           <:title>
             {@detail.summary.enabled_deployment_count}/{@detail.summary.deployment_count}
           </:title>
           Enabled copies.
         </.card>
-        <.card variant="bordered">
+        <.card variant="bordered" class="border-l-4 border-l-success">
           <:eyebrow>Health</:eyebrow>
           <:title>{@detail.summary.health}</:title>
           Aggregate posture.
         </.card>
-        <.card variant="bordered">
+        <.card variant="bordered" class="border-l-4 border-l-base-content/25">
           <:eyebrow>Requests</:eyebrow>
           <:title>{@detail.summary.requests}</:title>
           Recorded calls.
         </.card>
-        <.card variant="bordered">
+        <.card variant="bordered" class="border-l-4 border-l-error">
           <:eyebrow>Error rate</:eyebrow>
           <:title>{@detail.summary.error_rate}</:title>
           From usage rows.
         </.card>
-        <.card variant="bordered">
+        <.card variant="bordered" class="border-l-4 border-l-warning">
           <:eyebrow>p95 latency</:eyebrow>
           <:title>{latency(@detail.summary.p95_latency_ms)}</:title>
           Served calls.
         </.card>
-        <.card variant="bordered">
+        <.card variant="bordered" class="border-l-4 border-l-base-content/25">
           <:eyebrow>Fallbacks</:eyebrow>
           <:title>{@detail.summary.fallback_rate}</:title>
           Later candidates.
         </.card>
       </div>
 
-      <.card variant="bordered">
+      <.card variant="elevated" class="overflow-hidden">
         <:title>
-          <span class="break-all">{@detail.model.display_name}</span>
+          <span class="font-mono text-base break-all md:text-lg">{@detail.model.display_name}</span>
         </:title>
-        <div class="grid gap-4 text-sm md:grid-cols-2 xl:grid-cols-4">
+        <div class="grid gap-px overflow-hidden rounded border border-base-300 bg-base-300 text-sm md:grid-cols-2 xl:grid-cols-4">
           <div>
-            <span class="text-base-content/60">Upstream</span>
-            <br />
-            <span class="break-all">{@detail.model.upstream_model_id}</span>
+            <div class="h-full bg-base-100 p-3">
+              <span class="text-base-content/60">Upstream</span>
+              <br />
+              <span class="font-mono text-xs break-all">{@detail.model.upstream_model_id}</span>
+            </div>
           </div>
           <div>
-            <span class="text-base-content/60">Family</span> <br />{@detail.model.family || "—"}
+            <div class="h-full bg-base-100 p-3">
+              <span class="text-base-content/60">Family</span> <br />{@detail.model.family || "—"}
+            </div>
           </div>
           <div>
-            <span class="text-base-content/60">Version</span> <br />{@detail.model.version || "—"}
+            <div class="h-full bg-base-100 p-3">
+              <span class="text-base-content/60">Version</span> <br />{@detail.model.version || "—"}
+            </div>
           </div>
           <div>
-            <span class="text-base-content/60">Revision</span> <br />{@detail.model.revision || "—"}
+            <div class="h-full bg-base-100 p-3">
+              <span class="text-base-content/60">Revision</span> <br />{@detail.model.revision || "—"}
+            </div>
           </div>
           <div>
-            <span class="text-base-content/60">Quantization</span>
-            <br />{@detail.model.quantization || "—"}
+            <div class="h-full bg-base-100 p-3">
+              <span class="text-base-content/60">Quantization</span>
+              <br />{@detail.model.quantization || "—"}
+            </div>
           </div>
-          <div><span class="text-base-content/60">Size</span> <br />{@detail.model.size || "—"}</div>
-          <div><span class="text-base-content/60">Status</span> <br />{@detail.model.status}</div>
-          <div><span class="text-base-content/60">Cost</span> <br />{@detail.summary.cost}</div>
+          <div>
+            <div class="h-full bg-base-100 p-3">
+              <span class="text-base-content/60">Size</span> <br />{@detail.model.size || "—"}
+            </div>
+          </div>
+          <div>
+            <div class="h-full bg-base-100 p-3">
+              <span class="text-base-content/60">Status</span> <br />{@detail.model.status}
+            </div>
+          </div>
+          <div>
+            <div class="h-full bg-base-100 p-3">
+              <span class="text-base-content/60">Cost</span> <br />{@detail.summary.cost}
+            </div>
+          </div>
         </div>
         <p :if={@detail.model.notes} class="mt-4 text-sm">{@detail.model.notes}</p>
       </.card>
 
-      <.card :if={@detail.leading_deployment} variant="bordered">
+      <.card :if={@detail.leading_deployment} variant="elevated" class="border-l-4 border-l-warning">
         <:title>Deployment guidance</:title>
-        <div class="grid gap-4 text-sm md:grid-cols-2 xl:grid-cols-5">
+        <div class="grid gap-4 text-sm md:grid-cols-[1.1fr_1fr_1.5fr_0.7fr_1.5fr]">
           <div>
             <span class="text-base-content/60">Recommendation</span>
-            <br />{@detail.leading_deployment.recommendation}
+            <br />
+            <span class={[
+              "inline-flex rounded border px-2 py-1 font-semibold",
+              recommendation_class(@detail.leading_deployment.recommendation)
+            ]}>
+              {@detail.leading_deployment.recommendation}
+            </span>
           </div>
           <div>
             <span class="text-base-content/60">Provider</span>
@@ -303,7 +339,10 @@ defmodule AiroWeb.Admin.ModelLive do
           </div>
           <div>
             <span class="text-base-content/60">Score</span>
-            <br />{@detail.leading_deployment.guidance_score}/100
+            <br />
+            <span class="font-mono text-base text-base-content">
+              {@detail.leading_deployment.guidance_score}/100
+            </span>
           </div>
           <div>
             <span class="text-base-content/60">Reason</span>
@@ -481,6 +520,16 @@ defmodule AiroWeb.Admin.ModelLive do
   end
 
   defp running_label(_deployment), do: "—"
+
+  defp recommendation_class("Lean on"), do: "border-success/40 bg-success/10 text-success"
+  defp recommendation_class("Candidate"), do: "border-info/40 bg-info/10 text-info"
+  defp recommendation_class("Needs traffic"), do: "border-warning/40 bg-warning/10 text-warning"
+  defp recommendation_class("Watch"), do: "border-warning/40 bg-warning/10 text-warning"
+  defp recommendation_class("Avoid"), do: "border-error/40 bg-error/10 text-error"
+  defp recommendation_class("Disabled"), do: "border-base-300 bg-base-200 text-base-content/70"
+
+  defp recommendation_class(_recommendation),
+    do: "border-base-300 bg-base-200 text-base-content/70"
 
   defp latency(nil), do: "—"
   defp latency(ms), do: "#{ms} ms"
