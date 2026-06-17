@@ -214,6 +214,7 @@ defmodule AiroWeb.AdminLiveTest do
       {:ok, _view, detail_html} = live(conn, ~p"/admin/models/#{model.id}")
 
       assert detail_html =~ "Deployment copies"
+      assert detail_html =~ "Version performance"
       assert detail_html =~ "Routing participation"
       assert detail_html =~ "Recent traces"
       assert detail_html =~ "gt_model_trace"

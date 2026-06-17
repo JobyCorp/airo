@@ -51,6 +51,11 @@ defmodule Airo.ModelShelfTest do
     {:ok, _} =
       Usage.record_usage(%{
         trace_id: "gt_one",
+        model_id: d1.model_id,
+        model_display_name: "Qwen eval",
+        model_upstream_id: "qwen3.5-9b",
+        model_version: "v1",
+        model_revision: "r1",
         deployment_id: d1.id,
         request_model: "chat-deep",
         alias_name: "chat-deep",
@@ -63,6 +68,11 @@ defmodule Airo.ModelShelfTest do
     {:ok, _} =
       Usage.record_usage(%{
         trace_id: "gt_two",
+        model_id: d2.model_id,
+        model_display_name: "Qwen eval",
+        model_upstream_id: "qwen3.5-9b",
+        model_version: "v2",
+        model_revision: "r2",
         deployment_id: d2.id,
         request_model: "chat-deep",
         alias_name: "chat-deep",
@@ -87,6 +97,7 @@ defmodule Airo.ModelShelfTest do
 
     detail = ModelShelf.get_detail!(summary.model.id)
     assert length(detail.deployment_summaries) == 2
+    assert detail.version_summaries |> Enum.map(& &1.version) |> Enum.sort() == ["v1", "v2"]
     assert [%{alias: %{name: "chat-deep"}}] = detail.aliases
 
     assert detail.recent_records |> Enum.map(& &1.trace_id) |> Enum.sort() == [

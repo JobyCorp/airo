@@ -258,6 +258,22 @@ defmodule AiroWeb.Admin.ModelLive do
       </.card>
 
       <.card variant="bordered">
+        <:title>Version performance</:title>
+        <.table id="model-versions" rows={@detail.version_summaries}>
+          <:col :let={row} label="Version">{row.version}</:col>
+          <:col :let={row} label="Revision">{row.revision || "—"}</:col>
+          <:col :let={row} label="First seen">{row.first_seen}</:col>
+          <:col :let={row} label="Last seen">{row.last_seen}</:col>
+          <:col :let={row} label="Requests">{row.requests}</:col>
+          <:col :let={row} label="Errors">{row.error_rate}</:col>
+          <:col :let={row} label="p50">{latency(row.p50_latency_ms)}</:col>
+          <:col :let={row} label="p95">{latency(row.p95_latency_ms)}</:col>
+          <:col :let={row} label="Fallbacks">{row.fallback_rate}</:col>
+          <:col :let={row} label="Cost">{row.cost}</:col>
+        </.table>
+      </.card>
+
+      <.card variant="bordered">
         <:title>Deployment copies</:title>
         <.table id="model-deployments" rows={@detail.deployment_summaries}>
           <:col :let={row} label="Provider">{row.provider && row.provider.name}</:col>

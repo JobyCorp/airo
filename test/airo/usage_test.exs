@@ -89,7 +89,57 @@ defmodule Airo.UsageTest do
       assert record.alias_name == "chat-standard"
       assert record.tokens_in == 1000
       assert record.deployment_id == deployment.id
+      assert record.model_id == deployment.model_id
+      assert record.model_display_name == "m"
+      assert record.model_upstream_id == "m"
       assert Decimal.equal?(record.cost, Decimal.new("0.002"))
+    end
+
+    test "snapshots model version metadata at usage-write time" do
+      {:ok, provider} =
+        Config.create_provider(%{
+          name: "version-host",
+          adapter_type: :vllm,
+          base_url: "http://p/v1",
+          auth_kind: :none
+        })
+
+      {:ok, deployment} =
+        Config.create_deployment(%{
+          provider_id: provider.id,
+          model_name: "qwen-eval",
+          capabilities: [:chat]
+        })
+
+      model = Config.get_model!(deployment.model_id)
+      {:ok, model} = Config.update_model(model, %{version: "v1", revision: "r1"})
+
+      :ok =
+        Usage.record_async(%{
+          served: %{deployment: %{deployment | model: model}},
+          alias_name: "chat-eval",
+          capability: :chat,
+          response: @response
+        })
+
+      {:ok, model} = Config.update_model(model, %{version: "v2", revision: "r2"})
+
+      :ok =
+        Usage.record_async(%{
+          served: %{deployment: %{deployment | model: model}},
+          alias_name: "chat-eval",
+          capability: :chat,
+          response: @response
+        })
+
+      records =
+        eventually(fn ->
+          records = Usage.list_usage_records(%{"model" => "qwen-eval"}, 10)
+          if length(records) == 2, do: records
+        end)
+
+      assert records |> Enum.map(& &1.model_version) |> Enum.sort() == ["v1", "v2"]
+      assert records |> Enum.map(& &1.model_revision) |> Enum.sort() == ["r1", "r2"]
     end
   end
 

@@ -8,6 +8,7 @@ defmodule Airo.Usage do
   import Ecto.Query, warn: false
 
   alias Airo.Repo
+  alias Airo.Config.Model
   alias Airo.Usage.UsageRecord
 
   @task_supervisor Airo.Usage.TaskSupervisor
@@ -108,11 +109,17 @@ defmodule Airo.Usage do
   def build_attrs(context) do
     {tokens_in, tokens_out} = tokens(context[:response])
     deployment = context[:served] && context[:served].deployment
+    model_snapshot = model_snapshot(deployment)
 
     %{
       client_key_id: context[:client_key] && context[:client_key].id,
       trace_id: context[:trace_id],
       request_model: context[:request_model] || context[:alias_name],
+      model_id: model_snapshot[:id],
+      model_display_name: model_snapshot[:display_name],
+      model_upstream_id: model_snapshot[:upstream_model_id],
+      model_version: model_snapshot[:version],
+      model_revision: model_snapshot[:revision],
       deployment_id: deployment && deployment.id,
       alias_name: context[:alias_name],
       capability: context[:capability],
@@ -175,6 +182,29 @@ defmodule Airo.Usage do
   defp filter_time_range(query, "24h"), do: since(query, -86_400)
   defp filter_time_range(query, "7d"), do: since(query, -604_800)
   defp filter_time_range(query, _), do: query
+
+  defp model_snapshot(nil), do: %{}
+
+  defp model_snapshot(%{model: %Model{} = model}), do: model_snapshot(model)
+
+  defp model_snapshot(%{model_id: model_id}) when not is_nil(model_id) do
+    case Repo.get(Model, model_id) do
+      nil -> %{}
+      model -> model_snapshot(model)
+    end
+  end
+
+  defp model_snapshot(%Model{} = model) do
+    %{
+      id: model.id,
+      display_name: model.display_name,
+      upstream_model_id: model.upstream_model_id,
+      version: model.version,
+      revision: model.revision
+    }
+  end
+
+  defp model_snapshot(_deployment), do: %{}
 
   defp since(query, seconds) do
     cutoff = NaiveDateTime.utc_now() |> NaiveDateTime.add(seconds, :second)

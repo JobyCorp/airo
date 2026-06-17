@@ -24,11 +24,13 @@ defmodule Airo.ModelShelf do
 
   def get_detail!(id) do
     model = Config.get_model_with_deployments!(id)
+    records = usage_records(deployments: model.deployments, model_id: model.id)
 
     %{
       model: model,
       summary: summary(model),
       deployment_summaries: deployment_summaries(model.deployments),
+      version_summaries: version_summaries(records),
       aliases: aliases_for_model(model.id),
       health_events: health_events(model.deployments),
       recent_records: recent_records(model.deployments)
@@ -37,7 +39,7 @@ defmodule Airo.ModelShelf do
 
   defp summary(%Model{} = model) do
     deployments = model.deployments || []
-    records = usage_records(deployments)
+    records = usage_records(deployments: deployments, model_id: model.id)
     metrics = metrics(records)
 
     %{
@@ -58,7 +60,7 @@ defmodule Airo.ModelShelf do
 
   defp deployment_summaries(deployments) do
     Enum.map(deployments, fn deployment ->
-      records = usage_records([deployment])
+      records = usage_records(deployments: [deployment])
       metrics = metrics(records)
 
       %{
@@ -75,13 +77,22 @@ defmodule Airo.ModelShelf do
     end)
   end
 
-  defp usage_records(deployments) do
-    ids = deployment_ids(deployments)
+  defp usage_records(opts) do
+    ids = deployment_ids(Keyword.fetch!(opts, :deployments))
+    model_id = Keyword.get(opts, :model_id)
 
-    if ids == [] do
-      []
-    else
-      Repo.all(from r in UsageRecord, where: r.deployment_id in ^ids)
+    cond do
+      ids == [] and is_nil(model_id) ->
+        []
+
+      is_nil(model_id) ->
+        Repo.all(from r in UsageRecord, where: r.deployment_id in ^ids)
+
+      ids == [] ->
+        Repo.all(from r in UsageRecord, where: r.model_id == ^model_id)
+
+      true ->
+        Repo.all(from r in UsageRecord, where: r.model_id == ^model_id or r.deployment_id in ^ids)
     end
   end
 
@@ -139,6 +150,34 @@ defmodule Airo.ModelShelf do
       cost: sum_cost(records)
     }
   end
+
+  defp version_summaries(records) do
+    records
+    |> Enum.group_by(&version_key/1)
+    |> Enum.map(fn {{version, revision}, grouped} ->
+      metrics = metrics(grouped)
+      dates = Enum.map(grouped, & &1.inserted_at)
+
+      %{
+        version: version || "Unversioned",
+        revision: revision,
+        first_seen: min_datetime(dates),
+        last_seen: max_datetime(dates),
+        requests: metrics.requests,
+        error_rate: metrics.error_rate,
+        fallback_rate: metrics.fallback_rate,
+        p50_latency_ms: metrics.p50_latency_ms,
+        p95_latency_ms: metrics.p95_latency_ms,
+        cost: metrics.cost
+      }
+    end)
+    |> Enum.sort_by(& &1.last_seen, {:desc, NaiveDateTime})
+  end
+
+  defp version_key(record), do: {record.model_version, record.model_revision}
+
+  defp min_datetime(dates), do: Enum.min_by(dates, &NaiveDateTime.to_erl/1)
+  defp max_datetime(dates), do: Enum.max_by(dates, &NaiveDateTime.to_erl/1)
 
   defp capabilities(deployments) do
     deployments

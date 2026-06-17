@@ -238,6 +238,7 @@ Secret            ← Cloak vault  (port from either app, identical)
 UsageRecord       ← promoted incogito Runlog
   ts, client_key_ref, alias, deployment_ref, capability,
   tokens_in/out, latency_ms, outcome, finish_reason, fallback_used, cost
+  model/version snapshot copied at write time for before/after comparisons
 ```
 
 Mapping from today's schemas:
@@ -276,9 +277,9 @@ via `route.binding` when it needs strict-selection behavior.
 - **Model Shelf**: admin model-management layer over deployments. It shows one
   model/version with all runnable deployment copies across machines, aggregate
   and per-deployment latency/error/fallback/cost, recent traces, health
-  transitions, and alias participation. Routing remains explicit in Alias; the
-  shelf explains which models are safe to lean on and whether version changes
-  improved observed behavior.
+  transitions, alias participation, and version-performance groups. Routing
+  remains explicit in Alias; the shelf explains which models are safe to lean on
+  and whether version changes improved observed behavior.
 - **Transparency**: `x-gateway-*` headers + SSE trailing event (see §5.1).
 - Rate limits: **v2**.
 
