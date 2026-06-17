@@ -96,7 +96,7 @@ See [DESIGN-realtime-and-client.md](./DESIGN-realtime-and-client.md) §6.
 - `airo_client_realtime` relay-to-Airo; replaces `openai_ex` in both apps
 - **DoD extra:** incogito/orchester drop per-provider transport code; both green on the package
 
-### [ ] S10 — API docs (`/docs`)
+### [x] S10 — API docs (`/docs`)
 A Swagger UI reference at `/docs` (like Infinity's), backed by the existing
 `open_api_spex` document at `/openapi`.
 - `get "/docs", OpenApiSpex.Plug.SwaggerUI, path: "/openapi"`; nav link; `/docs` open (LAN), Bearer authorize for try-it-out
