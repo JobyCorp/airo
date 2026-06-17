@@ -54,6 +54,41 @@ defmodule AiroWeb.AdminLiveTest do
     end)
   end
 
+  defp stub_infinity_native do
+    Req.Test.stub(Airo.TestStub, fn
+      %{request_path: "/models"} = conn ->
+        Req.Test.json(conn, %{
+          "data" => [
+            %{
+              "id" => "BAAI/bge-reranker-v2-m3",
+              "stats" => %{
+                "queue_fraction" => 0.0,
+                "queue_absolute" => 0,
+                "results_pending" => 0,
+                "batch_size" => 32
+              },
+              "object" => "model",
+              "owned_by" => "infinity",
+              "created" => 1_781_703_287,
+              "backend" => "torch",
+              "capabilities" => ["rerank"]
+            }
+          ],
+          "object" => "list"
+        })
+
+      %{request_path: "/metrics"} = conn ->
+        Req.Test.text(
+          conn,
+          """
+          http_requests_total{handler="/rerank",method="POST",status="2xx"} 250.0
+          http_request_duration_seconds_count{handler="/rerank",method="POST"} 250.0
+          http_request_duration_seconds_sum{handler="/rerank",method="POST"} 8.0
+          """
+        )
+    end)
+  end
+
   describe "providers" do
     test "create, list, and delete", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/admin/providers")
@@ -85,6 +120,43 @@ defmodule AiroWeb.AdminLiveTest do
 
       html = view |> form("form", provider: %{name: "", base_url: ""}) |> render_submit()
       assert html =~ "can&#39;t be blank" or html =~ "can't be blank"
+    end
+
+    test "opens provider inventory and syncs deployment metadata", %{conn: conn} do
+      stub_infinity_native()
+
+      {:ok, provider} =
+        Config.create_provider(%{
+          name: "infinity-detail",
+          adapter_type: :infinity,
+          base_url: "http://infinity:7997",
+          auth_kind: :none
+        })
+
+      {:ok, deployment} =
+        Config.create_deployment(%{
+          provider_id: provider.id,
+          model_name: "BAAI/bge-reranker-v2-m3",
+          capabilities: [:rerank]
+        })
+
+      {:ok, view, html} = live(conn, ~p"/admin/providers/#{provider.id}")
+
+      assert html =~ "Local catalog"
+      assert html =~ "BAAI/bge-reranker-v2-m3"
+      assert html =~ "torch"
+      assert has_element?(view, "#provider-deployments")
+      assert has_element?(view, "#provider-catalog")
+
+      html =
+        view
+        |> element("button[phx-click='sync_deployment'][phx-value-id='#{deployment.id}']")
+        |> render_click()
+
+      assert html =~ "Provider metadata synced."
+      assert html =~ "bge"
+      assert html =~ "rerank"
+      assert html =~ "32"
     end
   end
 
