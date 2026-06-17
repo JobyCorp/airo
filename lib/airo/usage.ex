@@ -46,6 +46,53 @@ defmodule Airo.Usage do
     }
   end
 
+  @doc """
+  Bucket usage records into chart-ready performance series.
+
+  Supported ranges mirror the usage UI: `"1h"`, `"24h"`, and `"7d"`.
+  The result intentionally contains plain lists so LiveViews can JSON-encode it
+  directly for chart hooks without leaking Ecto structs into the client.
+  """
+  def performance_series(filters \\ %{}) do
+    range = Map.get(filters, "range", "24h")
+    {window_seconds, bucket_seconds, bucket_count} = bucket_config(range)
+
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+    starts_at = NaiveDateTime.add(now, -window_seconds, :second)
+
+    records =
+      filters
+      |> Map.put("range", range)
+      |> usage_query()
+      |> Repo.all()
+
+    grouped =
+      records
+      |> Enum.group_by(&bucket_index(&1, starts_at, bucket_seconds, bucket_count))
+      |> Map.drop([nil])
+
+    buckets =
+      Enum.map(0..(bucket_count - 1), fn index ->
+        bucket_start = NaiveDateTime.add(starts_at, index * bucket_seconds, :second)
+        bucket_records = Map.get(grouped, index, [])
+
+        %{
+          label: bucket_label(bucket_start, range),
+          records: bucket_records,
+          metrics: bucket_metrics(bucket_records)
+        }
+      end)
+
+    %{
+      categories: Enum.map(buckets, & &1.label),
+      requests: Enum.map(buckets, & &1.metrics.requests),
+      errors: Enum.map(buckets, & &1.metrics.errors),
+      fallbacks: Enum.map(buckets, & &1.metrics.fallbacks),
+      p50_latency_ms: Enum.map(buckets, & &1.metrics.p50_latency_ms),
+      p95_latency_ms: Enum.map(buckets, & &1.metrics.p95_latency_ms)
+    }
+  end
+
   @doc "Total cost across the recorded usage (Decimal)."
   def total_cost do
     Repo.one(from r in UsageRecord, select: coalesce(sum(r.cost), 0))
@@ -209,6 +256,33 @@ defmodule Airo.Usage do
   defp since(query, seconds) do
     cutoff = NaiveDateTime.utc_now() |> NaiveDateTime.add(seconds, :second)
     where(query, [r], r.inserted_at >= ^cutoff)
+  end
+
+  defp bucket_config("1h"), do: {3_600, 300, 12}
+  defp bucket_config("7d"), do: {604_800, 86_400, 7}
+  defp bucket_config(_range), do: {86_400, 3_600, 24}
+
+  defp bucket_index(%{inserted_at: inserted_at}, starts_at, bucket_seconds, bucket_count) do
+    diff = NaiveDateTime.diff(inserted_at, starts_at, :second)
+
+    cond do
+      diff < 0 -> nil
+      diff > bucket_seconds * bucket_count -> nil
+      true -> min(div(diff, bucket_seconds), bucket_count - 1)
+    end
+  end
+
+  defp bucket_label(datetime, "7d"), do: Calendar.strftime(datetime, "%m/%d")
+  defp bucket_label(datetime, _range), do: Calendar.strftime(datetime, "%H:%M")
+
+  defp bucket_metrics(records) do
+    %{
+      requests: length(records),
+      errors: Enum.count(records, &(&1.outcome == :error)),
+      fallbacks: Enum.count(records, & &1.fallback_used),
+      p50_latency_ms: percentile_latency(records, 0.50),
+      p95_latency_ms: percentile_latency(records, 0.95)
+    }
   end
 
   defp percent(_part, 0), do: "0.0%"

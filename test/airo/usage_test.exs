@@ -143,6 +143,36 @@ defmodule Airo.UsageTest do
     end
   end
 
+  describe "performance_series/1" do
+    test "returns fixed chart buckets for recent usage" do
+      {:ok, _} =
+        Usage.record_usage(%{
+          trace_id: "gt_success",
+          capability: :chat,
+          outcome: :success,
+          latency_ms: 10,
+          fallback_used: false
+        })
+
+      {:ok, _} =
+        Usage.record_usage(%{
+          trace_id: "gt_error",
+          capability: :chat,
+          outcome: :error,
+          latency_ms: 30,
+          fallback_used: true
+        })
+
+      series = Usage.performance_series(%{"range" => "24h"})
+
+      assert length(series.categories) == 24
+      assert Enum.sum(series.requests) == 2
+      assert Enum.sum(series.errors) == 1
+      assert Enum.sum(series.fallbacks) == 1
+      assert 30 in series.p95_latency_ms
+    end
+  end
+
   defp eventually(fun, retries \\ 50) do
     case fun.() do
       nil when retries > 0 -> Process.sleep(10) && eventually(fun, retries - 1)
