@@ -68,6 +68,13 @@ defmodule AiroWeb.Router do
     get "/openapi", AiroWeb.OpenApiController, :show
   end
 
+  # Interactive API reference (Swagger UI) over the /openapi document.
+  scope "/" do
+    pipe_through :browser
+
+    get "/docs", OpenApiSpex.Plug.SwaggerUI, path: "/openapi"
+  end
+
   if Application.compile_env(:airo, :dev_routes) do
     import Phoenix.LiveDashboard.Router
 
