@@ -257,10 +257,14 @@ defmodule AiroWeb.Admin.ModelLive do
       </div>
 
       <.card variant="bordered">
-        <:title>{@detail.model.display_name}</:title>
+        <:title>
+          <span class="break-all">{@detail.model.display_name}</span>
+        </:title>
         <div class="grid gap-4 text-sm md:grid-cols-2 xl:grid-cols-4">
           <div>
-            <span class="text-base-content/60">Upstream</span> <br />{@detail.model.upstream_model_id}
+            <span class="text-base-content/60">Upstream</span>
+            <br />
+            <span class="break-all">{@detail.model.upstream_model_id}</span>
           </div>
           <div>
             <span class="text-base-content/60">Family</span> <br />{@detail.model.family || "—"}
@@ -295,7 +299,7 @@ defmodule AiroWeb.Admin.ModelLive do
           </div>
           <div>
             <span class="text-base-content/60">Model id</span>
-            <br />{@detail.leading_deployment.deployment.model_name}
+            <br /><span class="break-all">{@detail.leading_deployment.deployment.model_name}</span>
           </div>
           <div>
             <span class="text-base-content/60">Score</span>
@@ -310,127 +314,143 @@ defmodule AiroWeb.Admin.ModelLive do
 
       <.card variant="bordered">
         <:title>Version performance</:title>
-        <.table id="model-versions" rows={@detail.version_summaries}>
-          <:col :let={row} label="Version">{row.version}</:col>
-          <:col :let={row} label="Revision">{row.revision || "—"}</:col>
-          <:col :let={row} label="First seen">{row.first_seen}</:col>
-          <:col :let={row} label="Last seen">{row.last_seen}</:col>
-          <:col :let={row} label="Requests">{row.requests}</:col>
-          <:col :let={row} label="Errors">{row.error_rate}</:col>
-          <:col :let={row} label="p50">{latency(row.p50_latency_ms)}</:col>
-          <:col :let={row} label="p95">{latency(row.p95_latency_ms)}</:col>
-          <:col :let={row} label="Fallbacks">{row.fallback_rate}</:col>
-          <:col :let={row} label="Cost">{row.cost}</:col>
-        </.table>
+        <div class="max-w-full overflow-x-auto">
+          <.table id="model-versions" rows={@detail.version_summaries} class="min-w-max">
+            <:col :let={row} label="Version">{row.version}</:col>
+            <:col :let={row} label="Revision">{row.revision || "—"}</:col>
+            <:col :let={row} label="First seen">{row.first_seen}</:col>
+            <:col :let={row} label="Last seen">{row.last_seen}</:col>
+            <:col :let={row} label="Requests">{row.requests}</:col>
+            <:col :let={row} label="Errors">{row.error_rate}</:col>
+            <:col :let={row} label="p50">{latency(row.p50_latency_ms)}</:col>
+            <:col :let={row} label="p95">{latency(row.p95_latency_ms)}</:col>
+            <:col :let={row} label="Fallbacks">{row.fallback_rate}</:col>
+            <:col :let={row} label="Cost">{row.cost}</:col>
+          </.table>
+        </div>
       </.card>
 
       <.card variant="bordered">
         <:title>Deployment copies</:title>
-        <.table id="model-deployments" rows={@detail.deployment_summaries}>
-          <:col :let={row} label="Provider">{row.provider && row.provider.name}</:col>
-          <:col :let={row} label="Model id">{row.deployment.model_name}</:col>
-          <:col :let={row} label="Health">
-            <CompositeComponents.health_status status={to_string(row.health)} />
-          </:col>
-          <:col :let={row} label="Use">{row.recommendation}</:col>
-          <:col :let={row} label="Score">{row.guidance_score}/100</:col>
-          <:col :let={row} label="Reason">{row.guidance_reason}</:col>
-          <:col :let={row} label="Enabled">{row.deployment.enabled}</:col>
-          <:col :let={row} label="Capabilities">{join_values(row.deployment.capabilities)}</:col>
-          <:col :let={row} label="Requests">{row.requests}</:col>
-          <:col :let={row} label="Errors">{row.error_rate}</:col>
-          <:col :let={row} label="p50">{latency(row.p50_latency_ms)}</:col>
-          <:col :let={row} label="p95">{latency(row.p95_latency_ms)}</:col>
-          <:col :let={row} label="Fallbacks">{row.fallback_rate}</:col>
-          <:col :let={row} label="Synced">{metadata_value(row.deployment, "synced_at")}</:col>
-          <:action :let={row}>
-            <.button
-              :if={:inspect_model in row.local_capabilities}
-              size="sm"
-              phx-click="sync_deployment"
-              phx-value-id={row.deployment.id}
-            >
-              Sync
-            </.button>
-          </:action>
-        </.table>
+        <div class="max-w-full overflow-x-auto">
+          <.table id="model-deployments" rows={@detail.deployment_summaries} class="min-w-max">
+            <:col :let={row} label="Provider">{row.provider && row.provider.name}</:col>
+            <:col :let={row} label="Model id">
+              <span class="block max-w-80 break-all">{row.deployment.model_name}</span>
+            </:col>
+            <:col :let={row} label="Health">
+              <CompositeComponents.health_status status={to_string(row.health)} />
+            </:col>
+            <:col :let={row} label="Use">{row.recommendation}</:col>
+            <:col :let={row} label="Score">{row.guidance_score}/100</:col>
+            <:col :let={row} label="Reason">{row.guidance_reason}</:col>
+            <:col :let={row} label="Enabled">{row.deployment.enabled}</:col>
+            <:col :let={row} label="Capabilities">{join_values(row.deployment.capabilities)}</:col>
+            <:col :let={row} label="Requests">{row.requests}</:col>
+            <:col :let={row} label="Errors">{row.error_rate}</:col>
+            <:col :let={row} label="p50">{latency(row.p50_latency_ms)}</:col>
+            <:col :let={row} label="p95">{latency(row.p95_latency_ms)}</:col>
+            <:col :let={row} label="Fallbacks">{row.fallback_rate}</:col>
+            <:col :let={row} label="Synced">{metadata_value(row.deployment, "synced_at")}</:col>
+            <:action :let={row}>
+              <.button
+                :if={:inspect_model in row.local_capabilities}
+                size="sm"
+                phx-click="sync_deployment"
+                phx-value-id={row.deployment.id}
+              >
+                Sync
+              </.button>
+            </:action>
+          </.table>
+        </div>
       </.card>
 
       <.card variant="bordered">
         <:title>Provider metadata</:title>
-        <.table id="provider-metadata" rows={@detail.deployment_summaries}>
-          <:col :let={row} label="Provider">{row.provider && row.provider.name}</:col>
-          <:col :let={row} label="Runtime">{metadata_value(row.deployment, "runtime_version")}</:col>
-          <:col :let={row} label="Type">{metadata_value(row.deployment, "type")}</:col>
-          <:col :let={row} label="Backend">{metadata_value(row.deployment, "backend")}</:col>
-          <:col :let={row} label="Family">{metadata_value(row.deployment, "family")}</:col>
-          <:col :let={row} label="Parameters">
-            {metadata_value(row.deployment, "parameter_size")}
-          </:col>
-          <:col :let={row} label="Quantization">
-            {metadata_value(row.deployment, "quantization")}
-          </:col>
-          <:col :let={row} label="Format">{metadata_value(row.deployment, "format")}</:col>
-          <:col :let={row} label="Architecture">
-            {metadata_value(row.deployment, "architecture")}
-          </:col>
-          <:col :let={row} label="Context">
-            {metadata_value(row.deployment, "context_window")}
-          </:col>
-          <:col :let={row} label="Batch">{metadata_value(row.deployment, "batch_size")}</:col>
-          <:col :let={row} label="Queue">{metadata_value(row.deployment, "queue_absolute")}</:col>
-          <:col :let={row} label="Languages">
-            {metadata_value(row.deployment, "language_count")}
-          </:col>
-          <:col :let={row} label="Voices">{metadata_value(row.deployment, "voice_count")}</:col>
-          <:col :let={row} label="Sample rate">
-            {metadata_value(row.deployment, "sample_rate")}
-          </:col>
-          <:col :let={row} label="Running">{running_label(row.deployment)}</:col>
-        </.table>
+        <div class="max-w-full overflow-x-auto">
+          <.table id="provider-metadata" rows={@detail.deployment_summaries} class="min-w-max">
+            <:col :let={row} label="Provider">{row.provider && row.provider.name}</:col>
+            <:col :let={row} label="Runtime">
+              {metadata_value(row.deployment, "runtime_version")}
+            </:col>
+            <:col :let={row} label="Type">{metadata_value(row.deployment, "type")}</:col>
+            <:col :let={row} label="Backend">{metadata_value(row.deployment, "backend")}</:col>
+            <:col :let={row} label="Family">{metadata_value(row.deployment, "family")}</:col>
+            <:col :let={row} label="Parameters">
+              {metadata_value(row.deployment, "parameter_size")}
+            </:col>
+            <:col :let={row} label="Quantization">
+              {metadata_value(row.deployment, "quantization")}
+            </:col>
+            <:col :let={row} label="Format">{metadata_value(row.deployment, "format")}</:col>
+            <:col :let={row} label="Architecture">
+              {metadata_value(row.deployment, "architecture")}
+            </:col>
+            <:col :let={row} label="Context">
+              {metadata_value(row.deployment, "context_window")}
+            </:col>
+            <:col :let={row} label="Batch">{metadata_value(row.deployment, "batch_size")}</:col>
+            <:col :let={row} label="Queue">{metadata_value(row.deployment, "queue_absolute")}</:col>
+            <:col :let={row} label="Languages">
+              {metadata_value(row.deployment, "language_count")}
+            </:col>
+            <:col :let={row} label="Voices">{metadata_value(row.deployment, "voice_count")}</:col>
+            <:col :let={row} label="Sample rate">
+              {metadata_value(row.deployment, "sample_rate")}
+            </:col>
+            <:col :let={row} label="Running">{running_label(row.deployment)}</:col>
+          </.table>
+        </div>
       </.card>
 
       <.card variant="bordered">
         <:title>Routing participation</:title>
-        <.table id="model-aliases" rows={@detail.aliases}>
-          <:col :let={candidate} label="Alias">{candidate.alias.name}</:col>
-          <:col :let={candidate} label="Capability">{candidate.alias.capability}</:col>
-          <:col :let={candidate} label="Strategy">{candidate.alias.strategy}</:col>
-          <:col :let={candidate} label="Provider">
-            {candidate.deployment.provider && candidate.deployment.provider.name}
-          </:col>
-          <:col :let={candidate} label="Weight">{candidate.weight}</:col>
-          <:col :let={candidate} label="Priority">{candidate.priority}</:col>
-        </.table>
+        <div class="max-w-full overflow-x-auto">
+          <.table id="model-aliases" rows={@detail.aliases} class="min-w-max">
+            <:col :let={candidate} label="Alias">{candidate.alias.name}</:col>
+            <:col :let={candidate} label="Capability">{candidate.alias.capability}</:col>
+            <:col :let={candidate} label="Strategy">{candidate.alias.strategy}</:col>
+            <:col :let={candidate} label="Provider">
+              {candidate.deployment.provider && candidate.deployment.provider.name}
+            </:col>
+            <:col :let={candidate} label="Weight">{candidate.weight}</:col>
+            <:col :let={candidate} label="Priority">{candidate.priority}</:col>
+          </.table>
+        </div>
       </.card>
 
       <.card variant="bordered">
         <:title>Recent health transitions</:title>
-        <.table id="model-health-events" rows={@detail.health_events}>
-          <:col :let={event} label="When">{event.inserted_at}</:col>
-          <:col :let={event} label="Provider">{event.provider && event.provider.name}</:col>
-          <:col :let={event} label="Status">
-            <CompositeComponents.health_status status={to_string(event.status)} />
-          </:col>
-          <:col :let={event} label="Source">{event.source}</:col>
-          <:col :let={event} label="Latency">{latency(event.latency_ms)}</:col>
-          <:col :let={event} label="Reason">{event.reason || "—"}</:col>
-        </.table>
+        <div class="max-w-full overflow-x-auto">
+          <.table id="model-health-events" rows={@detail.health_events} class="min-w-max">
+            <:col :let={event} label="When">{event.inserted_at}</:col>
+            <:col :let={event} label="Provider">{event.provider && event.provider.name}</:col>
+            <:col :let={event} label="Status">
+              <CompositeComponents.health_status status={to_string(event.status)} />
+            </:col>
+            <:col :let={event} label="Source">{event.source}</:col>
+            <:col :let={event} label="Latency">{latency(event.latency_ms)}</:col>
+            <:col :let={event} label="Reason">{event.reason || "—"}</:col>
+          </.table>
+        </div>
       </.card>
 
       <.card variant="bordered">
         <:title>Recent traces</:title>
-        <.table id="model-traces" rows={@detail.recent_records}>
-          <:col :let={record} label="When">{record.inserted_at}</:col>
-          <:col :let={record} label="Trace">
-            <span class="font-mono text-xs">{record.trace_id || "—"}</span>
-          </:col>
-          <:col :let={record} label="Client">{record.client_key && record.client_key.name}</:col>
-          <:col :let={record} label="Outcome">{record.outcome}</:col>
-          <:col :let={record} label="Error">{record.error_code || "—"}</:col>
-          <:col :let={record} label="Latency">{latency(record.latency_ms)}</:col>
-          <:col :let={record} label="Tokens">{record.tokens_in}/{record.tokens_out}</:col>
-        </.table>
+        <div class="max-w-full overflow-x-auto">
+          <.table id="model-traces" rows={@detail.recent_records} class="min-w-max">
+            <:col :let={record} label="When">{record.inserted_at}</:col>
+            <:col :let={record} label="Trace">
+              <span class="font-mono text-xs">{record.trace_id || "—"}</span>
+            </:col>
+            <:col :let={record} label="Client">{record.client_key && record.client_key.name}</:col>
+            <:col :let={record} label="Outcome">{record.outcome}</:col>
+            <:col :let={record} label="Error">{record.error_code || "—"}</:col>
+            <:col :let={record} label="Latency">{latency(record.latency_ms)}</:col>
+            <:col :let={record} label="Tokens">{record.tokens_in}/{record.tokens_out}</:col>
+          </.table>
+        </div>
       </.card>
     </div>
     """
