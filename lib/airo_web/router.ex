@@ -27,6 +27,7 @@ defmodule AiroWeb.Router do
     post "/chat/completions", ChatController, :create
     post "/embeddings", EmbeddingsController, :create
     post "/rerank", RerankController, :create
+    post "/classify", ClassifyController, :create
     post "/audio/speech", AudioController, :speech
     post "/audio/transcriptions", AudioController, :transcriptions
     get "/models", ModelsController, :index
