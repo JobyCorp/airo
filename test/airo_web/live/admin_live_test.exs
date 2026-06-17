@@ -150,6 +150,96 @@ defmodule AiroWeb.AdminLiveTest do
 
       assert html =~ "Couldn&#39;t reach the provider" or html =~ "Couldn't reach the provider"
     end
+
+    test "can attach a deployment to an existing shelf model", %{conn: conn} do
+      provider = provider("vllm-shelf")
+
+      {:ok, model} =
+        Config.create_model(%{
+          display_name: "Qwen evaluation",
+          upstream_model_id: "qwen3.5-9b",
+          status: :evaluating
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/admin/deployments")
+
+      view |> element("button", "New deployment") |> render_click()
+
+      html =
+        view
+        |> form("form",
+          deployment: %{
+            provider_id: provider.id,
+            model_id: model.id,
+            model_name: "qwen3.5-9b",
+            capabilities: ["chat"]
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "qwen3.5-9b"
+      assert Config.list_deployments() |> Enum.any?(&(&1.model_id == model.id))
+    end
+  end
+
+  describe "model shelf" do
+    test "renders aggregate model posture and opens detail", %{conn: conn} do
+      {:ok, deployment} =
+        Config.create_deployment(%{
+          provider_id: provider("model-host").id,
+          model_name: "qwen3.5-9b",
+          capabilities: [:chat],
+          class: :deep
+        })
+
+      {:ok, _} =
+        Usage.record_usage(%{
+          trace_id: "gt_model_trace",
+          deployment_id: deployment.id,
+          request_model: "chat-deep",
+          alias_name: "chat-deep",
+          capability: :chat,
+          latency_ms: 123,
+          outcome: :success
+        })
+
+      {:ok, view, html} = live(conn, ~p"/admin/models")
+
+      assert html =~ "Model Shelf"
+      assert html =~ "qwen3.5-9b"
+      assert html =~ "123 ms"
+      assert has_element?(view, "#models")
+
+      model = Config.get_model_by_upstream_id("qwen3.5-9b")
+      {:ok, _view, detail_html} = live(conn, ~p"/admin/models/#{model.id}")
+
+      assert detail_html =~ "Deployment copies"
+      assert detail_html =~ "Routing participation"
+      assert detail_html =~ "Recent traces"
+      assert detail_html =~ "gt_model_trace"
+    end
+
+    test "creates model metadata from the shelf", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/admin/models")
+
+      view |> element("button", "New model") |> render_click()
+
+      html =
+        view
+        |> form("#model-form",
+          model: %{
+            display_name: "Mistral local",
+            upstream_model_id: "mistral-small",
+            family: "mistral",
+            version: "small",
+            status: "evaluating"
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "Mistral local"
+      assert Config.get_model_by_upstream_id("mistral-small")
+    end
   end
 
   describe "usage" do

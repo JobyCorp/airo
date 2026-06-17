@@ -52,6 +52,8 @@ defmodule AiroWeb.Router do
     live "/design", DesignSystemLive, :index
     live "/custom-designs", CustomDesignsLive, :index
 
+    live "/admin/models", Admin.ModelLive, :index
+    live "/admin/models/:id", Admin.ModelLive, :show
     live "/admin/providers", Admin.ProviderLive, :index
     live "/admin/deployments", Admin.DeploymentLive, :index
     live "/admin/aliases", Admin.AliasLive, :index

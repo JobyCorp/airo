@@ -125,6 +125,32 @@ incogito and orchester.
 - _Complete: implemented on `sprint/11-gateway-observability`; `mix
   precommit` and `mix joby_kit.lint` green._
 
+### [ ] S12 — Model Shelf
+A model-management layer over the gateway so Airo can answer operational and
+evaluation questions about model artifacts, versions, deployments, and routing
+posture across many local machines.
+- Add a durable model/version identity separate from `Deployment`: the model is
+  the artifact/lineage/version being evaluated; deployments are runnable copies
+  of that model on providers/machines
+- Link existing and new deployments to model records while preserving current
+  concrete `model` request behavior and alias routing
+- Add a Model Shelf admin surface: list models with capability, class, enabled
+  deployment count, health posture, usage volume, latency p50/p95, error rate,
+  fallback rate, and cost
+- Add model detail pages that show deployment copies by provider/machine, version
+  metadata, routing participation, recent health transitions, recent traces, and
+  per-deployment performance breakdowns
+- Capture model metadata needed for evaluation: display name, family, upstream
+  model id, version/build/revision, quantization/size when known, notes, and
+  lifecycle status (`evaluating`, `preferred`, `deprecated`, `disabled`)
+- Keep routing source-of-truth explicit: aliases still route traffic, but model
+  pages expose which aliases/candidates currently lean on each model and where
+  duplicate deployments provide failover
+- **DoD extra:** given two deployments of the same model on different providers,
+  the shelf shows them as one model with separate operational rows and aggregate
+  performance; updating a model version creates visible before/after comparison
+  data from `UsageRecord` without breaking existing gateway calls
+
 ---
 
 ## Status log

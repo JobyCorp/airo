@@ -186,10 +186,12 @@ The "one place to configure everything." A unification of both apps' schemas;
 structurally the **full orchester model**, with incogito's collapsed model as the
 degenerate case.
 
-Key structural decision: **separate `Deployment` from `Alias`** (LiteLLM-style).
-A Deployment (caps + pricing) is defined once and can belong to many Aliases;
-**health and usage attach to the Deployment** (the thing that fails / costs
-money), **routing policy attaches to the Alias** (the thing consumers name).
+Key structural decision: **separate `Model`, `Deployment`, and `Alias`**.
+Model is the durable artifact/version identity operators evaluate; Deployment is
+the runnable copy of that model on a provider/machine; Alias is the routing
+policy consumers call. **Health and usage still attach to Deployment** (the
+thing that fails / costs money), while the Model Shelf aggregates those signals
+back to the model/version level.
 
 ```
 Provider          ← physical upstream  (orchester Install / incogito Connection)
@@ -200,8 +202,17 @@ Provider          ← physical upstream  (orchester Install / incogito Connectio
   default_params    ← provider layer
   enabled
 
-Deployment        ← concrete (provider, model) + caps  (orchester CapabilityBinding)
+Model             ← managed artifact/version identity  (Model Shelf)
+  display_name      "Qwen 3.5 9B"
+  family            "qwen"
+  upstream_model_id "qwen3.5-9b"
+  version/revision/quantization/size
+  status            evaluating | preferred | deprecated | disabled
+  notes
+
+Deployment        ← runnable model copy on a provider  (orchester CapabilityBinding)
   provider_ref
+  model_ref       → Model
   model_name        "qwen3.5-9b"
   capability        chat | embeddings | rerank | speech | transcription
   class             edge | standard | deep | cloud
@@ -262,6 +273,12 @@ via `route.binding` when it needs strict-selection behavior.
 - **Usage + cost attribution**: every call → `UsageRecord` (promoted Runlog),
   cost computed from Deployment pricing. The reason this matters the moment two
   apps share a pool.
+- **Model Shelf**: admin model-management layer over deployments. It shows one
+  model/version with all runnable deployment copies across machines, aggregate
+  and per-deployment latency/error/fallback/cost, recent traces, health
+  transitions, and alias participation. Routing remains explicit in Alias; the
+  shelf explains which models are safe to lean on and whether version changes
+  improved observed behavior.
 - **Transparency**: `x-gateway-*` headers + SSE trailing event (see §5.1).
 - Rate limits: **v2**.
 

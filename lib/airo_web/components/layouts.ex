@@ -24,6 +24,7 @@ defmodule AiroWeb.Layouts do
             active={@active_nav}
             brand="Airo"
             links={[
+              %{key: "models", label: "Models", href: "/admin/models"},
               %{key: "providers", label: "Providers", href: "/admin/providers"},
               %{key: "deployments", label: "Deployments", href: "/admin/deployments"},
               %{key: "aliases", label: "Aliases", href: "/admin/aliases"},

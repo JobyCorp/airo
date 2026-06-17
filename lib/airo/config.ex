@@ -11,7 +11,7 @@ defmodule Airo.Config do
   import Ecto.Query, warn: false
 
   alias Airo.Repo
-  alias Airo.Config.{Alias, AliasCandidate, ClientKey, Deployment, Provider, Secret}
+  alias Airo.Config.{Alias, AliasCandidate, ClientKey, Deployment, Model, Provider, Secret}
 
   ## Secrets
 
@@ -29,6 +29,44 @@ defmodule Airo.Config do
 
   def delete_secret(%Secret{} = secret), do: Repo.delete(secret)
   def change_secret(%Secret{} = secret, attrs \\ %{}), do: Secret.changeset(secret, attrs)
+
+  ## Models
+
+  def list_models do
+    Model
+    |> order_by([m], asc: m.display_name)
+    |> Repo.all()
+  end
+
+  def list_models_with_deployments do
+    Model
+    |> order_by([m], asc: m.display_name)
+    |> preload(deployments: [:provider])
+    |> Repo.all()
+  end
+
+  def get_model!(id), do: Repo.get!(Model, id)
+
+  def get_model_with_deployments!(id) do
+    Model
+    |> Repo.get!(id)
+    |> Repo.preload(deployments: [:provider])
+  end
+
+  def get_model_by_upstream_id(upstream_model_id) do
+    Repo.get_by(Model, upstream_model_id: upstream_model_id)
+  end
+
+  def create_model(attrs) do
+    %Model{} |> Model.changeset(attrs) |> Repo.insert()
+  end
+
+  def update_model(%Model{} = model, attrs) do
+    model |> Model.changeset(attrs) |> Repo.update()
+  end
+
+  def delete_model(%Model{} = model), do: Repo.delete(model)
+  def change_model(%Model{} = model, attrs \\ %{}), do: Model.changeset(model, attrs)
 
   ## Providers
 
@@ -74,17 +112,62 @@ defmodule Airo.Config do
   end
 
   def create_deployment(attrs) do
-    %Deployment{} |> Deployment.changeset(attrs) |> Repo.insert()
+    with {:ok, attrs} <- ensure_model_id(attrs) do
+      %Deployment{} |> Deployment.changeset(attrs) |> Repo.insert()
+    end
   end
 
   def update_deployment(%Deployment{} = deployment, attrs) do
-    deployment |> Deployment.changeset(attrs) |> Repo.update()
+    with {:ok, attrs} <- ensure_model_id(attrs) do
+      deployment |> Deployment.changeset(attrs) |> Repo.update()
+    end
   end
 
   def delete_deployment(%Deployment{} = deployment), do: Repo.delete(deployment)
 
   def change_deployment(%Deployment{} = deployment, attrs \\ %{}),
     do: Deployment.changeset(deployment, attrs)
+
+  defp ensure_model_id(attrs) do
+    attrs = stringify_keys(attrs)
+
+    cond do
+      present?(attrs["model_id"]) ->
+        {:ok, attrs}
+
+      present?(attrs["model_name"]) ->
+        case get_or_create_model_for_deployment(attrs["model_name"]) do
+          {:ok, model} -> {:ok, Map.put(attrs, "model_id", model.id)}
+          {:error, _changeset} = error -> error
+        end
+
+      true ->
+        {:ok, attrs}
+    end
+  end
+
+  defp get_or_create_model_for_deployment(model_name) do
+    case get_model_by_upstream_id(model_name) do
+      nil ->
+        create_model(%{
+          display_name: model_name,
+          upstream_model_id: model_name,
+          status: :evaluating
+        })
+
+      model ->
+        {:ok, model}
+    end
+  end
+
+  defp stringify_keys(attrs) when is_map(attrs) do
+    Map.new(attrs, fn
+      {key, value} when is_atom(key) -> {Atom.to_string(key), value}
+      entry -> entry
+    end)
+  end
+
+  defp present?(value), do: value not in [nil, ""]
 
   ## Aliases
 
@@ -114,7 +197,7 @@ defmodule Airo.Config do
 
   def add_alias_candidate(alias_id, attrs) do
     %AliasCandidate{}
-    |> AliasCandidate.changeset(Map.put(attrs, "alias_id", alias_id))
+    |> AliasCandidate.changeset(attrs |> stringify_keys() |> Map.put("alias_id", alias_id))
     |> Repo.insert()
   end
 

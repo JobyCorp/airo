@@ -23,6 +23,20 @@ defmodule Airo.Config.DeploymentTest do
       assert Deployment.changeset(%Deployment{}, valid(provider)).valid?
     end
 
+    test "accepts an optional model_id", %{provider: provider} do
+      {:ok, model} =
+        Config.create_model(%{
+          display_name: "Qwen",
+          upstream_model_id: "qwen3.5-9b",
+          status: :evaluating
+        })
+
+      changeset =
+        Deployment.changeset(%Deployment{}, Map.put(valid(provider), :model_id, model.id))
+
+      assert changeset.valid?
+    end
+
     test "accepts multiple capabilities", %{provider: provider} do
       changeset =
         Deployment.changeset(%Deployment{}, %{valid(provider) | capabilities: [:chat, :vision]})
@@ -76,6 +90,39 @@ defmodule Airo.Config.DeploymentTest do
 
       assert {:error, _} =
                Config.create_deployment(%{valid(provider) | capabilities: [:embeddings]})
+    end
+  end
+
+  describe "model shelf linking" do
+    test "create_deployment/1 infers a shelf model from model_name", %{provider: provider} do
+      assert {:ok, deployment} = Config.create_deployment(valid(provider))
+      deployment = Airo.Repo.preload(deployment, :model)
+
+      assert deployment.model
+      assert deployment.model.display_name == "qwen3.5-9b"
+      assert deployment.model.upstream_model_id == "qwen3.5-9b"
+    end
+
+    test "deployments with the same model_name share the inferred shelf model", %{
+      provider: provider
+    } do
+      {:ok, second_provider} =
+        Config.create_provider(%{
+          name: "local-vllm-2",
+          adapter_type: :vllm,
+          base_url: "http://localhost:8001/v1"
+        })
+
+      assert {:ok, first} = Config.create_deployment(valid(provider))
+
+      assert {:ok, second} =
+               Config.create_deployment(%{
+                 provider_id: second_provider.id,
+                 model_name: "qwen3.5-9b",
+                 capabilities: [:chat]
+               })
+
+      assert first.model_id == second.model_id
     end
   end
 end

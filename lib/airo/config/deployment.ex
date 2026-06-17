@@ -14,7 +14,7 @@ defmodule Airo.Config.Deployment do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Airo.Config.Provider
+  alias Airo.Config.{Model, Provider}
 
   @capabilities [:chat, :embeddings, :rerank, :speech, :transcription, :vision, :classify]
   @classes [:edge, :standard, :deep, :cloud]
@@ -32,6 +32,7 @@ defmodule Airo.Config.Deployment do
     field :default_params, :map, default: %{}
     field :enabled, :boolean, default: true
 
+    belongs_to :model, Model
     belongs_to :provider, Provider
 
     timestamps()
@@ -47,6 +48,7 @@ defmodule Airo.Config.Deployment do
     deployment
     |> cast(attrs, [
       :provider_id,
+      :model_id,
       :model_name,
       :capabilities,
       :class,
@@ -61,6 +63,7 @@ defmodule Airo.Config.Deployment do
     |> validate_length(:capabilities, min: 1)
     |> validate_number(:context_window, greater_than: 0)
     |> assoc_constraint(:provider)
+    |> assoc_constraint(:model)
     |> unique_constraint([:provider_id, :model_name],
       name: :deployments_provider_id_model_name_index
     )

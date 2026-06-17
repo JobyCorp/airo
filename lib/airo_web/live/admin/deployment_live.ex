@@ -21,6 +21,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
      |> assign(page_title: "Deployments", form: nil, editing: nil)
      |> assign(capabilities: Deployment.capabilities(), classes: Deployment.classes())
      |> assign(model_options: [], model_error: nil, models_provider_id: nil)
+     |> assign_model_id_options()
      |> assign(health: health_map(deployments))
      |> stream(:health_events, Health.list_events(25))
      |> assign_providers()
@@ -116,6 +117,14 @@ defmodule AiroWeb.Admin.DeploymentLive do
     assign(socket, provider_options: Enum.map(Config.list_providers(), &{&1.name, &1.id}))
   end
 
+  defp assign_model_id_options(socket) do
+    options =
+      Config.list_models()
+      |> Enum.map(&{"#{&1.display_name} (#{&1.upstream_model_id})", &1.id})
+
+    assign(socket, model_id_options: options)
+  end
+
   # Populate the model picker from the chosen provider's upstream catalog. Only
   # refetch when the provider actually changes (validate fires on every keystroke),
   # and degrade to a free-text field + hint when the upstream can't be listed.
@@ -196,6 +205,13 @@ defmodule AiroWeb.Admin.DeploymentLive do
               label="Model name"
               options={model_select_options(@model_options, @form[:model_name].value)}
               prompt="Select a model"
+            />
+            <.input
+              field={@form[:model_id]}
+              type="select"
+              label="Shelf model"
+              options={@model_id_options}
+              prompt="Infer from model name"
             />
             <p :if={@model_error} class="text-sm text-warning">{@model_error}</p>
             <.input
