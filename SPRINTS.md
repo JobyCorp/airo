@@ -150,6 +150,22 @@ posture across many local machines.
   for local runtimes, implement Ollama native catalog/inspect/pull/runtime info,
   then follow with LM Studio and vLLM runtime metadata; remote/cloud provider
   management stays backlog
+- Ollama proof-out: persist provider-native metadata on each deployment copy,
+  sync it from the model detail page, update the shared model's family/size/
+  quantization from native inspect output, and surface runtime/version/family/
+  parameter/quantization/context/running details beside performance rows
+- Local-provider follow-up blueprint:
+  1. LM Studio: catalog + runtime/version first, then load/unload/download state
+     if exposed by the local server API
+  2. vLLM: runtime/version, served-model metadata, tokenizer/context details,
+     and metrics endpoints where available; no pull/install workflow assumed
+  3. Background sync: scheduled metadata refresh per enabled local deployment,
+     with last sync status/error on the deployment row
+  4. Provider pages: local runtime inventory and currently loaded/running models,
+     so machine-level capacity and duplicate failover copies are visible
+  5. Evaluation layer: compare provider copy/version cohorts using existing
+     `UsageRecord` latency/error/fallback/cost groups before adding subjective
+     quality scoring
 - **DoD extra:** given two deployments of the same model on different providers,
   the shelf shows them as one model with separate operational rows and aggregate
   performance; updating a model version creates visible before/after comparison

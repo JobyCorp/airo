@@ -4,6 +4,7 @@ defmodule AiroWeb.Admin.ModelLive do
 
   alias Airo.Config
   alias Airo.Config.Model
+  alias Airo.LocalModels
   alias Airo.ModelShelf
   alias AiroWeb.CompositeComponents
 
@@ -55,6 +56,24 @@ defmodule AiroWeb.Admin.ModelLive do
     save(socket, socket.assigns.editing, clean(params))
   end
 
+  def handle_event("sync_deployment", %{"id" => id}, socket) do
+    deployment = Config.get_deployment!(id)
+
+    case LocalModels.sync_deployment(deployment) do
+      {:ok, _deployment} ->
+        {:noreply,
+         socket
+         |> refresh_detail()
+         |> put_flash(:info, "Provider metadata synced.")}
+
+      {:error, :unsupported} ->
+        {:noreply, put_flash(socket, :error, "This provider does not expose local metadata.")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Metadata sync failed: #{inspect(reason)}")}
+    end
+  end
+
   defp save(socket, nil, params) do
     case Config.create_model(params) do
       {:ok, _model} ->
@@ -90,6 +109,12 @@ defmodule AiroWeb.Admin.ModelLive do
 
     assign(socket, form: nil, editing: nil)
   end
+
+  defp refresh_detail(%{assigns: %{detail: %{model: model}}} = socket) do
+    assign(socket, detail: ModelShelf.get_detail!(model.id), form: nil, editing: nil)
+  end
+
+  defp refresh_detail(socket), do: socket
 
   defp clean(params), do: for({k, v} <- params, v != "", into: %{}, do: {k, v})
 
@@ -288,6 +313,40 @@ defmodule AiroWeb.Admin.ModelLive do
           <:col :let={row} label="p50">{latency(row.p50_latency_ms)}</:col>
           <:col :let={row} label="p95">{latency(row.p95_latency_ms)}</:col>
           <:col :let={row} label="Fallbacks">{row.fallback_rate}</:col>
+          <:col :let={row} label="Synced">{metadata_value(row.deployment, "synced_at")}</:col>
+          <:action :let={row}>
+            <.button
+              :if={:inspect_model in row.local_capabilities}
+              size="sm"
+              phx-click="sync_deployment"
+              phx-value-id={row.deployment.id}
+            >
+              Sync
+            </.button>
+          </:action>
+        </.table>
+      </.card>
+
+      <.card variant="bordered">
+        <:title>Provider metadata</:title>
+        <.table id="provider-metadata" rows={@detail.deployment_summaries}>
+          <:col :let={row} label="Provider">{row.provider && row.provider.name}</:col>
+          <:col :let={row} label="Runtime">{metadata_value(row.deployment, "runtime_version")}</:col>
+          <:col :let={row} label="Family">{metadata_value(row.deployment, "family")}</:col>
+          <:col :let={row} label="Parameters">
+            {metadata_value(row.deployment, "parameter_size")}
+          </:col>
+          <:col :let={row} label="Quantization">
+            {metadata_value(row.deployment, "quantization")}
+          </:col>
+          <:col :let={row} label="Format">{metadata_value(row.deployment, "format")}</:col>
+          <:col :let={row} label="Architecture">
+            {metadata_value(row.deployment, "architecture")}
+          </:col>
+          <:col :let={row} label="Context">
+            {metadata_value(row.deployment, "context_window")}
+          </:col>
+          <:col :let={row} label="Running">{running_label(row.deployment)}</:col>
         </.table>
       </.card>
 
@@ -346,6 +405,22 @@ defmodule AiroWeb.Admin.ModelLive do
   defp join_values([]), do: "—"
   defp join_values(nil), do: "—"
   defp join_values(values), do: Enum.map_join(values, ", ", &to_string/1)
+
+  defp metadata_value(%{provider_metadata: metadata}, key) when is_map(metadata) do
+    Map.get(metadata, key) || "—"
+  end
+
+  defp metadata_value(_deployment, _key), do: "—"
+
+  defp running_label(%{provider_metadata: metadata}) when is_map(metadata) do
+    case Map.fetch(metadata, "running") do
+      {:ok, true} -> "yes"
+      {:ok, false} -> "no"
+      :error -> "—"
+    end
+  end
+
+  defp running_label(_deployment), do: "—"
 
   defp latency(nil), do: "—"
   defp latency(ms), do: "#{ms} ms"

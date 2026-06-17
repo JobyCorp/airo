@@ -30,6 +30,7 @@ defmodule Airo.Config.Deployment do
     field :price_input, :decimal
     field :price_output, :decimal
     field :default_params, :map, default: %{}
+    field :provider_metadata, :map, default: %{}
     field :enabled, :boolean, default: true
 
     belongs_to :model, Model
@@ -57,6 +58,7 @@ defmodule Airo.Config.Deployment do
       :price_input,
       :price_output,
       :default_params,
+      :provider_metadata,
       :enabled
     ])
     |> validate_required([:provider_id, :model_name, :capabilities])

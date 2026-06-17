@@ -220,6 +220,7 @@ Deployment        ← runnable model copy on a provider  (orchester CapabilityBi
   context_window
   pricing           in/out per-1k       (feeds cost attribution)
   default_params    ← deployment layer
+  provider_metadata native local-runtime metadata, scoped to this provider copy
 
 Alias             ← logical handle consumers call  ("chat-deep")
   capability
@@ -282,7 +283,13 @@ via `route.binding` when it needs strict-selection behavior.
   and whether version changes improved observed behavior.
 - **Local provider management**: provider-specific management APIs are focused
   on local runtimes first. Ollama exposes native catalog/inspect/pull/runtime
-  APIs; LM Studio and vLLM runtime metadata follow. Cloud providers remain
+  APIs and is the reference implementation: a deployment-level sync stores
+  provider-native metadata (`family`, `families`, `format`, `parameter_size`,
+  `quantization`, `architecture`, `context_window`, `runtime_version`,
+  `running`, and raw inspect/runtime payloads) while updating the shared model
+  identity only for stable metadata such as family, quantization, and size.
+  LM Studio follows with catalog/runtime/load-state discovery; vLLM follows with
+  served-model/runtime/tokenizer/metrics metadata. Cloud providers remain
   catalog-only/backlog for model management.
 - **Transparency**: `x-gateway-*` headers + SSE trailing event (see §5.1).
 - Rate limits: **v2**.

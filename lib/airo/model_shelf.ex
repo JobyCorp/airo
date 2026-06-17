@@ -12,6 +12,7 @@ defmodule Airo.ModelShelf do
   alias Airo.Config.{Alias, AliasCandidate, Deployment, Model}
   alias Airo.Health
   alias Airo.Health.HealthEvent
+  alias Airo.LocalModels
   alias Airo.Repo
   alias Airo.Usage.UsageRecord
 
@@ -66,6 +67,7 @@ defmodule Airo.ModelShelf do
       %{
         deployment: deployment,
         provider: deployment.provider,
+        local_capabilities: LocalModels.capabilities(deployment.provider),
         health: Health.status(deployment.id),
         requests: metrics.requests,
         error_rate: metrics.error_rate,

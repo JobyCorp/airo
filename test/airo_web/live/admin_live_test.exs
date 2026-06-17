@@ -17,6 +17,43 @@ defmodule AiroWeb.AdminLiveTest do
     p
   end
 
+  defp stub_ollama_native do
+    Req.Test.stub(Airo.TestStub, fn
+      %{request_path: "/api/show"} = conn ->
+        Req.Test.json(conn, %{
+          "modelfile" => "FROM moondream:latest",
+          "parameters" => "temperature 0.2",
+          "template" => "{{ .Prompt }}",
+          "license" => "Apache-2.0",
+          "details" => %{
+            "format" => "gguf",
+            "family" => "moondream",
+            "families" => ["moondream"],
+            "parameter_size" => "1.6B",
+            "quantization_level" => "Q4_K_M"
+          },
+          "model_info" => %{
+            "general.architecture" => "moondream",
+            "moondream.context_length" => 2048
+          }
+        })
+
+      %{request_path: "/api/version"} = conn ->
+        Req.Test.json(conn, %{"version" => "0.5.1"})
+
+      %{request_path: "/api/ps"} = conn ->
+        Req.Test.json(conn, %{
+          "models" => [
+            %{
+              "model" => "moondream:latest",
+              "size" => 1_900_000_000,
+              "details" => %{"family" => "moondream"}
+            }
+          ]
+        })
+    end)
+  end
+
   describe "providers" do
     test "create, list, and delete", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/admin/providers")
@@ -240,6 +277,51 @@ defmodule AiroWeb.AdminLiveTest do
 
       assert html =~ "Mistral local"
       assert Config.get_model_by_upstream_id("mistral-small")
+    end
+
+    test "syncs Ollama metadata into the model detail page", %{conn: conn} do
+      stub_ollama_native()
+
+      {:ok, provider} =
+        Config.create_provider(%{
+          name: "ollama-vision",
+          adapter_type: :ollama,
+          base_url: "http://ollama:11434/v1",
+          auth_kind: :none
+        })
+
+      {:ok, deployment} =
+        Config.create_deployment(%{
+          provider_id: provider.id,
+          model_name: "moondream:latest",
+          capabilities: [:chat, :vision]
+        })
+
+      model = Config.get_model_by_upstream_id("moondream:latest")
+      {:ok, view, html} = live(conn, ~p"/admin/models/#{model.id}")
+
+      assert html =~ "Provider metadata"
+
+      assert has_element?(
+               view,
+               "button[phx-click='sync_deployment'][phx-value-id='#{deployment.id}']"
+             )
+
+      refute html =~ "Q4_K_M"
+
+      html =
+        view
+        |> element("button[phx-click='sync_deployment'][phx-value-id='#{deployment.id}']")
+        |> render_click()
+
+      assert html =~ "Provider metadata synced."
+      assert html =~ "0.5.1"
+      assert html =~ "moondream"
+      assert html =~ "1.6B"
+      assert html =~ "Q4_K_M"
+      assert html =~ "gguf"
+      assert html =~ "2048"
+      assert html =~ "yes"
     end
   end
 
