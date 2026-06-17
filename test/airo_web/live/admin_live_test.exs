@@ -122,6 +122,33 @@ defmodule AiroWeb.AdminLiveTest do
       assert html =~ "can&#39;t be blank" or html =~ "can't be blank"
     end
 
+    test "creates an inline provider credential secret", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/admin/providers")
+
+      view |> element("button", "New provider") |> render_click()
+
+      html =
+        view
+        |> form("form",
+          provider: %{
+            name: "Unsloth test",
+            adapter_type: "unsloth",
+            base_url: "https://unsloth.local.joby.gg/v1",
+            auth_kind: "api_key",
+            new_credential_name: "Unsloth test API key",
+            new_credential_value: "secret-token"
+          }
+        )
+        |> render_submit()
+
+      provider = Config.get_provider_by_name("Unsloth test")
+      secret = Config.get_secret_by_name("Unsloth test API key")
+
+      assert provider.credential_id == secret.id
+      assert html =~ "Unsloth test API key"
+      refute html =~ "secret-token"
+    end
+
     test "opens provider inventory and syncs deployment metadata", %{conn: conn} do
       stub_infinity_native()
 

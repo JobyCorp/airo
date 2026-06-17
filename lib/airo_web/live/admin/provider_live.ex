@@ -22,6 +22,7 @@ defmodule AiroWeb.Admin.ProviderLive do
      socket
      |> assign(page_title: "Providers", form: nil, editing: nil, detail: nil)
      |> assign(adapter_types: Provider.adapter_types(), auth_kinds: Provider.auth_kinds())
+     |> assign(secret_options: secret_options())
      |> assign(health: health_map(providers))
      |> stream(:providers, providers)}
   end
@@ -110,13 +111,13 @@ defmodule AiroWeb.Admin.ProviderLive do
     end
   end
 
-  defp list, do: Config.list_providers() |> Airo.Repo.preload(:deployments)
+  defp list, do: Config.list_providers() |> Repo.preload([:credential, :deployments])
 
   defp detail(id) do
     provider =
       id
       |> Config.get_provider!()
-      |> Repo.preload(deployments: [:model])
+      |> Repo.preload([:credential, deployments: [:model]])
 
     capabilities = LocalModels.capabilities(provider)
     {catalog, catalog_error} = local_catalog(provider, capabilities)
@@ -167,7 +168,7 @@ defmodule AiroWeb.Admin.ProviderLive do
     provider =
       provider.id
       |> Config.get_provider!()
-      |> Repo.preload(deployments: [:model])
+      |> Repo.preload([:credential, deployments: [:model]])
 
     assign(socket, detail: %{detail | provider: provider, health: provider_status(provider)})
   end
@@ -189,32 +190,110 @@ defmodule AiroWeb.Admin.ProviderLive do
   end
 
   defp save(socket, nil, params) do
-    case Config.create_provider(params) do
-      {:ok, provider} ->
+    with {:ok, params} <- attach_new_credential(params) do
+      case Config.create_provider(params) do
+        {:ok, provider} ->
+          {:noreply,
+           socket
+           |> stream_insert(:providers, preload_index_provider(provider))
+           |> assign(form: nil, secret_options: secret_options())
+           |> put_flash(:info, "Provider created.")}
+
+        {:error, changeset} ->
+          {:noreply, assign(socket, form: to_form(changeset))}
+      end
+    else
+      {:error, message} ->
         {:noreply,
          socket
-         |> stream_insert(:providers, provider)
-         |> assign(form: nil)
-         |> put_flash(:info, "Provider created.")}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, form: to_form(changeset))}
+         |> assign(form: to_form(Config.change_provider(%Provider{}, provider_fields(params))))
+         |> put_flash(:error, message)}
     end
   end
 
   defp save(socket, provider, params) do
-    case Config.update_provider(provider, params) do
-      {:ok, provider} ->
+    with {:ok, params} <- attach_new_credential(params) do
+      case Config.update_provider(provider, params) do
+        {:ok, provider} ->
+          {:noreply,
+           socket
+           |> stream_insert(:providers, preload_index_provider(provider))
+           |> assign(form: nil, editing: nil, secret_options: secret_options())
+           |> put_flash(:info, "Provider updated.")}
+
+        {:error, changeset} ->
+          {:noreply, assign(socket, form: to_form(changeset))}
+      end
+    else
+      {:error, message} ->
         {:noreply,
          socket
-         |> stream_insert(:providers, provider)
-         |> assign(form: nil, editing: nil)
-         |> put_flash(:info, "Provider updated.")}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, form: to_form(changeset))}
+         |> assign(form: to_form(Config.change_provider(provider, provider_fields(params))))
+         |> put_flash(:error, message)}
     end
   end
+
+  defp attach_new_credential(params) do
+    params = provider_fields(params)
+    name = present(params["new_credential_name"])
+    value = present(params["new_credential_value"])
+
+    cond do
+      is_nil(name) and is_nil(value) ->
+        {:ok, Map.drop(params, ["new_credential_name", "new_credential_value"])}
+
+      is_nil(value) ->
+        {:error, "New credential value is required."}
+
+      true ->
+        attrs = %{
+          name: name || default_credential_name(params),
+          kind: credential_kind(params),
+          value: value
+        }
+
+        case Config.create_secret(attrs) do
+          {:ok, secret} ->
+            {:ok,
+             params
+             |> Map.drop(["new_credential_name", "new_credential_value"])
+             |> Map.put("credential_id", secret.id)}
+
+          {:error, changeset} ->
+            {:error, credential_error(changeset)}
+        end
+    end
+  end
+
+  defp provider_fields(params) when is_map(params) do
+    Map.new(params, fn {key, value} -> {to_string(key), value} end)
+  end
+
+  defp present(value) when value in [nil, ""], do: nil
+  defp present(value), do: value
+
+  defp default_credential_name(params), do: "#{present(params["name"]) || "Provider"} credential"
+
+  defp credential_kind(%{"auth_kind" => kind}) when kind in ["oauth", :oauth], do: :oauth
+  defp credential_kind(_params), do: :api_key
+
+  defp credential_error(changeset) do
+    changeset
+    |> Ecto.Changeset.traverse_errors(fn {message, _opts} -> message end)
+    |> Enum.map_join(", ", fn {field, messages} -> "#{field} #{Enum.join(messages, ", ")}" end)
+    |> then(&"Credential could not be saved: #{&1}")
+  end
+
+  defp preload_index_provider(provider),
+    do: Repo.preload(provider, [:credential, :deployments], force: true)
+
+  defp secret_options do
+    Config.list_secrets()
+    |> Enum.map(&{&1.name, &1.id})
+  end
+
+  defp credential_name(%{credential: %{name: name}}), do: name
+  defp credential_name(_provider), do: "—"
 
   @impl true
   def render(assigns) do
@@ -239,6 +318,22 @@ defmodule AiroWeb.Admin.ProviderLive do
             />
             <.input field={@form[:base_url]} label="Base URL" />
             <.input field={@form[:auth_kind]} type="select" label="Auth kind" options={@auth_kinds} />
+            <.input
+              field={@form[:credential_id]}
+              type="select"
+              label="Credential"
+              options={@secret_options}
+              prompt="No credential"
+            />
+            <div class="grid gap-4 rounded border border-base-300 p-4 md:grid-cols-2">
+              <.input name="provider[new_credential_name]" label="New credential name" value="" />
+              <.input
+                name="provider[new_credential_value]"
+                type="password"
+                label="New credential value"
+                value=""
+              />
+            </div>
             <.input field={@form[:enabled]} type="checkbox" label="Enabled" />
             <.button variant="primary">Save</.button>
           </.form>
@@ -253,6 +348,7 @@ defmodule AiroWeb.Admin.ProviderLive do
             <:col :let={{_id, p}} label="Adapter">{p.adapter_type}</:col>
             <:col :let={{_id, p}} label="Base URL">{p.base_url}</:col>
             <:col :let={{_id, p}} label="Auth">{p.auth_kind}</:col>
+            <:col :let={{_id, p}} label="Credential">{credential_name(p)}</:col>
             <:col :let={{_id, p}} label="Enabled">{p.enabled}</:col>
             <:col :let={{_id, p}} label="Health">
               <CompositeComponents.health_status status={@health[p.id] || "unknown"} />
