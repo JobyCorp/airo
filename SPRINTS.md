@@ -104,7 +104,7 @@ A Swagger UI reference at `/docs` (like Infinity's), backed by the existing
 - Decide CSP/offline: vendor Swagger UI assets into `priv/static` vs CDN (LAN browsers need internet for the CDN)
 - **DoD extra:** `/docs` renders every `/v1` path with request/response detail; "Authorize" + try-it-out works against a real key
 
-### [ ] S11 — Gateway observability
+### [x] S11 — Gateway observability
 Post-cutover production observability for Airo as the single AI model path for
 incogito and orchester.
 - Trace identity: every HTTP request, SSE stream, and realtime session carries a
@@ -122,8 +122,8 @@ incogito and orchester.
 - **DoD extra:** a failed request and a successful streamed request can both be
   correlated across response headers/SSE metadata, logs, and `UsageRecord`;
   realtime sessions carry one trace id from connect through close
-- _Implementation complete on `sprint/11-gateway-observability`: `mix
-  precommit` and `mix joby_kit.lint` green. Pending merge to `main`._
+- _Complete: implemented on `sprint/11-gateway-observability`; `mix
+  precommit` and `mix joby_kit.lint` green._
 
 ---
 
@@ -141,3 +141,4 @@ _Append one line per merge: `S0 merged <sha> — note`._
 - S7 completed operationally — incogito and orchester fully cut over; both now use Airo as the only gateway path to AI models, with app-specific orchestration remaining in the consumers.
 - S8 merged 813d86a — realtime WebSocket proxy: Airo.Realtime (alias/concrete resolution, connect-time health routing, intent→capability), AiroWeb.RealtimeProxy (WebSock in / Mint.WebSocket out, transparent frame relay, pre-open buffering, session UsageRecord), RealtimeController + :realtime_api pipeline + GET /v1/realtime, GatewayError :unsupported_intent, mint_web_socket dep; 6 tests (resolution + relay against a real echo upstream) + verified against the REAL Speaches endpoint (session.created relayed back), precommit green (169 tests).
 - S10 merged 190c042 — API docs: Swagger UI at /docs (OpenApiSpex.Plug.SwaggerUI over /openapi) + "Docs" nav link; enriched AiroWeb.ApiSpec with request/response schemas + examples, the route object (class/tools/vision), capabilities on /v1/models, /v1/classify, Error/Usage schemas, 401/404; 191 tests + /docs render test, joby_kit.lint green. (Interim work since S6, not numbered sprints: multi-valued deployment capabilities + vision routing, /v1/classify endpoint + adapter, health-visibility admin columns, release-based deploy to the airo VM.)
+- S11 merged pending — Gateway observability: request trace ids in headers/SSE metadata/usage rows, structured gateway logs, failed-request accounting, usage admin filters + summaries + trace drilldown, provider/deployment health transition history; 195 tests, joby_kit.lint green.
