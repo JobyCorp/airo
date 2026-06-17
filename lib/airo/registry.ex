@@ -2,13 +2,23 @@ defmodule Airo.Registry do
   @moduledoc """
   Maps a provider `adapter_type` to its `Airo.Adapter` implementation (DESIGN §13).
 
-  OpenAI-compatible upstreams (vLLM, Ollama, LM Studio, OpenAI, Speaches) all
-  share `Airo.Adapters.OpenAICompatible`. Anthropic and Infinity get bespoke
-  normalizing adapters; until an adapter exists `fetch/1` reports `:no_adapter`
-  so callers fail loudly rather than silently mis-dispatching.
+  OpenAI-compatible upstreams may either use `Airo.Adapters.OpenAICompatible`
+  directly or a provider-specific wrapper when they expose useful local
+  management APIs. Anthropic and Infinity get bespoke normalizing adapters;
+  until an adapter exists `fetch/1` reports `:no_adapter` so callers fail
+  loudly rather than silently mis-dispatching.
   """
 
-  alias Airo.Adapters.{Anthropic, Infinity, LMStudio, Ollama, OpenAICompatible, Speaches, VLLM}
+  alias Airo.Adapters.{
+    Anthropic,
+    Infinity,
+    LMStudio,
+    Ollama,
+    OpenAICompatible,
+    Speaches,
+    Unsloth,
+    VLLM
+  }
 
   @adapters %{
     openai: OpenAICompatible,
@@ -16,6 +26,7 @@ defmodule Airo.Registry do
     ollama: Ollama,
     lmstudio: LMStudio,
     speaches: Speaches,
+    unsloth: Unsloth,
     anthropic: Anthropic,
     infinity: Infinity
   }

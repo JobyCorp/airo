@@ -11,7 +11,16 @@ defmodule Airo.Config.Provider do
 
   alias Airo.Config.{Deployment, Secret}
 
-  @adapter_types [:vllm, :ollama, :lmstudio, :openai, :anthropic, :speaches, :infinity]
+  @adapter_types [
+    :vllm,
+    :ollama,
+    :lmstudio,
+    :openai,
+    :anthropic,
+    :speaches,
+    :infinity,
+    :unsloth
+  ]
   @auth_kinds [:none, :api_key, :oauth]
 
   @type t :: %__MODULE__{}

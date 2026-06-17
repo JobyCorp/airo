@@ -1,7 +1,7 @@
 defmodule Airo.RegistryTest do
   use ExUnit.Case, async: true
 
-  alias Airo.Adapters.{LMStudio, Ollama, OpenAICompatible, Speaches, VLLM}
+  alias Airo.Adapters.{LMStudio, Ollama, OpenAICompatible, Speaches, Unsloth, VLLM}
   alias Airo.Registry
 
   test "fetch/1 maps OpenAI-compatible types to the shared adapter" do
@@ -15,6 +15,7 @@ defmodule Airo.RegistryTest do
     assert Registry.fetch(:ollama) == {:ok, Ollama}
     assert Registry.fetch(:lmstudio) == {:ok, LMStudio}
     assert Registry.fetch(:speaches) == {:ok, Speaches}
+    assert Registry.fetch(:unsloth) == {:ok, Unsloth}
     assert Registry.fetch(:anthropic) == {:ok, Airo.Adapters.Anthropic}
     assert Registry.fetch(:infinity) == {:ok, Airo.Adapters.Infinity}
   end
