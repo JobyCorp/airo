@@ -25,6 +25,10 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 airo-*.tar
 
+# Deploy release tarballs (built by bin/deploy.sh) and any env files.
+airo-*.tar.gz
+*.env
+
 # Ignore assets that are produced by build tools.
 /priv/static/assets/
 
