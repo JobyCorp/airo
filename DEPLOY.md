@@ -25,10 +25,10 @@ under systemd on the VM reached by the SSH alias **`airo`**.
 - Postgres `airo_prod` (role `airo`) on `127.0.0.1:5432`, reached via
   `DATABASE_URL` (scram password) in that env file.
 - **Traefik** terminates TLS at **`https://airo.local.joby.gg`** and forwards to
-  the app at **`192.168.68.73:4000`** (plain HTTP). It sets
+  the app at **`192.168.68.74:4000`** (plain HTTP). It sets
   `X-Forwarded-Proto: https`, which `config/prod.exs`'s
   `force_ssl: [rewrite_on: [:x_forwarded_proto]]` trusts — so the app stays HTTP
-  behind the proxy without redirect loops. (Hitting `192.168.68.73:4000`
+  behind the proxy without redirect loops. (Hitting `192.168.68.74:4000`
   directly over HTTP will redirect to https; reach it via the hostname.)
 
 The release bundles ERTS, so the VM needs no Erlang/Elixir installed.
