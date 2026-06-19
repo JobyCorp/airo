@@ -11,7 +11,89 @@ defmodule Airo.Config do
   import Ecto.Query, warn: false
 
   alias Airo.Repo
-  alias Airo.Config.{Alias, AliasCandidate, ClientKey, Deployment, Model, Provider, Secret}
+
+  alias Airo.Config.{
+    Alias,
+    AliasCandidate,
+    ClientKey,
+    Deployment,
+    Model,
+    Provider,
+    RoutingSetting,
+    Secret
+  }
+
+  @routing_cache {__MODULE__, :routing_config}
+
+  ## Routing setting (system classifier — S16)
+
+  @doc """
+  The singleton system classifier setting. Returns the persisted row, or an
+  unpersisted default struct when none exists (fresh DB / tests).
+  """
+  def get_routing_setting do
+    Repo.one(from r in RoutingSetting, limit: 1) || %RoutingSetting{}
+  end
+
+  @doc "Update (or insert) the singleton, then refresh the cached parsed config."
+  def update_routing_setting(attrs) do
+    result =
+      case Repo.one(from r in RoutingSetting, limit: 1) do
+        nil -> %RoutingSetting{}
+        setting -> setting
+      end
+      |> RoutingSetting.changeset(attrs)
+      |> Repo.insert_or_update()
+
+    with {:ok, _setting} <- result, do: refresh_routing_config()
+    result
+  end
+
+  def change_routing_setting(%RoutingSetting{} = setting, attrs \\ %{}),
+    do: RoutingSetting.changeset(setting, attrs)
+
+  @doc """
+  The parsed system classifier config that `Airo.Routing.Classifier` consumes —
+  the same shape the per-alias `router_config` used to produce. Cached in
+  `:persistent_term` (lazy load, write-through on update).
+  """
+  def routing_config do
+    case :persistent_term.get(@routing_cache, :miss) do
+      :miss -> refresh_routing_config()
+      cfg -> cfg
+    end
+  end
+
+  @doc "Rebuild the cached parsed routing config from the DB. Returns the config."
+  def refresh_routing_config do
+    cfg = parse_routing_setting(get_routing_setting())
+    :persistent_term.put(@routing_cache, cfg)
+    cfg
+  end
+
+  # Mirror the old `Classifier.parse_config/1` output, sourced from the singleton.
+  defp parse_routing_setting(%RoutingSetting{} = s) do
+    %{
+      backend: s.backend,
+      classifier: s.classifier,
+      model: s.model,
+      score: if(map_size(s.score) > 0, do: s.score, else: :overall),
+      labels: normalize_routing_labels(s.labels),
+      default_class: s.default_class,
+      input: to_string(s.input),
+      timeout_ms: s.timeout_ms
+    }
+  end
+
+  defp normalize_routing_labels(labels) when is_list(labels) do
+    for entry <- labels,
+        is_map(entry),
+        is_binary(entry["class"]),
+        is_number(entry["min"]),
+        do: %{label: entry["label"], class: entry["class"], min: entry["min"]}
+  end
+
+  defp normalize_routing_labels(_), do: []
 
   ## Secrets
 

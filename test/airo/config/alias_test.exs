@@ -70,19 +70,21 @@ defmodule Airo.Config.AliasTest do
       assert "is invalid" in errors_on(changeset).router
     end
 
-    test "requires a non-empty router_config when router is :classify" do
-      missing = Alias.changeset(%Alias{}, %{name: "x", capability: :chat, router: :classify})
-      assert "can't be empty when router is :classify" in errors_on(missing).router_config
+    test "router :classify needs no per-alias config (inherits the system classifier, S16)" do
+      changeset = Alias.changeset(%Alias{}, %{name: "x", capability: :chat, router: :classify})
+      assert changeset.valid?
+      assert Ecto.Changeset.apply_changes(changeset).router == :classify
+    end
 
-      empty =
-        Alias.changeset(%Alias{}, %{
-          name: "x",
-          capability: :chat,
-          router: :classify,
-          router_config: %{}
-        })
+    test "router_mode defaults to :shadow and accepts :enforce" do
+      default = Alias.changeset(%Alias{}, %{name: "x", capability: :chat})
+      assert Ecto.Changeset.apply_changes(default).router_mode == :shadow
 
-      assert "can't be empty when router is :classify" in errors_on(empty).router_config
+      enforced =
+        Alias.changeset(%Alias{}, %{name: "x", capability: :chat, router_mode: :enforce})
+
+      assert enforced.valid?
+      assert Ecto.Changeset.apply_changes(enforced).router_mode == :enforce
     end
   end
 
