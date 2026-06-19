@@ -262,7 +262,7 @@ backend are a later sprint.
   cases); latency logged under budget; the `:infinity` path is byte-for-byte
   unchanged (non-regression test)
 
-### [ ] S16 — Routing settings (system-level classifier)
+### [x] S16 — Routing settings (system-level classifier)
 See [DESIGN-routing-settings.md](./DESIGN-routing-settings.md).
 Depends on S13 (classifier seam) + S15 (`:ortex` backend). Lift the classifier
 config out of `aliases.router_config` into **one system-level "Routing"

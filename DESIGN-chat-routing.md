@@ -11,6 +11,12 @@ decisions so the work doesn't need to re-derive them.
 > **shadow mode** (logs its decision without acting on it) so thresholds can be
 > calibrated on real traffic before it routes anything.
 
+> **Superseded (S16).** The per-alias `router_config` map described below now lives
+> in **one system-level setting** (`Airo.Config.RoutingSetting`, edited at
+> `/admin/routing`); aliases only carry `router` + `router_mode`. The mechanics
+> (NLI pairs, thresholds, fail-open, shadow/enforce) are unchanged — only *where the
+> config lives* moved. See [DESIGN-routing-settings.md](./DESIGN-routing-settings.md).
+
 ---
 
 ## 1. Why this is small

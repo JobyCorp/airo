@@ -273,12 +273,14 @@ via `route.binding` when it needs strict-selection behavior.
 ### Classification-driven routing (routed aliases)
 
 An alias can opt into **computing `route.class` server-side** from the prompt rather
-than waiting for the caller to send it. Two columns drive it: `router` (`:none` |
-`:classify`, default `:none`) and `router_config` (a map). When `router: :classify`,
-the gateway classifies the incoming prompt, maps the result to a tier
-(`Deployment.class`), and sets `route.class` — then the *existing* class filter +
-strategy + failover machinery does the rest. It's a server-side default source for the
-same `route.class` knob §5.1 already exposes; nothing downstream is special-cased.
+than waiting for the caller to send it. The **classifier is a system-level setting**
+(`Airo.Config.RoutingSetting`, one singleton, edited at `/admin/routing`); an alias
+only opts in via two columns: `router` (`:none` | `:classify`, default `:none`) and
+`router_mode` (`:shadow` | `:enforce`, default `:shadow`). When `router: :classify`,
+the gateway classifies the incoming prompt with the system classifier, maps the result
+to a tier (`Deployment.class`), and sets `route.class` — then the *existing* class
+filter + strategy + failover machinery does the rest. It's a server-side default source
+for the same `route.class` knob §5.1 already exposes; nothing downstream is special-cased.
 
 - **Caller still wins.** If the request already carries `route.class` or
   `route.binding`, classification is skipped — the opt-in `route` object stays the
@@ -289,21 +291,24 @@ same `route.class` knob §5.1 already exposes; nothing downstream is special-cas
 - **Fail-open, asymmetric.** A classifier error/timeout applies **no** class filter
   (preserve full failover); only a confident low-tier result narrows to the default
   tier. The router being down must never fail — nor silently shrink — a request.
-- **Shadow vs enforce.** `mode: "shadow"` logs the predicted class without applying it
-  (detached, so it adds no caller latency) — the dataset for calibrating thresholds on
-  real traffic; `"enforce"` applies it. Flipping is a config edit, not a deploy.
-- **The classifier is just another alias.** `router_config.classifier` names a
-  `:classify`-capability alias (e.g. a zero-shot NLI model via the Infinity adapter),
-  resolved through the same routing/candidates path — no bespoke client.
-- **Engine dimension — `router_config.backend` (`infinity` | `ortex`).** Default
-  `infinity` (the remote NLI alias above). `ortex` runs a local ONNX model **on the
+- **Shadow vs enforce (per alias).** `router_mode: :shadow` logs the predicted class
+  without applying it (detached, so it adds no caller latency) — the dataset for
+  calibrating thresholds on real traffic; `:enforce` applies it. Mode is per-alias so
+  enforce rolls out one alias at a time; flipping is a config edit, not a deploy.
+- **One system classifier (`/admin/routing`).** The engine, model, score weighting,
+  and tier ladder live in the singleton `RoutingSetting` — configured once, inherited by
+  every routed alias (no per-alias duplication). Editing/calibrating it (incl. a
+  built-in prompt tester) is operator-facing; routed aliases just toggle on/off.
+- **Engine dimension — `RoutingSetting.backend` (`infinity` | `ortex`).** Default
+  `infinity` (a remote `:classify` NLI alias). `ortex` runs a local ONNX model **on the
   BEAM, on CPU, with no GPU/Infinity call** (S15), routing on a **graded complexity
   score** thresholded into a tier ladder rather than topic entailment — for hosts
   without a spare classifier GPU. Same decision contract either way.
 
 Full spec, tier mapping, and the calibrated config:
 [`DESIGN-chat-routing.md`](./DESIGN-chat-routing.md) (S13; v1 ships `:edge`-vs-`:deep`,
-shadow-first). Local on-CPU engine: [`DESIGN-local-classifier.md`](./DESIGN-local-classifier.md) (S15).
+shadow-first). Local on-CPU engine: [`DESIGN-local-classifier.md`](./DESIGN-local-classifier.md)
+(S15). System-level routing settings: [`DESIGN-routing-settings.md`](./DESIGN-routing-settings.md) (S16).
 
 ## 10. Auth, usage, observability
 
