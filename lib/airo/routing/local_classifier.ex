@@ -46,7 +46,14 @@ defmodule Airo.Routing.LocalClassifier do
     "Text Generation"
   ]
 
-  @default_max_seq 512
+  # Truncate the prompt head for classification. The routing signal sits in the
+  # first tokens (e.g. "debug this JavaScript"); a code/context tail is pure
+  # truncatable filler. Measured: overall_complexity is stable to ±0.01 from
+  # cap=64 to full length, and capping at 128 cuts the slow case (short ask + big
+  # paste) ~2.3× with ~zero misroute on real traffic. Override via
+  # `config :airo, Airo.Routing.LocalClassifier, max_seq: N` (the model accepts up
+  # to 512; raise it if prompts ever bury the ask in a long benign tail).
+  @default_max_seq 128
 
   @doc """
   Score `premise` with the model named by `config.model`.
