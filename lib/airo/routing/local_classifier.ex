@@ -122,11 +122,31 @@ defmodule Airo.Routing.LocalClassifier do
     result
   end
 
+  # Warm the session and assert the output contract: complexity_dims must be 6-wide
+  # and task_type_probs 11-wide, or our @dims / @task_labels mapping would silently
+  # mis-read a re-exported graph (the [:11] slice drops the last class, "Unknown").
   defp warmup(state) do
-    _ = encode_and_run(state, "warmup")
+    {dims, _overall, task} = encode_and_run(state, "warmup")
+    assert_width!(dims, length(@dims), "complexity_dims")
+    assert_width!(task, length(@task_labels), "task_type_probs")
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning("LocalClassifier: warmup/contract check failed: #{inspect(e)}")
+      :ok
+  end
+
+  defp assert_width!(tensor, expected, name) do
+    case Nx.shape(tensor) do
+      {_b, ^expected} ->
+        :ok
+
+      other ->
+        Logger.warning(
+          "LocalClassifier: #{name} shape #{inspect(other)} != [_, #{expected}] — " <>
+            "model contract changed; re-run T1 (export + fetch_model)."
+        )
+    end
   end
 
   ## Inference
