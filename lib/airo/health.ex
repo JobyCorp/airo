@@ -13,7 +13,7 @@ defmodule Airo.Health do
 
   alias Airo.Config.{Deployment, Provider}
   alias Airo.Health.HealthEvent
-  alias Airo.{Repo, Runtime.Store}
+  alias Airo.{Logs, Repo, Runtime.Store}
 
   @staleness_ms 90_000
 
@@ -56,7 +56,31 @@ defmodule Airo.Health do
 
   @doc "Persist one health event."
   def record_event(attrs) do
-    %HealthEvent{} |> HealthEvent.changeset(attrs) |> Repo.insert()
+    result = %HealthEvent{} |> HealthEvent.changeset(attrs) |> Repo.insert()
+
+    # Mirror the transition into the operational log (DESIGN-logging-traceability.md).
+    # Leaves health_events and its existing readers untouched; off the hot path.
+    Logs.record(%{
+      kind: :health,
+      level: if(attrs[:status] == :down, do: :warning, else: :info),
+      provider_id: attrs[:provider_id],
+      deployment_id: attrs[:deployment_id],
+      summary: health_summary(attrs),
+      data: %{
+        "status" => to_string(attrs[:status]),
+        "source" => to_string(attrs[:source]),
+        "reason" => attrs[:reason],
+        "latency_ms" => attrs[:latency_ms]
+      }
+    })
+
+    result
+  end
+
+  defp health_summary(attrs) do
+    reason = if attrs[:reason], do: " reason=#{attrs[:reason]}", else: ""
+
+    "health #{attrs[:status]} deployment=#{attrs[:deployment_id]} source=#{attrs[:source]}#{reason}"
   end
 
   @doc "Recent health transition events, newest first."

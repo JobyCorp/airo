@@ -23,6 +23,7 @@ defmodule Airo.Gateway do
   alias Airo.Gateway.Params
   alias Airo.Gateway.Vision
   alias Airo.Health
+  alias Airo.Logs
   alias Airo.Registry
   alias Airo.Routing
   alias Airo.Routing.Classifier
@@ -335,16 +336,18 @@ defmodule Airo.Gateway do
   defp log_classified(alias_, result, mode, latency_ms, trace_id) do
     applied = mode == "enforce" and match?({:ok, _, _}, result)
 
-    {predicted, scores, summary} =
+    {predicted, scores, outcome} =
       case result do
         {:ok, class, raw} -> {class, round_scores(raw), "predicted=#{class}"}
         :skip -> {nil, %{}, "skipped(no_text)"}
         {:error, reason} -> {nil, %{}, "error=#{inspect(reason)}"}
       end
 
-    Logger.info(
-      "gateway.route.classified alias=#{alias_.name} #{summary} applied=#{applied} " <>
-        "mode=#{mode} scores=#{inspect(scores)} latency_ms=#{latency_ms} trace=#{trace_id}",
+    message =
+      "gateway.route.classified alias=#{alias_.name} #{outcome} applied=#{applied} " <>
+        "mode=#{mode} scores=#{inspect(scores)} latency_ms=#{latency_ms} trace=#{trace_id}"
+
+    Logger.info(message,
       event: "gateway.route.classified",
       alias: alias_.name,
       predicted_class: predicted,
@@ -354,6 +357,22 @@ defmodule Airo.Gateway do
       latency_ms: latency_ms,
       trace_id: trace_id
     )
+
+    # Persist for /admin/logs — off the hot path, never raises (Logs.record/1).
+    Logs.record(%{
+      kind: :route_prediction,
+      level: if(match?({:error, _}, result), do: :warning, else: :info),
+      trace_id: trace_id,
+      alias_name: alias_.name,
+      summary: message,
+      data: %{
+        "predicted_class" => predicted,
+        "scores" => scores,
+        "mode" => mode,
+        "applied" => applied,
+        "latency_ms" => latency_ms
+      }
+    })
   end
 
   defp round_scores(scores), do: Map.new(scores, fn {c, s} -> {c, Float.round(s, 3)} end)

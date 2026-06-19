@@ -71,6 +71,8 @@ defmodule AiroWeb.Router do
     live "/admin/keys", Admin.KeyLive, :index
     live "/admin/keys/new", Admin.KeyLive, :new
     live "/admin/usage", Admin.UsageLive, :index
+    live "/admin/logs", Admin.LogsLive, :index
+    live "/admin/logs/:trace_id", Admin.TraceLive, :show
   end
 
   scope "/" do

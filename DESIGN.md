@@ -329,6 +329,11 @@ shadow-first).
   loaded-model metadata. Cloud providers remain catalog-only/backlog for model
   management.
 - **Transparency**: `x-gateway-*` headers + SSE trailing event (see §5.1).
+- **Logs & traceability**: a persisted operational event log (`log_events`) — routing
+  predictions and health transitions, captured off the hot path — surfaced at
+  `/admin/logs` and stitched per request into a `trace_id` timeline (usage + logs).
+  Distinct from `usage_records` (consumption). See
+  [DESIGN-logging-traceability.md](./DESIGN-logging-traceability.md) (S14).
 - Rate limits: **v2**.
 
 ## 11. Scope
