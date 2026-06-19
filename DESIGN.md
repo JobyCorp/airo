@@ -295,10 +295,15 @@ same `route.class` knob §5.1 already exposes; nothing downstream is special-cas
 - **The classifier is just another alias.** `router_config.classifier` names a
   `:classify`-capability alias (e.g. a zero-shot NLI model via the Infinity adapter),
   resolved through the same routing/candidates path — no bespoke client.
+- **Engine dimension — `router_config.backend` (`infinity` | `ortex`).** Default
+  `infinity` (the remote NLI alias above). `ortex` runs a local ONNX model **on the
+  BEAM, on CPU, with no GPU/Infinity call** (S15), routing on a **graded complexity
+  score** thresholded into a tier ladder rather than topic entailment — for hosts
+  without a spare classifier GPU. Same decision contract either way.
 
 Full spec, tier mapping, and the calibrated config:
 [`DESIGN-chat-routing.md`](./DESIGN-chat-routing.md) (S13; v1 ships `:edge`-vs-`:deep`,
-shadow-first).
+shadow-first). Local on-CPU engine: [`DESIGN-local-classifier.md`](./DESIGN-local-classifier.md) (S15).
 
 ## 10. Auth, usage, observability
 

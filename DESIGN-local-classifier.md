@@ -354,16 +354,35 @@ infinity still needs classifier).
 - **Routing-specific dimension reweighting + outcome logging** — calibration follow-up
   (§6.2); v1 ships NVIDIA's `"overall"` weights and the diagnostic breakdown.
 
-## 10. Results (fill on build)
-- Chosen model + size: _TBD_ (NVIDIA prompt-task-complexity / deberta-v3-base ≈ 0.2B,
-  or zero-shot fallback)
-- **ONNX export numerical-equivalence gate** (max-abs logit delta vs torch): _TBD_
-- Graph inputs (`token_type_ids` present?): _TBD_ · head output order: _TBD_ ·
-  complexity weighting used: _TBD_
-- §10-set decision parity (7/7 edge/deep match expected): _TBD_
-- **Code-nuance cases** (string-reverse → edge, multi-file refactor → deep): _TBD_
-- CPU latency p50 / p95 (f32, single pass): _TBD_ vs Infinity ~45 ms LAN
-- ORT thread settings used: _TBD_
+## 10. Results (measured 2026-06-18)
+- **Chosen model:** NVIDIA `prompt-task-and-complexity-classifier` (DeBERTa-v3-base,
+  ~0.2B, f32), HF revision `fea1121511eafabaf7dd6fc66863dcb04f74defb`.
+  `model.onnx` 703 MB (`sha256 1e77d482…b208e5`), `tokenizer.json` 8.3 MB
+  (Unigram, 128k vocab, `sha256 4b4f6023…27b929`). No fallback needed.
+- **ONNX export numerical-equivalence gate: ✅ PASS** — torch vs onnxruntime (CPU,
+  7 prompts): `max|Δ| complexity_dims = 7.75e-7`, `overall = 2.24e-7`, task_type
+  argmax 0/7 mismatch. In-graph `process_logits` cross-checked vs NVIDIA's native
+  impl (overall ~1e-5, pure rounding).
+- **Graph inputs:** `input_ids` + `attention_mask` (Int64, dynamic) — **no
+  `token_type_ids`** (dropped on export). **Outputs:** `complexity_dims [B,6]`
+  (order `creativity, reasoning, constraint, domain_knowledge,
+  contextual_knowledge, num_few_shots`), `overall_complexity [B,1]`,
+  `task_type_probs [B,11]` (idx→label = `config.task_type_map`, idx 11 "Unknown"
+  dropped by the `[:11]` slice). Contract recorded in `mix airo.fetch_model`.
+- **Routing weighting (the §4 knob):** `constraint 0.55 · reasoning 0.35 ·
+  creativity 0.05 · contextual_knowledge 0.05` (domain excluded — it's the
+  topic-trap), **deep threshold 0.20**. Default `overall` separates 7/7 too but
+  with a thin ~0.03 margin; this weighting gives **~0.11** (edge max 0.141 vs deep
+  min 0.255). Starting point — widen the sample via shadow logs before locking.
+- **§10-set decision parity: 7/7** (`mix airo.validate_classifier`).
+- **Code-nuance cases:** "reverse a string" → **edge** (0.103) · "refactor across
+  three files" → **deep** (0.383). Code graded by difficulty, not flagged binary.
+- **CPU latency** (`score/2`, f32, single pass, n=210): **p50 44.0 ms · p95
+  80.5 ms** (min 17.3 / max 110) — at parity with the Infinity ~45 ms LAN hop,
+  **zero GPU**, well under the 200 ms budget. (INT8 next sprint should beat it.)
+- **ORT thread settings:** defaults — Ortex 0.1.10 doesn't expose intra/inter-op
+  thread counts. Mitigated by `Ortex.run` being a dirty NIF; pin (OMP env / Ortex
+  PR) before any production/enforce cutover.
 
 ## 11. Appendix — BEAM / Ortex / export ops notes
 - **Build locally, ship the tarball.** `mix compile`/`mix release` run on the build
