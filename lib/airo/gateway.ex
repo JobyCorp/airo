@@ -327,28 +327,36 @@ defmodule Airo.Gateway do
     {result, System.monotonic_time(:millisecond) - start}
   end
 
-  # `gateway.route.classified` — the shadow-mode calibration dataset (T5), in the
-  # `gateway.attempt.*` Logger style. `applied` is true only when enforce mutated
-  # the route. `scores`/`outcome` are inspected for safe metadata encoding.
+  # `gateway.route.classified` — the calibration signal (T5). The full prediction
+  # is rendered into the *message* so it's readable in any sink (plain console, a
+  # homelab log tail) without a metadata-aware formatter, and is also attached as
+  # structured metadata for sinks that index it. `applied` is true only when
+  # enforce mutated the route.
   defp log_classified(alias_, result, mode, latency_ms, trace_id) do
-    {predicted, scores, outcome} =
+    applied = mode == "enforce" and match?({:ok, _, _}, result)
+
+    {predicted, scores, summary} =
       case result do
-        {:ok, class, scores} -> {class, scores, :ok}
-        :skip -> {nil, %{}, :skip}
-        {:error, reason} -> {nil, %{}, {:error, reason}}
+        {:ok, class, raw} -> {class, round_scores(raw), "predicted=#{class}"}
+        :skip -> {nil, %{}, "skipped(no_text)"}
+        {:error, reason} -> {nil, %{}, "error=#{inspect(reason)}"}
       end
 
-    Logger.info("gateway.route.classified",
+    Logger.info(
+      "gateway.route.classified alias=#{alias_.name} #{summary} applied=#{applied} " <>
+        "mode=#{mode} scores=#{inspect(scores)} latency_ms=#{latency_ms} trace=#{trace_id}",
+      event: "gateway.route.classified",
       alias: alias_.name,
       predicted_class: predicted,
-      scores: inspect(scores),
+      scores: scores,
       mode: mode,
-      applied: mode == "enforce" and match?({:ok, _, _}, result),
-      outcome: inspect(outcome),
+      applied: applied,
       latency_ms: latency_ms,
       trace_id: trace_id
     )
   end
+
+  defp round_scores(scores), do: Map.new(scores, fn {c, s} -> {c, Float.round(s, 3)} end)
 
   defp concrete_target(model, resource) do
     case Config.list_deployments_by_model(model, resource) do
