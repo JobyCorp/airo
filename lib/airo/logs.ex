@@ -14,11 +14,31 @@ defmodule Airo.Logs do
   alias Airo.Repo
 
   @task_supervisor Airo.Usage.TaskSupervisor
+  @pubsub Airo.PubSub
+
+  @doc "Subscribe the caller to the live log feed (`/admin/logs`)."
+  def subscribe, do: Phoenix.PubSub.subscribe(@pubsub, "logs")
+
+  @doc "Subscribe the caller to live activity for one `trace_id` (log events + usage)."
+  def subscribe_trace(trace_id) when is_binary(trace_id),
+    do: Phoenix.PubSub.subscribe(@pubsub, trace_topic(trace_id))
+
+  @doc """
+  Broadcast non-log activity for a trace's live timeline (e.g. a `usage_records`
+  write), so an open trace view refreshes. No-op without a trace id.
+  """
+  def trace_activity(trace_id) when is_binary(trace_id),
+    do: Phoenix.PubSub.broadcast(@pubsub, trace_topic(trace_id), {:trace_activity, :usage})
+
+  def trace_activity(_), do: :ok
+
+  defp trace_topic(trace_id), do: "trace:" <> trace_id
 
   @doc """
   Record an operational event. Returns `:ok` immediately; the insert happens in a
   task (async in dev/prod, synchronous in test so the SQL sandbox is available).
-  Fire-and-forget — a bad write is dropped, never propagated.
+  Fire-and-forget — a bad write is dropped, never propagated. On success it
+  broadcasts to the live feed and the event's trace topic.
   """
   @spec record(map()) :: :ok
   def record(attrs) when is_map(attrs) do
@@ -32,9 +52,25 @@ defmodule Airo.Logs do
   end
 
   defp insert(attrs) do
-    %LogEvent{} |> LogEvent.changeset(attrs) |> Repo.insert()
+    case %LogEvent{} |> LogEvent.changeset(attrs) |> Repo.insert() do
+      {:ok, event} = ok ->
+        publish(event)
+        ok
+
+      other ->
+        other
+    end
   rescue
     _ -> :error
+  end
+
+  defp publish(%LogEvent{} = event) do
+    Phoenix.PubSub.broadcast(@pubsub, "logs", {:log_event, event})
+
+    if event.trace_id,
+      do: Phoenix.PubSub.broadcast(@pubsub, trace_topic(event.trace_id), {:trace_activity, event})
+
+    :ok
   end
 
   defp async?, do: Application.get_env(:airo, __MODULE__, [])[:async] != false

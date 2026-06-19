@@ -20,10 +20,13 @@ defmodule AiroWeb.Admin.LogsLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    if connected?(socket), do: Logs.subscribe()
+
     {:ok,
      socket
      |> assign(
        page_title: "Logs",
+       streaming: connected?(socket),
        kind_options: optionize(Logs.kind_options()),
        level_options: optionize(Logs.level_options())
      )
@@ -37,6 +40,21 @@ defmodule AiroWeb.Admin.LogsLive do
 
   def handle_event("reset", _params, socket) do
     {:noreply, load(socket, @default_filters)}
+  end
+
+  # Live feed: a freshly captured event arrives via PubSub. Prepend it if it still
+  # matches the active filters (new events are always within any time range), and
+  # bump the counts — no re-query needed.
+  @impl true
+  def handle_info({:log_event, event}, socket) do
+    if matches?(event, socket.assigns.filters) do
+      {:noreply,
+       socket
+       |> stream_insert(:events, event, at: 0)
+       |> assign(summary: bump(socket.assigns.summary, event))}
+    else
+      {:noreply, socket}
+    end
   end
 
   defp load(socket, filters) do
@@ -57,6 +75,16 @@ defmodule AiroWeb.Admin.LogsLive do
         <CompositeComponents.page_header subtitle="Operational events — routing predictions and health transitions, correlated by trace.">
           <:crumb>Logs</:crumb>
           <:actions>
+            <span
+              :if={@streaming}
+              class="inline-flex items-center gap-1.5 text-xs font-medium text-success"
+            >
+              <span class="relative flex size-2">
+                <span class="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
+                <span class="relative inline-flex size-2 rounded-full bg-success" />
+              </span>
+              Live
+            </span>
             <.button id="logs-header-reset" size="sm" phx-click="reset">Reset filters</.button>
           </:actions>
         </CompositeComponents.page_header>
@@ -254,4 +282,33 @@ defmodule AiroWeb.Admin.LogsLive do
 
   defp format_at(%NaiveDateTime{} = at), do: Calendar.strftime(at, "%b %d  %H:%M:%S")
   defp format_at(other), do: to_string(other)
+
+  ## Live-feed filter matching (mirrors query/1; a new event is always in-range)
+
+  defp matches?(event, filters) do
+    eq?(filters["kind"], to_string(event.kind)) and
+      eq?(filters["level"], to_string(event.level)) and
+      sub?(filters["alias"], event.alias_name) and
+      eq?(filters["predicted_class"], event.data["predicted_class"]) and
+      sub?(filters["trace_id"], event.trace_id)
+  end
+
+  defp eq?(blank, _value) when blank in [nil, ""], do: true
+  defp eq?(filter, value), do: filter == value
+
+  defp sub?(blank, _value) when blank in [nil, ""], do: true
+  defp sub?(_filter, nil), do: false
+
+  defp sub?(filter, value),
+    do: String.contains?(String.downcase(value), String.downcase(filter))
+
+  defp bump(summary, event) do
+    summary
+    |> Map.update!(:total, &(&1 + 1))
+    |> Map.update!(:warnings, &(&1 + bool(event.level == :warning)))
+    |> Map.update!(:errors, &(&1 + bool(event.level == :error)))
+  end
+
+  defp bool(true), do: 1
+  defp bool(false), do: 0
 end

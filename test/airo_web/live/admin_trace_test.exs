@@ -36,4 +36,21 @@ defmodule AiroWeb.AdminTraceTest do
     {:ok, _view, html} = live(conn, ~p"/admin/logs/gt_unknown")
     assert html =~ "No events for this trace"
   end
+
+  test "the timeline updates live as events arrive", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/admin/logs/gt_livetrace")
+    assert render(view) =~ "No events for this trace"
+
+    :ok =
+      Logs.record(%{
+        kind: :route_prediction,
+        level: :info,
+        trace_id: "gt_livetrace",
+        summary: "live-trace-detail-marker",
+        data: %{}
+      })
+
+    refute render(view) =~ "No events for this trace"
+    assert render(view) =~ "live-trace-detail-marker"
+  end
 end

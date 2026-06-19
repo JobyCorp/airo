@@ -12,12 +12,21 @@ defmodule AiroWeb.Admin.TraceLive do
 
   @impl true
   def mount(%{"trace_id" => trace_id}, _session, socket) do
+    if connected?(socket), do: Logs.subscribe_trace(trace_id)
+
     {:ok,
      assign(socket,
        page_title: "Trace #{trace_id}",
        trace_id: trace_id,
+       streaming: connected?(socket),
        timeline: timeline(trace_id)
      )}
+  end
+
+  # Live: a new log event or usage write for this trace re-stitches the timeline.
+  @impl true
+  def handle_info({:trace_activity, _}, socket) do
+    {:noreply, assign(socket, timeline: timeline(socket.assigns.trace_id))}
   end
 
   defp timeline(trace_id) do
@@ -60,6 +69,16 @@ defmodule AiroWeb.Admin.TraceLive do
           <:crumb navigate={~p"/admin/logs"}>Logs</:crumb>
           <:crumb>{@trace_id}</:crumb>
           <:actions>
+            <span
+              :if={@streaming}
+              class="inline-flex items-center gap-1.5 text-xs font-medium text-success"
+            >
+              <span class="relative flex size-2">
+                <span class="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
+                <span class="relative inline-flex size-2 rounded-full bg-success" />
+              </span>
+              Live
+            </span>
             <.button size="sm" navigate={~p"/admin/usage"}>Usage</.button>
           </:actions>
         </CompositeComponents.page_header>

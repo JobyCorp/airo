@@ -40,4 +40,21 @@ defmodule AiroWeb.AdminLogsTest do
     assert html =~ "down"
     refute html =~ "chat-marker-alias"
   end
+
+  test "new captured events stream in live (no reload)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/admin/logs")
+    refute render(view) =~ "streamed-live-marker"
+
+    :ok =
+      Logs.record(%{
+        kind: :route_prediction,
+        level: :info,
+        trace_id: "gt_live",
+        summary: "raw",
+        alias_name: "streamed-live-marker",
+        data: %{"predicted_class" => "edge"}
+      })
+
+    assert render(view) =~ "streamed-live-marker"
+  end
 end

@@ -133,12 +133,17 @@ defmodule Airo.Usage do
   `:outcome`, `:fallback_used`.
   """
   def record_async(context) do
+    work = fn ->
+      case context |> build_attrs() |> record_usage() do
+        {:ok, record} -> Airo.Logs.trace_activity(record.trace_id)
+        _ -> :ok
+      end
+    end
+
     if async?() do
-      Task.Supervisor.start_child(@task_supervisor, fn ->
-        context |> build_attrs() |> record_usage()
-      end)
+      Task.Supervisor.start_child(@task_supervisor, work)
     else
-      context |> build_attrs() |> record_usage()
+      work.()
     end
 
     :ok
