@@ -212,6 +212,54 @@ defmodule AiroWeb.ChatControllerTest do
 
     """
 
+    # Mirrors what vllm-spark (qwen35-nvfp4) emits: reasoning arrives token-by-token
+    # in a `reasoning` delta field across separate SSE events, before any content.
+    @sse_reasoning """
+    data: {"choices":[{"index":0,"delta":{"reasoning":"Think"}}]}
+
+    data: {"choices":[{"index":0,"delta":{"reasoning":"ing"}}]}
+
+    data: {"choices":[{"index":0,"delta":{"content":"Yes"}}]}
+
+    data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+    data: [DONE]
+
+    """
+
+    test "forwards reasoning deltas verbatim, one SSE event each (no buffering)", %{conn: conn} do
+      Req.Test.stub(Airo.TestStub, fn upstream ->
+        upstream
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(200, @sse_reasoning)
+      end)
+
+      conn =
+        conn
+        |> authed(mint())
+        |> post(~p"/v1/chat/completions", body(%{"stream" => true}))
+
+      assert conn.status == 200
+      body = conn.resp_body
+
+      # Each reasoning token survives the round-trip (airo re-encodes the JSON, so
+      # key order may change, but the `reasoning` field is preserved)...
+      assert body =~ ~s("reasoning":"Think")
+      assert body =~ ~s("reasoning":"ing")
+
+      # ...and the two reasoning tokens arrive as two separate `data:` events —
+      # they are NOT coalesced into one block, which is what incremental client
+      # rendering depends on.
+      reasoning_events =
+        body |> String.split("\n\n", trim: true) |> Enum.count(&(&1 =~ "\"reasoning\":"))
+
+      assert reasoning_events == 2
+
+      # Reasoning is emitted before content, in upstream arrival order.
+      assert :binary.match(body, "\"reasoning\":\"Think\"") |> elem(0) <
+               :binary.match(body, "\"content\":\"Yes\"") |> elem(0)
+    end
+
     test "streams SSE deltas, a transparency trailer, and [DONE]", %{conn: conn} do
       Req.Test.stub(Airo.TestStub, fn upstream ->
         upstream
