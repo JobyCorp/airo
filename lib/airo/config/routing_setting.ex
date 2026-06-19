@@ -31,6 +31,8 @@ defmodule Airo.Config.RoutingSetting do
     field :default_class, :string, default: "edge"
     field :input, Ecto.Enum, values: @inputs, default: :last_user
     field :timeout_ms, :integer, default: 200
+    # Infinity only: rendered per label into the NLI hypothesis (`{}` → label).
+    field :hypothesis_template, :string, default: "This request requires {}."
     # Singleton guard — always true, unique.
     field :singleton, :boolean, default: true
 
@@ -53,7 +55,8 @@ defmodule Airo.Config.RoutingSetting do
       :labels,
       :default_class,
       :input,
-      :timeout_ms
+      :timeout_ms,
+      :hypothesis_template
     ])
     |> put_change(:singleton, true)
     |> validate_required([:backend, :default_class, :input, :timeout_ms])

@@ -296,8 +296,8 @@ defmodule Airo.Gateway do
   defp run_classification(alias_, params, route) do
     trace_id = Logger.metadata()[:gateway_trace_id]
 
-    case classifier_mode(alias_) do
-      "enforce" ->
+    case alias_.router_mode do
+      :enforce ->
         {result, latency_ms} = timed(fn -> Classifier.class_for(alias_, params) end)
         log_classified(alias_, result, "enforce", latency_ms, trace_id)
         apply_class(route, result)
@@ -314,8 +314,6 @@ defmodule Airo.Gateway do
         route
     end
   end
-
-  defp classifier_mode(alias_), do: get_in(alias_.router_config, ["mode"]) || "shadow"
 
   # Only a confident prediction mutates routing; `:skip` / `{:error, _}` leave
   # `route` untouched → no class filter → full priority + failover (fail-open, §4).

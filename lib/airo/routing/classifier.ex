@@ -28,11 +28,6 @@ defmodule Airo.Routing.Classifier do
   alias Airo.{Adapter, Config, Registry, Routing}
   alias Airo.Adapter.Context
 
-  @default_template "This request requires {}."
-  @default_input "last_user"
-  @default_class "edge"
-  @default_timeout_ms 200
-
   @doc """
   Predicted tier for `alias_` given the request `params` (OpenAI-shaped).
 
@@ -43,8 +38,8 @@ defmodule Airo.Routing.Classifier do
   """
   @spec class_for(Config.Alias.t(), map()) ::
           {:ok, String.t(), map()} | :skip | {:error, term()}
-  def class_for(%Config.Alias{} = alias_, params) when is_map(params) do
-    with {:ok, config} <- parse_config(alias_.router_config),
+  def class_for(%Config.Alias{} = _alias_, params) when is_map(params) do
+    with {:ok, config} <- usable_config(Config.routing_config()),
          {:ok, premise} <- extract_input(params, config),
          {:ok, scores} <- score(config, premise) do
       {:ok, decide(config, scores), scores}
@@ -58,84 +53,18 @@ defmodule Airo.Routing.Classifier do
     kind, reason -> {:error, {kind, reason}}
   end
 
-  ## Config
+  ## Config — sourced from the system classifier setting (S16). Parsing lives in
+  ## `Airo.Config.routing_config/0`; here we only gate on usability (fail-open).
 
-  defp parse_config(rc) when is_map(rc) do
-    backend = as_atom(rc["backend"], :infinity, [:infinity, :ortex])
-    labels = normalize_labels(rc["labels"])
-
-    base = %{
-      backend: backend,
-      labels: labels,
-      template: as_string(rc["hypothesis_template"], @default_template),
-      input: as_string(rc["input"], @default_input),
-      default_class: as_string(rc["default_class"], @default_class),
-      timeout_ms: as_pos_int(rc["timeout_ms"], @default_timeout_ms)
-    }
-
+  defp usable_config(config) do
     cond do
-      labels == [] -> {:error, :bad_config}
-      backend == :ortex -> ortex_config(base, rc)
-      true -> infinity_config(base, rc)
+      config.labels == [] -> {:error, :bad_config}
+      config.backend == :ortex and is_binary(config.model) -> {:ok, config}
+      config.backend == :ortex -> {:error, :bad_config}
+      is_binary(config.classifier) -> {:ok, config}
+      true -> {:error, :bad_config}
     end
   end
-
-  defp parse_config(_), do: {:error, :bad_config}
-
-  # `:infinity` needs the classifier alias name (the NLI deployment to call).
-  defp infinity_config(base, rc) do
-    case rc["classifier"] do
-      classifier when is_binary(classifier) -> {:ok, Map.put(base, :classifier, classifier)}
-      _ -> {:error, :bad_config}
-    end
-  end
-
-  # `:ortex` needs the local model dir; `classifier` is ignored. `score` is the
-  # routing weighting: "overall" (model's own) or a `%{dim => weight}` map (§4).
-  defp ortex_config(base, rc) do
-    case rc["model"] do
-      model when is_binary(model) ->
-        {:ok, base |> Map.put(:model, model) |> Map.put(:score, parse_score(rc["score"]))}
-
-      _ ->
-        {:error, :bad_config}
-    end
-  end
-
-  defp parse_score("overall"), do: :overall
-
-  defp parse_score(weights) when is_map(weights) do
-    parsed = for {k, v} <- weights, is_binary(k) and is_number(v), into: %{}, do: {k, v * 1.0}
-    if parsed == %{}, do: :overall, else: parsed
-  end
-
-  defp parse_score(_), do: :overall
-
-  defp as_atom(v, default, allowed) when is_binary(v) do
-    Enum.find(allowed, default, &(Atom.to_string(&1) == v))
-  end
-
-  defp as_atom(_v, default, _allowed), do: default
-
-  # Keep well-formed entries; order is preserved (highest tier first → first over
-  # `min` wins, per the decision step). `class` + `min` are required; `label` (the
-  # NLI hypothesis text) is required for `:infinity` but ignored for `:ortex`, so
-  # it is optional here.
-  defp normalize_labels(labels) when is_list(labels) do
-    for entry <- labels,
-        is_map(entry),
-        is_binary(entry["class"]),
-        is_number(entry["min"]),
-        do: %{label: entry["label"], class: entry["class"], min: entry["min"]}
-  end
-
-  defp normalize_labels(_), do: []
-
-  defp as_string(v, _default) when is_binary(v), do: v
-  defp as_string(_v, default), do: default
-
-  defp as_pos_int(v, _default) when is_integer(v) and v > 0, do: v
-  defp as_pos_int(_v, default), do: default
 
   ## Input extraction
 

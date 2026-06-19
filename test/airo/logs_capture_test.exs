@@ -88,21 +88,24 @@ defmodule Airo.LogsCaptureTest do
           candidates: [%{deployment_id: clf.id, weight: 100, priority: 0}]
         })
 
+      {:ok, _} =
+        Config.update_routing_setting(%{
+          backend: :infinity,
+          classifier: "prompt-class",
+          input: :last_user,
+          hypothesis_template: "This request requires {}.",
+          default_class: "edge",
+          timeout_ms: 200,
+          labels: [%{"label" => "reasoning", "class" => "deep", "min" => 0.5}]
+        })
+
       {:ok, chat} =
         Config.create_alias(%{
           name: "chat",
           capability: :chat,
           strategy: :priority,
           router: :classify,
-          router_config: %{
-            "mode" => "enforce",
-            "classifier" => "prompt-class",
-            "input" => "last_user",
-            "hypothesis_template" => "This request requires {}.",
-            "default_class" => "edge",
-            "timeout_ms" => 200,
-            "labels" => [%{"label" => "reasoning", "class" => "deep", "min" => 0.5}]
-          },
+          router_mode: :enforce,
           candidates: [
             %{deployment_id: edge.id, weight: 100, priority: 0},
             %{deployment_id: deep.id, weight: 100, priority: 1}
