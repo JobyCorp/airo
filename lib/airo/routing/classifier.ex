@@ -61,32 +61,72 @@ defmodule Airo.Routing.Classifier do
   ## Config
 
   defp parse_config(rc) when is_map(rc) do
-    classifier = rc["classifier"]
+    backend = as_atom(rc["backend"], :infinity, [:infinity, :ortex])
     labels = normalize_labels(rc["labels"])
 
-    if is_binary(classifier) and labels != [] do
-      {:ok,
-       %{
-         classifier: classifier,
-         labels: labels,
-         template: as_string(rc["hypothesis_template"], @default_template),
-         input: as_string(rc["input"], @default_input),
-         default_class: as_string(rc["default_class"], @default_class),
-         timeout_ms: as_pos_int(rc["timeout_ms"], @default_timeout_ms)
-       }}
-    else
-      {:error, :bad_config}
+    base = %{
+      backend: backend,
+      labels: labels,
+      template: as_string(rc["hypothesis_template"], @default_template),
+      input: as_string(rc["input"], @default_input),
+      default_class: as_string(rc["default_class"], @default_class),
+      timeout_ms: as_pos_int(rc["timeout_ms"], @default_timeout_ms)
+    }
+
+    cond do
+      labels == [] -> {:error, :bad_config}
+      backend == :ortex -> ortex_config(base, rc)
+      true -> infinity_config(base, rc)
     end
   end
 
   defp parse_config(_), do: {:error, :bad_config}
 
-  # Keep only well-formed `{label, class, min}` entries; order is preserved
-  # (highest tier first → first over `min` wins, per the decision step).
+  # `:infinity` needs the classifier alias name (the NLI deployment to call).
+  defp infinity_config(base, rc) do
+    case rc["classifier"] do
+      classifier when is_binary(classifier) -> {:ok, Map.put(base, :classifier, classifier)}
+      _ -> {:error, :bad_config}
+    end
+  end
+
+  # `:ortex` needs the local model dir; `classifier` is ignored. `score` is the
+  # routing weighting: "overall" (model's own) or a `%{dim => weight}` map (§4).
+  defp ortex_config(base, rc) do
+    case rc["model"] do
+      model when is_binary(model) ->
+        {:ok, base |> Map.put(:model, model) |> Map.put(:score, parse_score(rc["score"]))}
+
+      _ ->
+        {:error, :bad_config}
+    end
+  end
+
+  defp parse_score("overall"), do: :overall
+
+  defp parse_score(weights) when is_map(weights) do
+    parsed = for {k, v} <- weights, is_binary(k) and is_number(v), into: %{}, do: {k, v * 1.0}
+    if parsed == %{}, do: :overall, else: parsed
+  end
+
+  defp parse_score(_), do: :overall
+
+  defp as_atom(v, default, allowed) when is_binary(v) do
+    Enum.find(allowed, default, &(Atom.to_string(&1) == v))
+  end
+
+  defp as_atom(_v, default, _allowed), do: default
+
+  # Keep well-formed entries; order is preserved (highest tier first → first over
+  # `min` wins, per the decision step). `class` + `min` are required; `label` (the
+  # NLI hypothesis text) is required for `:infinity` but ignored for `:ortex`, so
+  # it is optional here.
   defp normalize_labels(labels) when is_list(labels) do
-    for %{"label" => l, "class" => c, "min" => m} <- labels,
-        is_binary(l) and is_binary(c) and is_number(m),
-        do: %{label: l, class: c, min: m}
+    for entry <- labels,
+        is_map(entry),
+        is_binary(entry["class"]),
+        is_number(entry["min"]),
+        do: %{label: entry["label"], class: entry["class"], min: entry["min"]}
   end
 
   defp normalize_labels(_), do: []
@@ -136,9 +176,16 @@ defmodule Airo.Routing.Classifier do
 
   defp message_text(_), do: ""
 
-  ## Scoring (branch B — build NLI pairs, batch, read entailment by label)
+  ## Scoring — dispatch on backend; same `{:ok, %{class => float}}` shape either way.
 
-  defp score(config, premise) do
+  defp score(%{backend: :ortex} = config, premise),
+    do: Airo.Routing.LocalClassifier.score(config, premise)
+
+  defp score(config, premise), do: score_infinity(config, premise)
+
+  ## Infinity backend (branch B — build NLI pairs, batch, read entailment by label)
+
+  defp score_infinity(config, premise) do
     with {:ok, candidate} <- resolve_classifier(config.classifier),
          {:ok, adapter, ctx} <- build_call(candidate) do
       inputs = Enum.map(config.labels, &(premise <> " " <> render(config.template, &1.label)))
@@ -183,7 +230,8 @@ defmodule Airo.Routing.Classifier do
     end
   end
 
-  defp render(template, label), do: String.replace(template, "{}", label)
+  defp render(template, label) when is_binary(label), do: String.replace(template, "{}", label)
+  defp render(template, _label), do: template
 
   defp zip_scores(labels, rows) do
     labels

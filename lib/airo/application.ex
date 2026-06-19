@@ -25,6 +25,9 @@ defmodule Airo.Application do
       Airo.Health.Prober,
       # Off-path usage-record writes.
       {Task.Supervisor, name: Airo.Usage.TaskSupervisor},
+      # Loads any configured local ONNX routing models into :persistent_term at
+      # boot (S15). No configured models ⇒ no-op; load failure ⇒ fail-open.
+      Airo.Routing.LocalClassifier.Holder,
       # Oban — housekeeping jobs (UsageRecord prune).
       {Oban, Application.fetch_env!(:airo, Oban)},
       # Start a worker by calling: Airo.Worker.start_link(arg)

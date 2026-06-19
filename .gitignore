@@ -45,3 +45,6 @@ airo-*.tar.gz
 npm-debug.log
 /assets/node_modules/
 
+
+# Local ONNX routing models (S15) — fetched, never committed
+/priv/models/
