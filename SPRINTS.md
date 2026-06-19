@@ -214,7 +214,7 @@ consumption-focused (tokens/cost/latency).
   correlates a request across `/usage` and logs; capture adds no request latency and
   can't recurse; `/usage` byte-for-byte unchanged
 
-### [ ] S15 — Local ONNX classifier (Ortex, on-CPU validation slice)
+### [x] S15 — Local ONNX classifier (Ortex, on-CPU validation slice)
 See [DESIGN-local-classifier.md](./DESIGN-local-classifier.md).
 Depends on S13 (classifier seam, `router`/`router_config`, `Classifier.score/2`).
 Prove the routing classifier can run **natively on the BEAM, on CPU, end-to-end**
