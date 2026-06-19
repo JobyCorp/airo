@@ -194,7 +194,7 @@ computing `route.class`; reuses candidate/health/failover wholesale. Ships in
   filters to the predicted class, shadow serves the priority head and logs; a
   `router: :none` alias is byte-for-byte unchanged (non-regression test)
 
-### [ ] S14 — Logging & traceability
+### [x] S14 — Logging & traceability
 See [DESIGN-logging-traceability.md](./DESIGN-logging-traceability.md). Builds on
 S11 (trace ids/logs) and S13 (classifier predictions).
 A persisted operational event log at `/admin/logs` + cross-surface traceability by
@@ -232,3 +232,4 @@ _Append one line per merge: `S0 merged <sha> — note`._
 - S10 merged 190c042 — API docs: Swagger UI at /docs (OpenApiSpex.Plug.SwaggerUI over /openapi) + "Docs" nav link; enriched AiroWeb.ApiSpec with request/response schemas + examples, the route object (class/tools/vision), capabilities on /v1/models, /v1/classify, Error/Usage schemas, 401/404; 191 tests + /docs render test, joby_kit.lint green. (Interim work since S6, not numbered sprints: multi-valued deployment capabilities + vision routing, /v1/classify endpoint + adapter, health-visibility admin columns, release-based deploy to the airo VM.)
 - S11 merged b15d2aa — Gateway observability: request trace ids in headers/SSE metadata/usage rows, structured gateway logs, failed-request accounting, usage admin filters + summaries + trace drilldown, provider/deployment health transition history; 195 tests, joby_kit.lint green.
 - S13 merged d9c510b — Classification-driven chat routing: `aliases.router`/`router_config`, `Airo.Routing.Classifier` (Infinity deberta-zeroshot, option-B NLI pairs built client-side + batched, ordered thresholds, total/fail-open), `Gateway.alias_target/3` hook (enforce applies `route.class`, shadow logs from a detached task), readable `gateway.route.classified` log, and an operator routing-tuning UI on `/admin/aliases` (router/mode/classifier/labels+thresholds + a no-traffic prompt-test). v1 edge-vs-deep, shadow-first; live-calibrated against the real model. 276 tests, joby_kit.lint green.
+- S14 merged fa6ba65 — Logging & traceability: `log_events` table + `Airo.Logs` (`record/1` off the hot path via the Task.Supervisor, `list/2` filters, `for_trace/1`, summary) + Oban prune; capture of route predictions (`Gateway.log_classified`) and health transitions (`Health.record_event` dual-write, leaving `health_events` + readers untouched); `/admin/logs` viewer (kind/level/range/alias/predicted_class/trace filters) + "Logs" nav; `/admin/logs/:trace_id` unified usage+logs timeline. `/usage` unchanged; capture async/fail-open. 285 tests, joby_kit.lint green.
