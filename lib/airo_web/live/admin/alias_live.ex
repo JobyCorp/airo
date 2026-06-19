@@ -7,23 +7,19 @@ defmodule AiroWeb.Admin.AliasLive do
   use AiroWeb, :live_view
 
   alias Airo.Config
-  alias Airo.Config.{Alias, Deployment}
-  alias Airo.Routing.Classifier
+  alias Airo.Config.Alias
   alias AiroWeb.CompositeComponents
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(page_title: "Aliases", form: nil, editing: nil, detail: nil, preview: nil)
+     |> assign(page_title: "Aliases", form: nil, editing: nil, detail: nil)
      |> assign(capabilities: Alias.capabilities(), strategies: Alias.strategies())
      |> assign(deployment_options: deployment_options())
      |> assign(
-       routers: [{"Off", "none"}, {"On — classify prompt", "classify"}],
-       modes: [{"Shadow — log only", "shadow"}, {"Enforce — apply tier", "enforce"}],
-       input_modes: [{"Last user message", "last_user"}, {"All turns", "all"}],
-       classes: Enum.map(Deployment.classes(), &to_string/1),
-       classify_aliases: classify_alias_names()
+       routers: [{"Off", "none"}, {"On — use the system classifier", "classify"}],
+       modes: [{"Shadow — log only", "shadow"}, {"Enforce — apply tier", "enforce"}]
      )
      |> stream(:aliases, list())}
   end
@@ -69,113 +65,27 @@ defmodule AiroWeb.Admin.AliasLive do
     {:noreply, reload_editing(socket, socket.assigns.editing.id)}
   end
 
-  # The classifier-routing config (router on/off + the router_config map: mode,
-  # classifier, thresholds, labels) is operator-editable here, so calibration and
-  # the shadow->enforce flip need no code or SQL. Save persists only on the explicit
-  # Save button (intent=save); every other submit — including Enter in the prompt
-  # field — is a side-effect-free Test, so an accidental submit can't overwrite the
-  # live config.
-  def handle_event("routing_submit", %{"intent" => "save"} = params, socket) do
-    router = if params["router"] == "classify", do: :classify, else: :none
-    config = build_router_config(params["rc"] || %{})
-
-    if router == :classify and config["labels"] == [] do
-      {:noreply,
-       put_flash(socket, :error, "Add at least one label to enable classifier routing.")}
-    else
-      case Config.update_alias(socket.assigns.editing, %{router: router, router_config: config}) do
-        {:ok, a} ->
-          {:noreply,
-           socket
-           |> put_flash(:info, routing_flash(router))
-           |> assign(editing: Config.get_alias_with_candidates!(a.id), preview: nil)}
-
-        {:error, _changeset} ->
-          {:noreply, put_flash(socket, :error, "Could not save routing config.")}
-      end
-    end
-  end
-
-  # "Test" (or any non-save submit) — run the classifier on the *current form*
-  # config (unsaved) so the operator can tune thresholds and see the prediction
-  # without sending traffic or persisting anything.
+  # Routing participation only (S16): turn the system classifier on/off for this
+  # alias and pick shadow/enforce. The classifier itself (engine, model, ladder)
+  # lives in the system setting at `/admin/routing` — not here.
   def handle_event("routing_submit", params, socket) do
-    config = build_router_config(params["rc"] || %{})
-    prompt = trimmed(params["preview_prompt"])
-    alias_ = %{socket.assigns.editing | router: :classify, router_config: config}
+    router = if params["router"] == "classify", do: :classify, else: :none
+    mode = if params["router_mode"] == "enforce", do: :enforce, else: :shadow
 
-    result =
-      if prompt == "" do
-        :empty
-      else
-        Classifier.class_for(alias_, %{"messages" => [%{"role" => "user", "content" => prompt}]})
-      end
+    case Config.update_alias(socket.assigns.editing, %{router: router, router_mode: mode}) do
+      {:ok, a} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, routing_flash(router))
+         |> assign(editing: Config.get_alias_with_candidates!(a.id))}
 
-    {:noreply, assign(socket, preview: %{prompt: prompt, result: result, config: config})}
-  end
-
-  defp routing_flash(:classify), do: "Classifier routing saved."
-  defp routing_flash(:none), do: "Classifier routing disabled."
-
-  # Rebuild the router_config map from flat form params. Labels arrive indexed
-  # (`rc[labels][0][...]`); blank rows are dropped so an empty row doubles as "add".
-  defp build_router_config(rc) do
-    %{
-      "mode" => if(rc["mode"] == "enforce", do: "enforce", else: "shadow"),
-      "classifier" => trimmed(rc["classifier"]),
-      "input" => if(rc["input"] == "all", do: "all", else: "last_user"),
-      "hypothesis_template" =>
-        blank_default(rc["hypothesis_template"], "This request requires {}."),
-      "default_class" => blank_default(rc["default_class"], "edge"),
-      "timeout_ms" => parse_int(rc["timeout_ms"], 200),
-      "labels" => build_labels(rc["labels"])
-    }
-  end
-
-  defp build_labels(labels) when is_map(labels) do
-    labels
-    |> Enum.sort_by(fn {idx, _} -> String.to_integer(idx) end)
-    |> Enum.map(fn {_idx, l} ->
-      %{
-        "label" => trimmed(l["label"]),
-        "class" => trimmed(l["class"]),
-        "min" => parse_float(l["min"], 0.5)
-      }
-    end)
-    |> Enum.reject(&(&1["label"] == ""))
-  end
-
-  defp build_labels(_), do: []
-
-  defp trimmed(nil), do: ""
-  defp trimmed(s) when is_binary(s), do: String.trim(s)
-
-  defp blank_default(s, default) do
-    case trimmed(s) do
-      "" -> default
-      other -> other
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Could not save routing.")}
     end
   end
 
-  defp parse_int(s, default) do
-    case Integer.parse(to_string(s)) do
-      {n, _} when n > 0 -> n
-      _ -> default
-    end
-  end
-
-  defp parse_float(s, default) do
-    case Float.parse(to_string(s)) do
-      {f, _} -> f
-      _ -> default
-    end
-  end
-
-  defp classify_alias_names do
-    Config.list_aliases()
-    |> Enum.filter(&(&1.capability == :classify))
-    |> Enum.map(& &1.name)
-  end
+  defp routing_flash(:classify), do: "Routing enabled — this alias uses the system classifier."
+  defp routing_flash(:none), do: "Routing disabled."
 
   defp save(socket, nil, params) do
     case Config.create_alias(params) do
@@ -310,10 +220,6 @@ defmodule AiroWeb.Admin.AliasLive do
               deployment_options={@deployment_options}
               routers={@routers}
               modes={@modes}
-              input_modes={@input_modes}
-              classes={@classes}
-              classify_aliases={@classify_aliases}
-              preview={@preview}
             />
           <% @detail -> %>
             <.alias_detail alias={@detail} />
@@ -332,10 +238,6 @@ defmodule AiroWeb.Admin.AliasLive do
   attr :deployment_options, :list, required: true
   attr :routers, :list, required: true
   attr :modes, :list, required: true
-  attr :input_modes, :list, required: true
-  attr :classes, :list, required: true
-  attr :classify_aliases, :list, required: true
-  attr :preview, :any, required: true
 
   defp alias_form(assigns) do
     ~H"""
@@ -397,16 +299,7 @@ defmodule AiroWeb.Admin.AliasLive do
         </.form>
       </.card>
 
-      <.alias_routing_card
-        :if={@editing}
-        editing={@editing}
-        routers={@routers}
-        modes={@modes}
-        input_modes={@input_modes}
-        classes={@classes}
-        classify_aliases={@classify_aliases}
-        preview={@preview}
-      />
+      <.alias_routing_card :if={@editing} editing={@editing} routers={@routers} modes={@modes} />
     </div>
     """
   end
@@ -414,22 +307,12 @@ defmodule AiroWeb.Admin.AliasLive do
   attr :editing, :any, required: true
   attr :routers, :list, required: true
   attr :modes, :list, required: true
-  attr :input_modes, :list, required: true
-  attr :classes, :list, required: true
-  attr :classify_aliases, :list, required: true
-  attr :preview, :any, required: true
 
   defp alias_routing_card(assigns) do
-    # Render from the just-tested config (if any) so unsaved edits survive a Test,
-    # otherwise from the saved config.
-    rc = (assigns.preview && assigns.preview.config) || assigns.editing.router_config || %{}
-    label_rows = Enum.with_index((rc["labels"] || []) ++ [%{}, %{}])
-
     assigns =
       assign(assigns,
-        rc: rc,
-        label_rows: label_rows,
-        router_value: to_string(assigns.editing.router)
+        router_value: to_string(assigns.editing.router),
+        mode_value: to_string(assigns.editing.router_mode)
       )
 
     ~H"""
@@ -437,9 +320,15 @@ defmodule AiroWeb.Admin.AliasLive do
       <:eyebrow>Classification routing</:eyebrow>
       <:title>Tier routing — {@editing.name}</:title>
       <p class="mb-4 text-sm text-base-content/70">
-        Classify the prompt and set <code>route.class</code> to a tier. Shadow logs the
-        prediction (<code>gateway.route.classified</code>) without changing what is served;
-        enforce applies it. An explicit caller <code>route.class</code> always wins.
+        When on, this alias classifies the prompt and sets <code>route.class</code>
+        to a tier.
+        Shadow logs the prediction (<code>gateway.route.classified</code>) without changing what
+        is served; enforce applies it. An explicit caller <code>route.class</code>
+        always wins.
+        The classifier itself (engine, model, thresholds) is configured once in <.link
+          navigate={~p"/admin/routing"}
+          class="text-primary hover:underline"
+        >Routing settings</.link>.
       </p>
 
       <.form for={%{}} id="alias-routing-form" phx-submit="routing_submit" class="space-y-4">
@@ -451,121 +340,10 @@ defmodule AiroWeb.Admin.AliasLive do
             options={@routers}
             value={@router_value}
           />
-          <.input
-            name="rc[mode]"
-            type="select"
-            label="Mode"
-            options={@modes}
-            value={@rc["mode"] || "shadow"}
-          />
-          <.input
-            name="rc[classifier]"
-            type="select"
-            label="Classifier alias"
-            options={@classify_aliases}
-            value={@rc["classifier"]}
-            prompt="Select a :classify alias"
-          />
-          <.input
-            name="rc[input]"
-            type="select"
-            label="Text to classify"
-            options={@input_modes}
-            value={@rc["input"] || "last_user"}
-          />
-          <.input
-            name="rc[default_class]"
-            type="select"
-            label="Default tier (no match)"
-            options={@classes}
-            value={@rc["default_class"] || "edge"}
-          />
-          <.input
-            name="rc[timeout_ms]"
-            type="number"
-            label="Timeout (ms)"
-            value={@rc["timeout_ms"] || 200}
-          />
+          <.input name="router_mode" type="select" label="Mode" options={@modes} value={@mode_value} />
         </div>
-
-        <.input
-          name="rc[hypothesis_template]"
-          label="Hypothesis template ({} is replaced by each label)"
-          value={@rc["hypothesis_template"] || "This request requires {}."}
-        />
-
-        <div class="space-y-2">
-          <p class="text-sm font-medium">
-            Labels — highest tier first; the first whose score ≥ its min wins. Clear a label's text to remove it.
-          </p>
-          <div
-            :for={{label, i} <- @label_rows}
-            class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_9rem_7rem]"
-          >
-            <.input
-              name={"rc[labels][#{i}][label]"}
-              value={label["label"]}
-              placeholder="hypothesis text, e.g. multi-step reasoning, math, or analysis"
-            />
-            <.input
-              name={"rc[labels][#{i}][class]"}
-              type="select"
-              options={@classes}
-              value={label["class"] || "deep"}
-            />
-            <.input
-              name={"rc[labels][#{i}][min]"}
-              type="number"
-              step="0.05"
-              min="0"
-              max="1"
-              value={label["min"] || 0.5}
-            />
-          </div>
-        </div>
-
-        <div class="flex flex-wrap items-end gap-3 border-t border-base-content/10 pt-4">
-          <div class="grow">
-            <.input
-              name="preview_prompt"
-              value={@preview && @preview.prompt}
-              label="Test a prompt — runs the classifier, sends no traffic"
-              placeholder="e.g. debug this code"
-            />
-          </div>
-          <.button type="submit" name="intent" value="test">Test</.button>
-          <.button type="submit" name="intent" value="save" variant="primary">Save routing</.button>
-        </div>
+        <.button type="submit" variant="primary">Save routing</.button>
       </.form>
-
-      <div
-        :if={@preview}
-        class="mt-4 rounded-lg border border-base-content/10 bg-base-200/40 p-4 text-sm"
-      >
-        <%= case @preview.result do %>
-          <% :empty -> %>
-            <span class="text-base-content/70">Enter a prompt, then click Test.</span>
-          <% {:ok, class, scores} -> %>
-            <p>
-              Predicted tier: <span class="font-semibold">{class}</span>
-              <span class="text-base-content/60">
-                · default {@preview.config["default_class"]} · shadow logs only
-              </span>
-            </p>
-            <ul class="mt-2 space-y-1 font-mono text-xs">
-              <li :for={l <- @preview.config["labels"]}>
-                {if Map.get(scores, l["class"], 0.0) >= l["min"], do: "✓", else: "·"} {l["class"]} ≥ {l[
-                  "min"
-                ]} — score {Float.round(Map.get(scores, l["class"], 0.0), 3)}
-                <span class="text-base-content/50">({l["label"]})</span>
-              </li>
-            </ul>
-          <% :skip -> %>
-            <span class="text-base-content/70">No classifiable text in that prompt.</span>
-          <% {:error, reason} -> %>
-            <span class="text-warning">Classifier error: {inspect(reason)}</span>
-        <% end %>
-      </div>
     </.card>
     """
   end

@@ -29,11 +29,9 @@ defmodule Airo.Config.Alias do
     # alias; `:classify` computes `route.class` from the prompt using the
     # **system classifier** (`Airo.Config.RoutingSetting`, S16). `router_mode`
     # controls whether the prediction is applied (`:enforce`) or only logged
-    # (`:shadow`). `router_config` is retired in favour of the system setting
-    # (dropped in a follow-up migration once the seam reads it).
+    # (`:shadow`).
     field :router, Ecto.Enum, values: @routers, default: :none
     field :router_mode, Ecto.Enum, values: @router_modes, default: :shadow
-    field :router_config, :map, default: %{}
 
     has_many :candidates, AliasCandidate, on_replace: :delete
 
@@ -61,8 +59,7 @@ defmodule Airo.Config.Alias do
       :fallback,
       :default_params,
       :router,
-      :router_mode,
-      :router_config
+      :router_mode
     ])
     |> validate_required([:name, :capability, :strategy])
     |> cast_assoc(:candidates)
