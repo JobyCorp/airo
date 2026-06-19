@@ -39,6 +39,51 @@ defmodule Airo.Config.AliasTest do
       changeset = Alias.changeset(%Alias{}, %{name: "x", capability: :chat, strategy: :random})
       assert "is invalid" in errors_on(changeset).strategy
     end
+
+    test "router defaults to :none and router_config to %{}" do
+      alias_ =
+        %Alias{}
+        |> Alias.changeset(%{name: "x", capability: :chat})
+        |> Ecto.Changeset.apply_changes()
+
+      assert alias_.router == :none
+      assert alias_.router_config == %{}
+    end
+
+    test "accepts router :classify with a config map" do
+      changeset =
+        Alias.changeset(%Alias{}, %{
+          name: "chat",
+          capability: :chat,
+          router: :classify,
+          router_config: %{"mode" => "shadow", "classifier" => "prompt-class"}
+        })
+
+      assert changeset.valid?
+      applied = Ecto.Changeset.apply_changes(changeset)
+      assert applied.router == :classify
+      assert applied.router_config == %{"mode" => "shadow", "classifier" => "prompt-class"}
+    end
+
+    test "rejects an unknown router" do
+      changeset = Alias.changeset(%Alias{}, %{name: "x", capability: :chat, router: :bogus})
+      assert "is invalid" in errors_on(changeset).router
+    end
+
+    test "requires a non-empty router_config when router is :classify" do
+      missing = Alias.changeset(%Alias{}, %{name: "x", capability: :chat, router: :classify})
+      assert "can't be empty when router is :classify" in errors_on(missing).router_config
+
+      empty =
+        Alias.changeset(%Alias{}, %{
+          name: "x",
+          capability: :chat,
+          router: :classify,
+          router_config: %{}
+        })
+
+      assert "can't be empty when router is :classify" in errors_on(empty).router_config
+    end
   end
 
   describe "candidates (cast_assoc)" do

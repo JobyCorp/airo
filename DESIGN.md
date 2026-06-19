@@ -128,7 +128,9 @@ ignore `route`:
 `route.binding` is orchester's **strict pin**: serve that deployment or return
 `selected_binding_unavailable` — never silently substitute (preserves ORC-073).
 Header equivalents (`x-route-class`, …) exist as a fallback for proxies that
-mangle bodies; body is primary.
+mangle bodies; body is primary. `route.class` may also be **computed server-side**
+for opt-in *routed aliases* — a classifier fills it in when the caller omits it (§9);
+an explicit caller `route.class` always wins.
 
 **3. Transparency metadata out (opt-in to read).**
 Responses stay OpenAI-shaped, but Airo reports which concrete provider/model
@@ -268,6 +270,36 @@ via `route.binding` when it needs strict-selection behavior.
 - Health threshold is a **preference signal**, not a hard gate (don't refuse a
   freshly-reloaded dev endpoint).
 
+### Classification-driven routing (routed aliases)
+
+An alias can opt into **computing `route.class` server-side** from the prompt rather
+than waiting for the caller to send it. Two columns drive it: `router` (`:none` |
+`:classify`, default `:none`) and `router_config` (a map). When `router: :classify`,
+the gateway classifies the incoming prompt, maps the result to a tier
+(`Deployment.class`), and sets `route.class` — then the *existing* class filter +
+strategy + failover machinery does the rest. It's a server-side default source for the
+same `route.class` knob §5.1 already exposes; nothing downstream is special-cased.
+
+- **Caller still wins.** If the request already carries `route.class` or
+  `route.binding`, classification is skipped — the opt-in `route` object stays the
+  escape hatch.
+- **Compute, don't branch.** The classifier only *fills in* `route.class`. An
+  absent/failed classifier ⇒ no class filter ⇒ the alias behaves as an ordinary
+  priority alias (the safe default `filter_class` already has).
+- **Fail-open, asymmetric.** A classifier error/timeout applies **no** class filter
+  (preserve full failover); only a confident low-tier result narrows to the default
+  tier. The router being down must never fail — nor silently shrink — a request.
+- **Shadow vs enforce.** `mode: "shadow"` logs the predicted class without applying it
+  (detached, so it adds no caller latency) — the dataset for calibrating thresholds on
+  real traffic; `"enforce"` applies it. Flipping is a config edit, not a deploy.
+- **The classifier is just another alias.** `router_config.classifier` names a
+  `:classify`-capability alias (e.g. a zero-shot NLI model via the Infinity adapter),
+  resolved through the same routing/candidates path — no bespoke client.
+
+Full spec, tier mapping, and the calibrated config:
+[`DESIGN-chat-routing.md`](./DESIGN-chat-routing.md) (S13; v1 ships `:edge`-vs-`:deep`,
+shadow-first).
+
 ## 10. Auth, usage, observability
 
 - **Client keys**: Airo-issued, hashed, scoped to allowed aliases. (Gateway→
@@ -372,6 +404,10 @@ Reused from the scaffold: `req`, `ecto_sql`/`postgrex`, `jason`, `telemetry_*`,
 - [ ] Homelab ops: deploy as a Phoenix release behind Traefik
       (`airo.local.joby.gg`) + its own Postgres; client keys for orchester/incogito.
 - [ ] Pricing source for cost attribution (manual per-Deployment vs a price feed).
+- [ ] **Classification-driven routing (S13)**: routed aliases compute `route.class`
+      from the prompt via a zero-shot classifier (Infinity deberta-zeroshot), shipped
+      shadow-first; v1 is `:edge`-vs-`:deep`. Spec + live calibration:
+      `DESIGN-chat-routing.md`.
 
 **Anthropic claude-code OAuth** is configurable (the exact token endpoint /
 client id / beta header are deployment-specific):

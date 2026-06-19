@@ -25,6 +25,7 @@ defmodule Airo.Gateway do
   alias Airo.Health
   alias Airo.Registry
   alias Airo.Routing
+  alias Airo.Routing.Classifier
 
   @type attempt :: %{
           adapter: module(),
@@ -259,6 +260,7 @@ defmodule Airo.Gateway do
 
   defp alias_target(alias_, params, resource) do
     route = if is_map(params["route"]), do: params["route"], else: %{}
+    route = maybe_classify(alias_, params, route, resource)
 
     case Routing.candidates(alias_, route, resource) do
       {:ok, []} ->
@@ -270,6 +272,82 @@ defmodule Airo.Gateway do
       {:error, _reason} = error ->
         error
     end
+  end
+
+  ## Classification-driven routing (routed aliases) — DESIGN-chat-routing.md, T3/T5
+
+  # Compute `route.class` from the prompt when the alias opts in and the caller
+  # left the tier unspecified. Enforce applies the prediction synchronously;
+  # shadow logs it from a detached task without touching `route` (no caller
+  # latency). Any other case returns `route` unchanged.
+  defp maybe_classify(alias_, params, route, resource) do
+    if classify?(alias_, route, resource),
+      do: run_classification(alias_, params, route),
+      else: route
+  end
+
+  defp classify?(%Alias{router: :classify}, route, resource)
+       when resource in [:chat, :vision],
+       do: is_nil(route["class"]) and is_nil(route["binding"])
+
+  defp classify?(_alias, _route, _resource), do: false
+
+  defp run_classification(alias_, params, route) do
+    trace_id = Logger.metadata()[:gateway_trace_id]
+
+    case classifier_mode(alias_) do
+      "enforce" ->
+        {result, latency_ms} = timed(fn -> Classifier.class_for(alias_, params) end)
+        log_classified(alias_, result, "enforce", latency_ms, trace_id)
+        apply_class(route, result)
+
+      _shadow ->
+        # Detached so serving isn't blocked on the classifier round-trip. Reuses
+        # the running Task.Supervisor; the task is best-effort and self-contained
+        # (`class_for` is fail-open), so it can never affect the request.
+        Task.Supervisor.start_child(Airo.Usage.TaskSupervisor, fn ->
+          {result, latency_ms} = timed(fn -> Classifier.class_for(alias_, params) end)
+          log_classified(alias_, result, "shadow", latency_ms, trace_id)
+        end)
+
+        route
+    end
+  end
+
+  defp classifier_mode(alias_), do: get_in(alias_.router_config, ["mode"]) || "shadow"
+
+  # Only a confident prediction mutates routing; `:skip` / `{:error, _}` leave
+  # `route` untouched → no class filter → full priority + failover (fail-open, §4).
+  defp apply_class(route, {:ok, class, _scores}), do: Map.put(route, "class", class)
+  defp apply_class(route, _result), do: route
+
+  defp timed(fun) do
+    start = System.monotonic_time(:millisecond)
+    result = fun.()
+    {result, System.monotonic_time(:millisecond) - start}
+  end
+
+  # `gateway.route.classified` — the shadow-mode calibration dataset (T5), in the
+  # `gateway.attempt.*` Logger style. `applied` is true only when enforce mutated
+  # the route. `scores`/`outcome` are inspected for safe metadata encoding.
+  defp log_classified(alias_, result, mode, latency_ms, trace_id) do
+    {predicted, scores, outcome} =
+      case result do
+        {:ok, class, scores} -> {class, scores, :ok}
+        :skip -> {nil, %{}, :skip}
+        {:error, reason} -> {nil, %{}, {:error, reason}}
+      end
+
+    Logger.info("gateway.route.classified",
+      alias: alias_.name,
+      predicted_class: predicted,
+      scores: inspect(scores),
+      mode: mode,
+      applied: mode == "enforce" and match?({:ok, _, _}, result),
+      outcome: inspect(outcome),
+      latency_ms: latency_ms,
+      trace_id: trace_id
+    )
   end
 
   defp concrete_target(model, resource) do
