@@ -76,7 +76,16 @@ defmodule Airo.MixProject do
       {:finch, "~> 0.22"},
       {:mint_web_socket, "~> 1.0"},
       {:open_api_spex, "~> 3.21"},
-      {:oban, "~> 2.23"}
+      {:oban, "~> 2.23"},
+
+      # Local ONNX routing classifier (S15) — on-CPU inference via Ortex.
+      # Ortex compiles a Rust NIF over ONNX Runtime (toolchain on the build host;
+      # the ORT lib + compiled NIF ship in the release tarball). Nx is used only
+      # for the tiny softmax + weighted-complexity post-process (default backend,
+      # no EXLA). See DESIGN-local-classifier.md.
+      {:ortex, "~> 0.1"},
+      {:tokenizers, "~> 0.5"},
+      {:nx, "~> 0.9"}
     ]
   end
 
