@@ -2,9 +2,10 @@ defmodule Airo.Routing.LocalClassifierTest do
   # Exercises the real bundled ONNX artifact (priv/models/, gitignored). Tagged
   # :model so a CI box without the artifact can `--exclude model` (or run
   # `mix airo.fetch_model nvidia-prompt-task-complexity` first).
-  use ExUnit.Case, async: true
+  use Airo.DataCase, async: true
   @moduletag :model
 
+  alias Airo.Config
   alias Airo.Config.Alias
   alias Airo.Routing.{Classifier, LocalClassifier}
 
@@ -74,41 +75,48 @@ defmodule Airo.Routing.LocalClassifierTest do
     end
   end
 
-  describe "Classifier.class_for/2 dispatch (backend: :ortex)" do
-    defp routed_ortex(overrides \\ %{}) do
-      config =
+  describe "Classifier.class_for/2 dispatch (system backend: :ortex)" do
+    # Configure the system classifier to the local ortex model.
+    defp set_ortex(overrides \\ %{}) do
+      attrs =
         Map.merge(
           %{
-            "backend" => "ortex",
-            "model" => @model,
-            "input" => "last_user",
-            "score" => @weights,
-            "labels" => [%{"class" => "deep", "min" => 0.20}],
-            "default_class" => "edge",
-            "timeout_ms" => 5000
+            backend: :ortex,
+            model: @model,
+            input: :last_user,
+            score: @weights,
+            labels: [%{"class" => "deep", "min" => 0.20}],
+            default_class: "edge",
+            timeout_ms: 5000
           },
           overrides
         )
 
-      %Alias{name: "chat", capability: :chat, router: :classify, router_config: config}
+      {:ok, _} = Config.update_routing_setting(attrs)
+      :ok
     end
+
+    defp routed,
+      do: %Alias{name: "chat", capability: :chat, router: :classify, router_mode: :enforce}
 
     defp params(text), do: %{"messages" => [%{"role" => "user", "content" => text}]}
 
     test "routes edge/deep on CPU with no Infinity classifier seeded (no HTTP)" do
+      set_ortex()
       # No classifier alias exists and no Req stub is set — a successful decision
       # proves the ortex path ran in-process, not the Infinity HTTP path.
-      assert {:ok, "edge", _scores} = Classifier.class_for(routed_ortex(), params(@reverse))
-      assert {:ok, "deep", _scores} = Classifier.class_for(routed_ortex(), params(@refactor))
+      assert {:ok, "edge", _scores} = Classifier.class_for(routed(), params(@reverse))
+      assert {:ok, "deep", _scores} = Classifier.class_for(routed(), params(@refactor))
     end
 
-    test "{:error, :bad_config} when ortex config omits :model" do
-      alias_ = routed_ortex(%{"model" => nil})
-      assert {:error, :bad_config} = Classifier.class_for(alias_, params(@reverse))
+    test "fail-open: an unavailable model ⇒ {:error, :model_unavailable}" do
+      set_ortex(%{model: "does-not-exist"})
+      assert {:error, :model_unavailable} = Classifier.class_for(routed(), params(@reverse))
     end
 
     test ":skip when there is no user text (shared extraction path)" do
-      assert :skip = Classifier.class_for(routed_ortex(), params("   "))
+      set_ortex()
+      assert :skip = Classifier.class_for(routed(), params("   "))
     end
   end
 end

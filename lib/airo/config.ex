@@ -11,7 +11,78 @@ defmodule Airo.Config do
   import Ecto.Query, warn: false
 
   alias Airo.Repo
-  alias Airo.Config.{Alias, AliasCandidate, ClientKey, Deployment, Model, Provider, Secret}
+
+  alias Airo.Config.{
+    Alias,
+    AliasCandidate,
+    ClientKey,
+    Deployment,
+    Model,
+    Provider,
+    RoutingSetting,
+    Secret
+  }
+
+  ## Routing setting (system classifier — S16)
+
+  @doc """
+  The singleton system classifier setting. Returns the persisted row, or an
+  unpersisted default struct when none exists (fresh DB / tests).
+  """
+  def get_routing_setting do
+    Repo.one(from r in RoutingSetting, limit: 1) || %RoutingSetting{}
+  end
+
+  @doc "Update (or insert) the singleton."
+  def update_routing_setting(attrs) do
+    case Repo.one(from r in RoutingSetting, limit: 1) do
+      nil -> %RoutingSetting{}
+      setting -> setting
+    end
+    |> RoutingSetting.changeset(attrs)
+    |> Repo.insert_or_update()
+  end
+
+  def change_routing_setting(%RoutingSetting{} = setting, attrs \\ %{}),
+    do: RoutingSetting.changeset(setting, attrs)
+
+  @doc """
+  The parsed system classifier config that `Airo.Routing.Classifier` consumes —
+  the same shape the per-alias `router_config` used to produce. Read straight
+  from the singleton (one indexed query, trivial vs. the inference it precedes —
+  no cache, so it respects the test sandbox and needs no invalidation).
+  """
+  def routing_config do
+    routing_config_from(get_routing_setting())
+  end
+
+  @doc """
+  The parsed config for a given (possibly unpersisted) setting — used by the
+  `/admin/routing` prompt-tester to preview unsaved edits.
+  """
+  def routing_config_from(%RoutingSetting{} = s) do
+    %{
+      backend: s.backend,
+      classifier: s.classifier,
+      model: s.model,
+      score: if(map_size(s.score) > 0, do: s.score, else: :overall),
+      labels: normalize_routing_labels(s.labels),
+      template: s.hypothesis_template,
+      default_class: s.default_class,
+      input: to_string(s.input),
+      timeout_ms: s.timeout_ms
+    }
+  end
+
+  defp normalize_routing_labels(labels) when is_list(labels) do
+    for entry <- labels,
+        is_map(entry),
+        is_binary(entry["class"]),
+        is_number(entry["min"]),
+        do: %{label: entry["label"], class: entry["class"], min: entry["min"]}
+  end
+
+  defp normalize_routing_labels(_), do: []
 
   ## Secrets
 

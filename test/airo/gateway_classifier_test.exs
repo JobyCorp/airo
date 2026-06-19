@@ -8,16 +8,17 @@ defmodule Airo.GatewayClassifierTest do
   alias Airo.Config
   alias Airo.Gateway
 
-  @router_config %{
-    "mode" => "shadow",
-    "classifier" => "prompt-class",
-    "input" => "last_user",
-    "hypothesis_template" => "This request requires {}.",
-    "labels" => [
+  # The system classifier config (S16) — the classifier reads this, not the alias.
+  @routing %{
+    backend: :infinity,
+    classifier: "prompt-class",
+    input: :last_user,
+    hypothesis_template: "This request requires {}.",
+    labels: [
       %{"label" => "multi-step reasoning, math, or analysis", "class" => "deep", "min" => 0.5}
     ],
-    "default_class" => "edge",
-    "timeout_ms" => 200
+    default_class: "edge",
+    timeout_ms: 200
   }
 
   setup do
@@ -51,7 +52,8 @@ defmodule Airo.GatewayClassifierTest do
   end
 
   # edge + deep chat deployments, an Infinity classifier, a `prompt-class` alias,
-  # and a routed `chat` alias in `mode`. Returns a client key.
+  # the system classifier setting, and a routed `chat` alias in `mode`
+  # (`:shadow | :enforce`). Returns a client key.
   defp seed(mode) do
     p = openai_provider()
     edge = chat_deployment(p, "edge-model", :edge)
@@ -80,13 +82,15 @@ defmodule Airo.GatewayClassifierTest do
         candidates: [%{deployment_id: clf.id, weight: 100, priority: 0}]
       })
 
+    {:ok, _} = Config.update_routing_setting(@routing)
+
     {:ok, _} =
       Config.create_alias(%{
         name: "chat",
         capability: :chat,
         strategy: :priority,
         router: :classify,
-        router_config: Map.put(@router_config, "mode", mode),
+        router_mode: mode,
         candidates: [
           %{deployment_id: edge.id, weight: 100, priority: 0},
           %{deployment_id: deep.id, weight: 100, priority: 1}
@@ -136,7 +140,7 @@ defmodule Airo.GatewayClassifierTest do
 
   describe "enforce mode" do
     test "filters candidates to the predicted class and logs the event" do
-      key = seed("enforce")
+      key = seed(:enforce)
       stub_entailment(0.9)
 
       log =
@@ -151,7 +155,7 @@ defmodule Airo.GatewayClassifierTest do
     end
 
     test "low confidence applies default_class (edge)" do
-      key = seed("enforce")
+      key = seed(:enforce)
       stub_entailment(0.1)
 
       assert {:ok, plan} = Gateway.resolve(chat("hi there"), key, :chat)
@@ -159,7 +163,7 @@ defmodule Airo.GatewayClassifierTest do
     end
 
     test "a classifier error applies no class filter (full candidate set)" do
-      key = seed("enforce")
+      key = seed(:enforce)
       Req.Test.stub(Airo.TestStub, fn conn -> Plug.Conn.send_resp(conn, 503, "down") end)
 
       assert {:ok, plan} = Gateway.resolve(chat("prove this theorem"), key, :chat)
@@ -169,7 +173,7 @@ defmodule Airo.GatewayClassifierTest do
 
   describe "shadow mode" do
     test "serves the priority head and does not apply the predicted class" do
-      key = seed("shadow")
+      key = seed(:shadow)
       stub_entailment(0.9)
 
       assert {:ok, plan} = Gateway.resolve(chat("prove this theorem"), key, :chat)
@@ -182,7 +186,7 @@ defmodule Airo.GatewayClassifierTest do
 
   describe "caller precedence and opt-out" do
     test "an explicit route.class skips the classifier entirely" do
-      key = seed("enforce")
+      key = seed(:enforce)
       test_pid = self()
 
       Req.Test.stub(Airo.TestStub, fn conn ->

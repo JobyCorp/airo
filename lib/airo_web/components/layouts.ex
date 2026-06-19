@@ -22,6 +22,7 @@ defmodule AiroWeb.Layouts do
         %{key: "providers", label: "Providers", href: "/admin/providers"},
         %{key: "deployments", label: "Deployments", href: "/admin/deployments"},
         %{key: "aliases", label: "Aliases", href: "/admin/aliases"},
+        %{key: "routing", label: "Routing", href: "/admin/routing"},
         %{key: "keys", label: "Keys", href: "/admin/keys"},
         %{key: "usage", label: "Usage", href: "/admin/usage"},
         %{key: "logs", label: "Logs", href: "/admin/logs"},

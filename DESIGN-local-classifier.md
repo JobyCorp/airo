@@ -103,6 +103,11 @@ the same map shape carrying a graded complexity score. Validation-only.
 pair) → `input_ids` / `attention_mask` (+ `token_type_ids` if the traced graph keeps
 them — T1 records this).
 
+> **Superseded (S16).** The `router_config` keys below (`backend`, `model`, `score`,
+> `labels`, …) now live in the system-level `RoutingSetting` singleton
+> (`/admin/routing`), not per alias. The backend dispatch, `LocalClassifier`, and the
+> graded-score contract are unchanged. See [DESIGN-routing-settings.md](./DESIGN-routing-settings.md).
+
 ## 3. Data-model / config change
 
 **No migration.** Reuse `aliases.router_config` (the free `:map` from S13). Add

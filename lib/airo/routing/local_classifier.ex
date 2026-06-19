@@ -64,6 +64,37 @@ defmodule Airo.Routing.LocalClassifier do
     end
   end
 
+  @doc """
+  Models installed under `priv/models/` (a dir containing `model.onnx`), each with
+  its load status (`:loaded` / `:unavailable` / `:not_loaded`). Drives the
+  `/admin/routing` model picker.
+  """
+  @spec installed_models() :: [%{name: String.t(), status: atom()}]
+  def installed_models do
+    dir = Path.join(:code.priv_dir(:airo), "models")
+
+    case File.ls(dir) do
+      {:ok, names} ->
+        names
+        |> Enum.filter(&File.exists?(Path.join([dir, &1, "model.onnx"])))
+        |> Enum.sort()
+        |> Enum.map(&%{name: &1, status: status(&1)})
+
+      _ ->
+        []
+    end
+  end
+
+  @doc "Load status of a model name (`:loaded | :unavailable | :not_loaded`)."
+  @spec status(String.t()) :: atom()
+  def status(name) do
+    case :persistent_term.get({__MODULE__, name}, :not_loaded) do
+      {:ok, _} -> :loaded
+      :unavailable -> :unavailable
+      _ -> :not_loaded
+    end
+  end
+
   ## Holder — loads the session + tokenizer once at boot into :persistent_term.
 
   defmodule Holder do

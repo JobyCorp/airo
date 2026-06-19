@@ -40,29 +40,29 @@ defmodule Airo.Config.AliasTest do
       assert "is invalid" in errors_on(changeset).strategy
     end
 
-    test "router defaults to :none and router_config to %{}" do
+    test "router defaults to :none and router_mode to :shadow" do
       alias_ =
         %Alias{}
         |> Alias.changeset(%{name: "x", capability: :chat})
         |> Ecto.Changeset.apply_changes()
 
       assert alias_.router == :none
-      assert alias_.router_config == %{}
+      assert alias_.router_mode == :shadow
     end
 
-    test "accepts router :classify with a config map" do
+    test "accepts router :classify with an enforce mode" do
       changeset =
         Alias.changeset(%Alias{}, %{
           name: "chat",
           capability: :chat,
           router: :classify,
-          router_config: %{"mode" => "shadow", "classifier" => "prompt-class"}
+          router_mode: :enforce
         })
 
       assert changeset.valid?
       applied = Ecto.Changeset.apply_changes(changeset)
       assert applied.router == :classify
-      assert applied.router_config == %{"mode" => "shadow", "classifier" => "prompt-class"}
+      assert applied.router_mode == :enforce
     end
 
     test "rejects an unknown router" do
@@ -70,19 +70,21 @@ defmodule Airo.Config.AliasTest do
       assert "is invalid" in errors_on(changeset).router
     end
 
-    test "requires a non-empty router_config when router is :classify" do
-      missing = Alias.changeset(%Alias{}, %{name: "x", capability: :chat, router: :classify})
-      assert "can't be empty when router is :classify" in errors_on(missing).router_config
+    test "router :classify needs no per-alias config (inherits the system classifier, S16)" do
+      changeset = Alias.changeset(%Alias{}, %{name: "x", capability: :chat, router: :classify})
+      assert changeset.valid?
+      assert Ecto.Changeset.apply_changes(changeset).router == :classify
+    end
 
-      empty =
-        Alias.changeset(%Alias{}, %{
-          name: "x",
-          capability: :chat,
-          router: :classify,
-          router_config: %{}
-        })
+    test "router_mode defaults to :shadow and accepts :enforce" do
+      default = Alias.changeset(%Alias{}, %{name: "x", capability: :chat})
+      assert Ecto.Changeset.apply_changes(default).router_mode == :shadow
 
-      assert "can't be empty when router is :classify" in errors_on(empty).router_config
+      enforced =
+        Alias.changeset(%Alias{}, %{name: "x", capability: :chat, router_mode: :enforce})
+
+      assert enforced.valid?
+      assert Ecto.Changeset.apply_changes(enforced).router_mode == :enforce
     end
   end
 
