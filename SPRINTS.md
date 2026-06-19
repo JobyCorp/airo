@@ -176,7 +176,7 @@ posture across many local machines.
   performance; updating a model version creates visible before/after comparison
   data from `UsageRecord` without breaking existing gateway calls
 
-### [ ] S13 — Routed `chat` alias (classification-driven tiering)
+### [x] S13 — Routed `chat` alias (classification-driven tiering)
 See [DESIGN-chat-routing.md](./DESIGN-chat-routing.md). Depends on S4 (routing),
 S5 (Infinity classify adapter), S11 (trace/logs) — all merged.
 A `chat` alias that classifies the prompt and routes to a model *tier* by
@@ -211,3 +211,4 @@ _Append one line per merge: `S0 merged <sha> — note`._
 - S8 merged 813d86a — realtime WebSocket proxy: Airo.Realtime (alias/concrete resolution, connect-time health routing, intent→capability), AiroWeb.RealtimeProxy (WebSock in / Mint.WebSocket out, transparent frame relay, pre-open buffering, session UsageRecord), RealtimeController + :realtime_api pipeline + GET /v1/realtime, GatewayError :unsupported_intent, mint_web_socket dep; 6 tests (resolution + relay against a real echo upstream) + verified against the REAL Speaches endpoint (session.created relayed back), precommit green (169 tests).
 - S10 merged 190c042 — API docs: Swagger UI at /docs (OpenApiSpex.Plug.SwaggerUI over /openapi) + "Docs" nav link; enriched AiroWeb.ApiSpec with request/response schemas + examples, the route object (class/tools/vision), capabilities on /v1/models, /v1/classify, Error/Usage schemas, 401/404; 191 tests + /docs render test, joby_kit.lint green. (Interim work since S6, not numbered sprints: multi-valued deployment capabilities + vision routing, /v1/classify endpoint + adapter, health-visibility admin columns, release-based deploy to the airo VM.)
 - S11 merged b15d2aa — Gateway observability: request trace ids in headers/SSE metadata/usage rows, structured gateway logs, failed-request accounting, usage admin filters + summaries + trace drilldown, provider/deployment health transition history; 195 tests, joby_kit.lint green.
+- S13 merged d9c510b — Classification-driven chat routing: `aliases.router`/`router_config`, `Airo.Routing.Classifier` (Infinity deberta-zeroshot, option-B NLI pairs built client-side + batched, ordered thresholds, total/fail-open), `Gateway.alias_target/3` hook (enforce applies `route.class`, shadow logs from a detached task), readable `gateway.route.classified` log, and an operator routing-tuning UI on `/admin/aliases` (router/mode/classifier/labels+thresholds + a no-traffic prompt-test). v1 edge-vs-deep, shadow-first; live-calibrated against the real model. 276 tests, joby_kit.lint green.
