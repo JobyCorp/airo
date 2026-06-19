@@ -34,6 +34,6 @@ defmodule AiroWeb.AdminTraceTest do
 
   test "empty state for an unknown trace", %{conn: conn} do
     {:ok, _view, html} = live(conn, ~p"/admin/logs/gt_unknown")
-    assert html =~ "No events recorded for this trace"
+    assert html =~ "No events for this trace"
   end
 end

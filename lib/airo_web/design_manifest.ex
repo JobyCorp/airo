@@ -110,6 +110,11 @@ defmodule AiroWeb.DesignManifest do
     summary: "Flat admin section with a header band and one elevated content container.",
     preview: &DesignPreviews.section_panel_preview/1
 
+  component CompositeComponents, :tag,
+    category: :composite,
+    summary: "Compact tone-colored status/category pill (log levels, event kinds, tiers).",
+    preview: &DesignPreviews.tag_preview/1
+
   # -------------------------------------------------------------------- domain
   # Add domain composites here:
   #

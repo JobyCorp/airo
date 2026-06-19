@@ -61,21 +61,25 @@ defmodule AiroWeb.Admin.LogsLive do
           </:actions>
         </CompositeComponents.page_header>
 
-        <div class="grid gap-4 md:grid-cols-3">
+        <div class="grid gap-4 sm:grid-cols-3">
           <.card variant="bordered">
             <:eyebrow>Events</:eyebrow>
             <:title>{@summary.total}</:title>
-            Matching records.
+            In the selected range.
           </.card>
           <.card variant="bordered">
             <:eyebrow>Warnings</:eyebrow>
-            <:title>{@summary.warnings}</:title>
-            Level warning.
+            <:title>
+              <span class={[@summary.warnings > 0 && "text-warning"]}>{@summary.warnings}</span>
+            </:title>
+            Degraded predictions or health.
           </.card>
           <.card variant="bordered">
             <:eyebrow>Errors</:eyebrow>
-            <:title>{@summary.errors}</:title>
-            Level error.
+            <:title>
+              <span class={[@summary.errors > 0 && "text-error"]}>{@summary.errors}</span>
+            </:title>
+            Failures worth a look.
           </.card>
         </div>
 
@@ -118,20 +122,67 @@ defmodule AiroWeb.Admin.LogsLive do
         </.card>
 
         <.table id="logs" rows={@streams.events}>
-          <:col :let={{_id, e}} label="When">{e.inserted_at}</:col>
-          <:col :let={{_id, e}} label="Kind">{e.kind}</:col>
-          <:col :let={{_id, e}} label="Level">{e.level}</:col>
-          <:col :let={{_id, e}} label="Trace">
-            <span class="font-mono text-xs">{e.trace_id || "—"}</span>
+          <:col :let={{_id, e}} label="When">
+            <span class="whitespace-nowrap font-mono text-xs text-base-content/55">
+              {format_at(e.inserted_at)}
+            </span>
           </:col>
-          <:col :let={{_id, e}} label="Alias">{e.alias_name || "—"}</:col>
-          <:col :let={{_id, e}} label="Summary">
-            <span class="text-xs">{e.summary}</span>
+          <:col :let={{_id, e}} label="Level">
+            <CompositeComponents.tag tone={level_tone(e.level)}>{e.level}</CompositeComponents.tag>
+          </:col>
+          <:col :let={{_id, e}} label="Event">
+            <div class="flex min-w-0 flex-col gap-1">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <CompositeComponents.tag tone={kind_tone(e.kind)}>
+                  {kind_label(e.kind)}
+                </CompositeComponents.tag>
+                <%= case e.kind do %>
+                  <% :route_prediction -> %>
+                    <span class="font-medium text-base-content">{e.alias_name || "—"}</span>
+                    <.icon name="hero-arrow-right" class="size-4 text-base-content/30" />
+                    <CompositeComponents.tag tone={tier_tone(e.data["predicted_class"])}>
+                      {e.data["predicted_class"] || "—"}
+                    </CompositeComponents.tag>
+                    <span
+                      :if={e.data["applied"] == true}
+                      class="inline-flex items-center gap-1 text-xs text-success"
+                    >
+                      <.icon name="hero-check-circle" class="size-4" /> applied
+                    </span>
+                  <% :health -> %>
+                    <span class="font-medium text-base-content">
+                      deployment {e.deployment_id || "?"}
+                    </span>
+                    <.icon name="hero-arrow-right" class="size-4 text-base-content/30" />
+                    <CompositeComponents.tag tone={status_tone(e.data["status"])}>
+                      {e.data["status"]}
+                    </CompositeComponents.tag>
+                  <% _ -> %>
+                    <span class="text-base-content/70">{e.summary}</span>
+                <% end %>
+              </div>
+              <span
+                :if={event_meta(e) != ""}
+                class="truncate font-mono text-xs text-base-content/45"
+              >
+                {event_meta(e)}
+              </span>
+            </div>
+          </:col>
+          <:col :let={{_id, e}} label="Trace">
+            <.link
+              :if={e.trace_id}
+              navigate={~p"/admin/logs/#{e.trace_id}"}
+              class="font-mono text-xs text-primary hover:underline"
+            >
+              {e.trace_id}
+            </.link>
+            <span :if={!e.trace_id} class="text-base-content/30">—</span>
           </:col>
           <:action :let={{_id, e}}>
             <.icon_button
               :if={e.trace_id}
-              icon="hero-magnifying-glass"
+              icon="hero-arrow-top-right-on-square"
               label="Open trace timeline"
               navigate={~p"/admin/logs/#{e.trace_id}"}
             />
@@ -149,4 +200,58 @@ defmodule AiroWeb.Admin.LogsLive do
 
   defp humanize(value),
     do: value |> to_string() |> String.replace("_", " ") |> String.capitalize()
+
+  ## Row presentation
+
+  defp kind_label(:route_prediction), do: "route"
+  defp kind_label(:health), do: "health"
+  defp kind_label(other), do: to_string(other)
+
+  defp kind_tone(:route_prediction), do: "primary"
+  defp kind_tone(_), do: "neutral"
+
+  defp level_tone(:error), do: "error"
+  defp level_tone(:warning), do: "warning"
+  defp level_tone(_), do: "neutral"
+
+  defp tier_tone("edge"), do: "success"
+  defp tier_tone("deep"), do: "warning"
+  defp tier_tone("cloud"), do: "primary"
+  defp tier_tone(_), do: "neutral"
+
+  defp status_tone("up"), do: "success"
+  defp status_tone("down"), do: "error"
+  defp status_tone(_), do: "neutral"
+
+  # The muted secondary line under the event title — the structured detail that
+  # used to be crammed into the raw summary string.
+  defp event_meta(%{kind: :route_prediction, data: data}) do
+    [data["mode"], score_str(data), latency_str(data["latency_ms"])]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" · ")
+  end
+
+  defp event_meta(%{kind: :health, data: data}) do
+    [data["source"], data["reason"]]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" · ")
+  end
+
+  defp event_meta(_), do: ""
+
+  defp score_str(%{"predicted_class" => class, "scores" => scores})
+       when is_binary(class) and is_map(scores) do
+    case scores[class] do
+      score when is_number(score) -> "score #{Float.round(score, 3)}"
+      _ -> nil
+    end
+  end
+
+  defp score_str(_), do: nil
+
+  defp latency_str(ms) when is_integer(ms), do: "#{ms}ms"
+  defp latency_str(_), do: nil
+
+  defp format_at(%NaiveDateTime{} = at), do: Calendar.strftime(at, "%b %d  %H:%M:%S")
+  defp format_at(other), do: to_string(other)
 end

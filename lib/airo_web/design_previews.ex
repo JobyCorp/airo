@@ -153,6 +153,18 @@ defmodule AiroWeb.DesignPreviews do
     """
   end
 
+  def tag_preview(assigns) do
+    ~H"""
+    <div class="flex flex-wrap items-center gap-2">
+      <CompositeComponents.tag tone="neutral">neutral</CompositeComponents.tag>
+      <CompositeComponents.tag tone="primary">primary</CompositeComponents.tag>
+      <CompositeComponents.tag tone="success">success</CompositeComponents.tag>
+      <CompositeComponents.tag tone="warning">warning</CompositeComponents.tag>
+      <CompositeComponents.tag tone="error">error</CompositeComponents.tag>
+    </div>
+    """
+  end
+
   def empty_state_preview(assigns) do
     ~H"""
     <div class="grid gap-4 sm:grid-cols-2">

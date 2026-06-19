@@ -55,7 +55,7 @@ defmodule AiroWeb.Admin.TraceLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} active_nav="logs">
-      <div class="mx-auto max-w-5xl space-y-6 px-6 py-8">
+      <div class="mx-auto max-w-7xl space-y-6 px-6 py-8">
         <CompositeComponents.page_header subtitle="Everything that happened to this request — prediction, dispatch, health, and outcome.">
           <:crumb navigate={~p"/admin/logs"}>Logs</:crumb>
           <:crumb>{@trace_id}</:crumb>
@@ -67,20 +67,44 @@ defmodule AiroWeb.Admin.TraceLive do
         <.card variant="bordered">
           <:title>Trace timeline</:title>
 
-          <ol :if={@timeline != []} class="space-y-3">
-            <li :for={entry <- @timeline} class="flex flex-col gap-1 sm:flex-row sm:gap-3">
-              <span class="w-44 shrink-0 font-mono text-xs text-base-content/60">{entry.at}</span>
-              <span class="w-28 shrink-0 text-sm font-medium">{entry.source}</span>
-              <span class="text-sm text-base-content/80">{entry.detail}</span>
+          <ol :if={@timeline != []} class="relative space-y-6 border-l border-base-content/15 py-1">
+            <li :for={entry <- @timeline} class="relative ml-6">
+              <span class={[
+                "absolute -left-[1.875rem] top-1 size-3 rounded-full ring-4 ring-base-100",
+                dot_class(entry.level)
+              ]} />
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-mono text-xs text-base-content/45">{format_at(entry.at)}</span>
+                <CompositeComponents.tag tone={source_tone(entry)}>
+                  {entry.source}
+                </CompositeComponents.tag>
+              </div>
+              <p class="mt-1 text-sm text-base-content/80">{entry.detail}</p>
             </li>
           </ol>
 
-          <p :if={@timeline == []} class="text-sm text-base-content/60">
-            No events recorded for this trace.
-          </p>
+          <CompositeComponents.empty_state
+            :if={@timeline == []}
+            icon="hero-magnifying-glass"
+            title="No events for this trace"
+          >
+            Nothing was recorded under this trace id.
+          </CompositeComponents.empty_state>
         </.card>
       </div>
     </Layouts.app>
     """
   end
+
+  defp dot_class(:error), do: "bg-error"
+  defp dot_class(:warning), do: "bg-warning"
+  defp dot_class(_), do: "bg-base-content/30"
+
+  defp source_tone(%{level: :error}), do: "error"
+  defp source_tone(%{level: :warning}), do: "warning"
+  defp source_tone(%{source: "usage"}), do: "primary"
+  defp source_tone(_), do: "neutral"
+
+  defp format_at(%NaiveDateTime{} = at), do: Calendar.strftime(at, "%b %d  %H:%M:%S")
+  defp format_at(other), do: to_string(other)
 end

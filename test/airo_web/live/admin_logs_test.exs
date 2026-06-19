@@ -5,15 +5,20 @@ defmodule AiroWeb.AdminLogsTest do
 
   alias Airo.Logs
 
-  test "renders events and narrows by the kind filter", %{conn: conn} do
+  test "renders structured events and narrows by the kind filter", %{conn: conn} do
     :ok =
       Logs.record(%{
         kind: :route_prediction,
         level: :info,
         trace_id: "gt_pred",
-        summary: "predicted-deep-marker",
-        alias_name: "chat",
-        data: %{"predicted_class" => "deep"}
+        summary: "raw summary string",
+        alias_name: "chat-marker-alias",
+        data: %{
+          "predicted_class" => "deep",
+          "mode" => "shadow",
+          "scores" => %{"deep" => 0.91},
+          "latency_ms" => 12
+        }
       })
 
     :ok =
@@ -21,16 +26,18 @@ defmodule AiroWeb.AdminLogsTest do
         kind: :health,
         level: :warning,
         trace_id: "gt_health",
-        summary: "health-down-marker",
-        data: %{"status" => "down"}
+        summary: "raw health summary",
+        data: %{"status" => "down", "source" => "dispatch"}
       })
 
     {:ok, view, html} = live(conn, ~p"/admin/logs")
-    assert html =~ "predicted-deep-marker"
-    assert html =~ "health-down-marker"
+    # structured fields render, not the raw summary string
+    assert html =~ "chat-marker-alias"
+    assert html =~ "deep"
+    assert html =~ "down"
 
     html = view |> form("#logs-filters", filters: %{kind: "health"}) |> render_change()
-    assert html =~ "health-down-marker"
-    refute html =~ "predicted-deep-marker"
+    assert html =~ "down"
+    refute html =~ "chat-marker-alias"
   end
 end

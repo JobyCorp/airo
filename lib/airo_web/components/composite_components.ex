@@ -66,6 +66,39 @@ defmodule AiroWeb.CompositeComponents do
   end
 
   @doc """
+  A compact tone-colored pill for a status, category, or tier — log levels, event
+  kinds, routing classes. `tone` maps to a daisyUI semantic color.
+
+      <.tag tone="warning">warning</.tag>
+      <.tag tone="success">edge</.tag>
+  """
+  attr :tone, :string, values: ~w(neutral primary success warning error), default: "neutral"
+  attr :rest, :global
+
+  slot :inner_block, required: true
+
+  def tag(assigns) do
+    ~H"""
+    <span
+      data-component="AiroWeb.CompositeComponents.tag"
+      class={[
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+        tag_tone(@tone)
+      ]}
+      {@rest}
+    >
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  defp tag_tone("primary"), do: "bg-primary/15 text-primary"
+  defp tag_tone("success"), do: "bg-success/15 text-success"
+  defp tag_tone("warning"), do: "bg-warning/15 text-warning"
+  defp tag_tone("error"), do: "bg-error/15 text-error"
+  defp tag_tone(_neutral), do: "bg-base-200 text-base-content/70"
+
+  @doc """
   An empty-state callout: centered icon, title, supporting text, and an
   optional action slot. Use to fill an otherwise-empty container — an
   unfilled list, a search with no results, a fresh dashboard.
