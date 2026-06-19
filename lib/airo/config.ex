@@ -53,11 +53,14 @@ defmodule Airo.Config do
   no cache, so it respects the test sandbox and needs no invalidation).
   """
   def routing_config do
-    parse_routing_setting(get_routing_setting())
+    routing_config_from(get_routing_setting())
   end
 
-  # Mirror the old `Classifier.parse_config/1` output, sourced from the singleton.
-  defp parse_routing_setting(%RoutingSetting{} = s) do
+  @doc """
+  The parsed config for a given (possibly unpersisted) setting — used by the
+  `/admin/routing` prompt-tester to preview unsaved edits.
+  """
+  def routing_config_from(%RoutingSetting{} = s) do
     %{
       backend: s.backend,
       classifier: s.classifier,

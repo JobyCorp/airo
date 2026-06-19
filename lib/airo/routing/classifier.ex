@@ -39,15 +39,23 @@ defmodule Airo.Routing.Classifier do
   @spec class_for(Config.Alias.t(), map()) ::
           {:ok, String.t(), map()} | :skip | {:error, term()}
   def class_for(%Config.Alias{} = _alias_, params) when is_map(params) do
-    with {:ok, config} <- usable_config(Config.routing_config()),
+    classify(Config.routing_config(), params)
+  end
+
+  @doc """
+  Classify `params` against an already-parsed `config` (the shape
+  `Airo.Config.routing_config/0` returns). Used by `class_for/2` and the
+  `/admin/routing` prompt-tester (which previews an unsaved config). Total by
+  contract — fails open to `{:error, _}` rather than raising into the caller.
+  """
+  @spec classify(map(), map()) :: {:ok, String.t(), map()} | :skip | {:error, term()}
+  def classify(config, params) when is_map(config) and is_map(params) do
+    with {:ok, config} <- usable_config(config),
          {:ok, premise} <- extract_input(params, config),
          {:ok, scores} <- score(config, premise) do
       {:ok, decide(config, scores), scores}
     end
   rescue
-    # Total by contract: a DB / resolve / decode explosion fails open rather than
-    # raising into the caller (enforce runs this in the request process, so an
-    # unhandled raise would 500 a chat request — exactly what must never happen).
     e -> {:error, {:exception, e}}
   catch
     kind, reason -> {:error, {kind, reason}}

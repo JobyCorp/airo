@@ -70,6 +70,7 @@ defmodule AiroWeb.Router do
     live "/admin/aliases/:id/edit", Admin.AliasLive, :edit
     live "/admin/keys", Admin.KeyLive, :index
     live "/admin/keys/new", Admin.KeyLive, :new
+    live "/admin/routing", Admin.RoutingLive, :index
     live "/admin/usage", Admin.UsageLive, :index
     live "/admin/logs", Admin.LogsLive, :index
     live "/admin/logs/:trace_id", Admin.TraceLive, :show
