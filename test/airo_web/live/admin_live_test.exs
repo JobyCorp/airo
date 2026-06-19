@@ -137,6 +137,27 @@ defmodule AiroWeb.AdminLiveTest do
       assert html =~ "can&#39;t be blank" or html =~ "can't be blank"
     end
 
+    test "flags a scheme-less base_url inline before it can be saved", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/admin/providers/new")
+
+      # phx-change validation: typing a bad base_url surfaces the error inline,
+      # so a probe-able-but-invalid provider never reaches the database.
+      html =
+        view
+        |> form("#provider-form", provider: %{name: "Local", base_url: "localhost:4000"})
+        |> render_change()
+
+      assert html =~ "must be an absolute http(s) URL"
+
+      view
+      |> form("#provider-form",
+        provider: %{name: "Local", adapter_type: "vllm", base_url: "localhost:4000"}
+      )
+      |> render_submit()
+
+      refute Config.get_provider_by_name("Local")
+    end
+
     test "creates an inline provider credential secret", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/admin/providers/new")
 

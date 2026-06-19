@@ -35,6 +35,21 @@ defmodule Airo.Config.ProviderTest do
         assert Provider.changeset(%Provider{}, %{@valid | adapter_type: type}).valid?
       end
     end
+
+    test "rejects a base_url with no scheme" do
+      changeset = Provider.changeset(%Provider{}, %{@valid | base_url: "localhost:4000"})
+
+      assert "must be an absolute http(s) URL, e.g. http://localhost:4000" in errors_on(changeset).base_url
+    end
+
+    test "rejects a non-http scheme" do
+      changeset = Provider.changeset(%Provider{}, %{@valid | base_url: "ftp://host:21"})
+      refute changeset.valid?
+    end
+
+    test "accepts an https base_url" do
+      assert Provider.changeset(%Provider{}, %{@valid | base_url: "https://api.example.com/v1"}).valid?
+    end
   end
 
   describe "uniqueness" do

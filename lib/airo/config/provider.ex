@@ -57,7 +57,24 @@ defmodule Airo.Config.Provider do
       :credential_id
     ])
     |> validate_required([:name, :adapter_type, :base_url, :auth_kind])
+    |> validate_base_url()
     |> unique_constraint(:name)
     |> assoc_constraint(:credential)
+  end
+
+  # `base_url` must be an absolute http(s) URL. A scheme-less value like
+  # "localhost:4000" parses with the host as the scheme and makes Finch raise at
+  # request time (DESIGN §14) — reject it here so it never reaches the transport.
+  defp validate_base_url(changeset) do
+    validate_change(changeset, :base_url, fn :base_url, url ->
+      case URI.new(url) do
+        {:ok, %URI{scheme: scheme, host: host}}
+        when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+          []
+
+        _ ->
+          [base_url: "must be an absolute http(s) URL, e.g. http://localhost:4000"]
+      end
+    end)
   end
 end

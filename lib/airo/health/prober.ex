@@ -67,7 +67,7 @@ defmodule Airo.Health.Prober do
     ctx = Context.new(provider, opts: [req_options: [receive_timeout: timeout_ms]])
 
     started = System.monotonic_time(:millisecond)
-    {status, latency, reason} = classify(Transport.get(ctx, "/models"), started)
+    {status, latency, reason} = classify(probe_get(ctx), started)
 
     for deployment <- provider.deployments do
       Airo.Health.mark_deployment(deployment, provider, status,
@@ -80,6 +80,16 @@ defmodule Airo.Health.Prober do
     status
   end
 
+  # A misconfigured provider (e.g. a `base_url` with no scheme) makes Req/Finch
+  # *raise* rather than return an error tuple. Health is best-effort, so any such
+  # failure is just `:down` — letting it escape would crash the prober, and on
+  # boot the restart loop takes the whole app down with it.
+  defp probe_get(ctx) do
+    Transport.get(ctx, "/models")
+  rescue
+    exception -> {:error, exception}
+  end
+
   defp classify({:ok, %{status: code}}, started) when code < 500,
     do: {:up, System.monotonic_time(:millisecond) - started, nil}
 
@@ -90,6 +100,7 @@ defmodule Airo.Health.Prober do
 
   defp reason_code(%{reason: reason}), do: "transport_#{reason}"
   defp reason_code(reason) when is_atom(reason), do: "transport_#{reason}"
+  defp reason_code(exception) when is_exception(exception), do: "transport_invalid_request"
   defp reason_code(_reason), do: "transport_error"
 
   defp config do

@@ -81,4 +81,22 @@ defmodule Airo.Health.ProberTest do
     assert Prober.probe_provider(provider) == :down
     assert Health.status(d1.id) == :down
   end
+
+  test "a provider whose base_url makes the transport raise is :down, not a crash" do
+    {provider, [d1, _d2]} = provider_with_deployments()
+    # A scheme-less base_url makes Finch raise rather than return an error tuple.
+    # The changeset rejects this, so reach past it to plant the bad value.
+    Repo.update_all(
+      from(p in Config.Provider, where: p.id == ^provider.id),
+      set: [base_url: "localhost:4000"]
+    )
+
+    provider = Repo.get!(Config.Provider, provider.id)
+
+    assert Prober.probe_provider(provider) == :down
+    assert Health.status(d1.id) == :down
+
+    assert %HealthEvent{reason: "transport_invalid_request"} =
+             Repo.get_by(HealthEvent, deployment_id: d1.id, status: :down, source: :probe)
+  end
 end
