@@ -1,17 +1,51 @@
 # Deploying Airo
 
 Agent-facing deployment guide. Read top-to-bottom before deploying. Mirrors the
-incogito deploy pattern (local prod release → tarball over SSH → systemd).
+incogito deploy pattern (prod release → tarball over SSH → systemd).
 
 ## TL;DR
 
 ```bash
 cd ~/airo
-bin/deploy.sh
+bin/deploy-docker.sh
 ```
 
-Builds a prod release locally, ships it to the VM (SSH alias `airo`), migrates,
-and restarts. Exit 0 = success.
+Builds a prod release **inside an `ubuntu:24.04` container** (so it links the
+VM's glibc), ships it to the VM (SSH alias `airo`), migrates, and restarts.
+Exit 0 = success.
+
+### Which script? (read this — it has bitten us)
+
+- **`bin/deploy-docker.sh` — use this.** The local dev host runs Ubuntu 26.04
+  (**glibc 2.43**); the VM runs Ubuntu 24.04 (**glibc 2.39**). A release built
+  natively bundles an ERTS + native NIFs (ortex, tokenizers) linked against
+  glibc 2.43 — `beam.smp` then dies on the VM with
+  `libm.so.6: version GLIBC_2.43 not found` and the service won't boot.
+  Building inside `ubuntu:24.04` makes ERTS and every NIF link glibc 2.39,
+  matching the target. The builder image (`bin/docker-build/Dockerfile`)
+  mirrors the VM toolchain: mise `erlang 28.5` + `elixir 1.19.5-otp-28`,
+  `node 24` (for the `vega-embed` perf-chart deps), and rustup stable (ortex).
+- **`bin/deploy.sh` — only safe when the build host's glibc ≤ the VM's** (2.39).
+  Once your laptop is on a newer glibc, this produces releases that can't boot
+  on the VM. Kept for that case and for reference.
+
+**Caution:** both scripts `systemctl stop` the service and overwrite `/opt/airo`
+*before* migrating, with no rollback. If the build is broken, fix it locally
+**before** running — a failed run leaves prod down (there is no backup of the
+prior release).
+
+### deploy-docker.sh flags
+
+```bash
+bin/deploy-docker.sh                  # build + ship + migrate + restart
+SKIP_MIGRATE=1 bin/deploy-docker.sh   # skip the migration step
+SSH_HOST=other bin/deploy-docker.sh   # override the SSH alias
+REBUILD_IMAGE=1 bin/deploy-docker.sh  # force-rebuild the builder image
+```
+
+Rebuild the image (`REBUILD_IMAGE=1`) whenever you change the toolchain in
+`bin/docker-build/Dockerfile` — the script otherwise reuses the cached image
+and your toolchain change silently won't apply.
 
 ## Architecture
 
@@ -63,21 +97,32 @@ Airo to the public internet** (a tunnel, a port-forward) without first gating
    or `CLOAK_KEY`, so the migrate step will fail loudly if the env file is
    incomplete or unreadable by sudo.
 
-## What `bin/deploy.sh` does (in order)
+## What `bin/deploy-docker.sh` does (in order)
 
-1. `mix deps.get --only prod`
-2. `MIX_ENV=prod mix deps.compile`
-3. `MIX_ENV=prod mix assets.deploy` (tailwind + esbuild, minified + digested)
-4. `MIX_ENV=prod mix release --overwrite` → `_build/prod/rel/airo/`
-   (picks up `rel/overlays/bin/{server,migrate}`)
-5. `tar` the release dir → `airo-<stamp>-<sha>.tar.gz`
-6. `scp` to `airo:/tmp/`
-7. Over SSH, with passwordless sudo: stop service → extract into `/opt/airo` →
-   chown → run `bin/migrate` (`Airo.Release.migrate`) → start service → status
-8. Local + remote tarballs cleaned up
+1. Builds the cached builder image from `bin/docker-build/Dockerfile` if it's
+   missing (or `REBUILD_IMAGE=1`). First build compiles OTP from source — slow;
+   reused after that.
+2. `git archive HEAD` → a clean source tree (no host `_build`/`deps`, which are
+   glibc-2.43). **The build is exactly committed `HEAD` — commit before you
+   deploy, or your change won't ship.**
+3. In the container (`MIX_ENV=prod`): `mix deps.get --only prod` →
+   `mix deps.compile` → `npm --prefix assets ci` → `mix assets.deploy`
+   (compile + tailwind + esbuild, minified + digested) → `mix release --overwrite`
+   → `tar` the release → `_out_/airo-<stamp>-<sha>.tar.gz`.
+4. `scp` the tarball to `airo:/tmp/`.
+5. Over SSH, with passwordless sudo: stop service → extract into `/opt/airo` →
+   chown → run `bin/migrate` (`Airo.Release.migrate`) → start service → status.
+6. Local temp dirs + remote tarball cleaned up.
 
-Skip migrations: `SKIP_MIGRATE=1 bin/deploy.sh`. Override the target:
-`SSH_HOST=other bin/deploy.sh`.
+`bin/deploy.sh` (the non-container path) is the same pipeline minus the
+container and the `npm ci` step, building natively into `_build/prod/`.
+
+Two build steps that are easy to miss and have broken deploys before:
+- **`npm --prefix assets ci`** — `assets/package.json` pulls `vega-embed`
+  (perf chart); without `node_modules`, esbuild fails to resolve it.
+- **`compile` is the first step of the `assets.deploy` mix alias** — it
+  generates Phoenix's `phoenix-colocated/airo` hooks dir that esbuild imports.
+  Don't remove it.
 
 ## Verification (after deploy)
 
@@ -89,7 +134,20 @@ ssh airo 'curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4000/'  # 20
 
 ## Common failure modes
 
-- **`uname -s` not Linux** — build on Linux/WSL; cross-OS releases don't work.
+- **`beam.smp: libm.so.6: version 'GLIBC_2.43' not found`** on the VM at the
+  migrate/start step — you built natively (`bin/deploy.sh`) on a host with a
+  newer glibc than the VM. Use `bin/deploy-docker.sh`. Note the failed run
+  already stopped the service, so **prod is down until a good release lands** —
+  re-run `bin/deploy-docker.sh`.
+- **esbuild `Could not resolve "vega-embed"`** — `npm ci` didn't run in
+  `assets/` (or Node is missing from the builder image; `REBUILD_IMAGE=1`).
+- **esbuild `Could not resolve "phoenix-colocated/airo"`** — `compile` isn't
+  running before esbuild; check the `assets.deploy` alias in `mix.exs`.
+- **builder image `mise: not found` / toolchain not on PATH** — the Dockerfile
+  needs `/root/.local/bin` on `PATH` and a `mise reshim` after `mise install`.
+- **toolchain change in the Dockerfile didn't take effect** — the script
+  reuses the cached image; re-run with `REBUILD_IMAGE=1`.
+- **`uname -s` not Linux** (`bin/deploy.sh` only) — build on Linux/WSL.
 - **`mix release` "elixir version mismatch"** — `mise install` in the repo root.
 - **migrate exits with `DATABASE_URL/SECRET_KEY_BASE/CLOAK_KEY is missing`** —
   `/etc/airo.env` unreadable by sudo or incomplete; check
@@ -99,7 +157,8 @@ ssh airo 'curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4000/'  # 20
 
 ## Rollback
 
-No built-in rollback. To revert: `git checkout <prev-sha>` then `bin/deploy.sh`.
+No built-in rollback, and the deploy keeps no backup of the prior release. To
+revert: `git checkout <prev-sha>` then `bin/deploy-docker.sh`.
 For a migration rollback, on the VM:
 
 ```bash
