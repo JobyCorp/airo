@@ -104,6 +104,7 @@ defmodule Airo.MixProject do
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["compile", "tailwind airo", "esbuild airo"],
       "assets.deploy": [
+        "compile",
         "tailwind airo --minify",
         "esbuild airo --minify",
         "phx.digest"
