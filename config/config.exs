@@ -72,6 +72,13 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Local ONNX routing classifier (S15) — load the complexity model at boot in
+# every environment so the `:ortex` backend can run on CPU. The artifact lives
+# under priv/models/ (gitignored, fetched via `mix airo.fetch_model`) and ships
+# inside the release; absent ⇒ the holder records :unavailable and routing
+# fails open. Override per-env below if a different model set is wanted.
+config :airo, Airo.Routing.LocalClassifier, models: ["nvidia-prompt-task-complexity"]
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

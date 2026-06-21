@@ -48,6 +48,21 @@ trap 'rm -rf "${SRC_DIR}" "${OUT_DIR}"' EXIT
 echo "▸ Staging clean source from HEAD (${GIT_SHA})…"
 git archive HEAD | tar -x -C "${SRC_DIR}"
 
+# The local ONNX routing classifier models (S15) live under priv/models/, which
+# is gitignored — so `git archive` omits them and `mix release` would ship a
+# release whose classifier boots :unavailable. There is no HTTPS source in the
+# manifest (url: nil), so copy the fetched, checksum-verified artifacts from the
+# working tree into the staged source. Fetch them first if missing.
+if [ -d priv/models ] && [ -n "$(ls -A priv/models 2>/dev/null)" ]; then
+  echo "▸ Including priv/models (local ONNX classifier artifacts)…"
+  mkdir -p "${SRC_DIR}/priv/models"
+  cp -a priv/models/. "${SRC_DIR}/priv/models/"
+else
+  echo "error: priv/models is empty — the local classifier won't ship." >&2
+  echo "       run 'mix airo.fetch_model <name> --from DIR' before deploying." >&2
+  exit 1
+fi
+
 echo "▸ Building release in container (deps + ortex NIF + assets + release)…"
 docker run --rm \
   -v "${SRC_DIR}:/build" \

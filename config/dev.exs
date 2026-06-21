@@ -102,7 +102,5 @@ config :phoenix_live_view,
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
 
-# Local ONNX routing classifier (S15) — load the complexity model at boot so the
-# `:ortex` backend can run on CPU. Artifact lives under priv/models/ (gitignored,
-# fetched via `mix airo.fetch_model`); absent ⇒ holder records :unavailable.
-config :airo, Airo.Routing.LocalClassifier, models: ["nvidia-prompt-task-complexity"]
+# The local ONNX routing classifier (S15) loads at boot in every environment —
+# see `config :airo, Airo.Routing.LocalClassifier` in config/config.exs.
