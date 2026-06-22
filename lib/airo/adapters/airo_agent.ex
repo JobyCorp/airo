@@ -10,8 +10,10 @@ defmodule Airo.Adapters.AiroAgent do
     agent pushed as `InstanceInfo.base_url` and `Airo.Agents.Ingest` stashed on
     the deployment as `provider_metadata["serving_base_url"]`. We retarget the
     context and delegate to `Airo.Adapters.OpenAICompatible` (bare `llama-server`
-    is OpenAI-compatible). A model that isn't loaded ⇒ `{:error, :model_not_loaded}`
-    (auto-load-on-route is decision #6).
+    is OpenAI-compatible). A cold model is **auto-loaded on demand** (POST /load →
+    poll the engine until ready → serve); the first request pays the cold start.
+    Disable with `config :airo, :airo_agent_auto_load, false`. Eviction policy is
+    a follow-up — a load that can't fit VRAM fails at the engine and surfaces here.
   - **Management** (`Airo.LocalProvider`) hits the control API and surfaces the
     HF-snapshot `revision` provenance Ollama/LM Studio can't.
   """
@@ -27,12 +29,12 @@ defmodule Airo.Adapters.AiroAgent do
 
   @impl Airo.Adapter
   def chat(params, %Context{} = ctx) do
-    with {:ok, ctx} <- engine_ctx(ctx), do: OpenAICompatible.chat(params, ctx)
+    with {:ok, ctx} <- ensure_loaded(ctx), do: OpenAICompatible.chat(params, ctx)
   end
 
   @impl Airo.Adapter
   def stream(params, %Context{} = ctx, acc, reducer) do
-    case engine_ctx(ctx) do
+    case ensure_loaded(ctx) do
       {:ok, ctx} -> OpenAICompatible.stream(params, ctx, acc, reducer)
       {:error, reason} -> {:error, reason, acc}
     end
@@ -40,7 +42,7 @@ defmodule Airo.Adapters.AiroAgent do
 
   @impl Airo.Adapter
   def embed(params, %Context{} = ctx) do
-    with {:ok, ctx} <- engine_ctx(ctx), do: OpenAICompatible.embed(params, ctx)
+    with {:ok, ctx} <- ensure_loaded(ctx), do: OpenAICompatible.embed(params, ctx)
   end
 
   @doc "Model ids the agent has on disk (its inventory), for discovery/pickers."
@@ -49,25 +51,75 @@ defmodule Airo.Adapters.AiroAgent do
     with {:ok, models} <- catalog(ctx), do: {:ok, Enum.map(models, & &1.id)}
   end
 
-  # Retarget the context's base_url to the loaded engine; OpenAICompatible does
-  # the rest. The provider's auth rides along (harmless to a keyless engine, and
-  # forward-compatible with reusing AIRO_AGENT_TOKEN as --api-key).
-  defp engine_ctx(%Context{deployment: %Deployment{} = d} = ctx) do
+  # Resolve a context that targets the *engine*. Already serving (Ingest stashed
+  # serving_base_url on :up) ⇒ retarget. Cold ⇒ auto-load on demand: POST /load,
+  # wait for the engine to answer, then serve. The provider's auth rides along
+  # (harmless to a keyless engine; forward-compatible with reusing the token as
+  # --api-key).
+  defp ensure_loaded(%Context{deployment: %Deployment{} = d} = ctx) do
     case serving_base_url(d) do
       url when is_binary(url) and url != "" ->
-        {:ok, %{ctx | provider: %{ctx.provider | base_url: url}}}
+        {:ok, retarget(ctx, url)}
 
       _ ->
-        {:error, :model_not_loaded}
+        if auto_load?(), do: load_and_await(ctx, d), else: {:error, :model_not_loaded}
     end
   end
 
-  defp engine_ctx(_ctx), do: {:error, :model_not_loaded}
+  defp ensure_loaded(_ctx), do: {:error, :no_deployment}
+
+  defp load_and_await(%Context{} = ctx, %Deployment{model_name: model_id} = d) do
+    case load_model(model_id, load_profile(d), ctx) do
+      {:ok, %{"base_url" => base_url}} when is_binary(base_url) ->
+        deadline = System.monotonic_time(:millisecond) + load_timeout_ms()
+
+        case await_ready(ctx, base_url, deadline) do
+          :ok -> {:ok, retarget(ctx, base_url)}
+          :timeout -> {:error, :load_timeout}
+        end
+
+      {:ok, _no_base_url} ->
+        {:error, :load_no_base_url}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # Poll the engine's /models until it answers 200 (ready) or the deadline passes.
+  defp await_ready(%Context{} = ctx, base_url, deadline) do
+    case Transport.get(retarget(ctx, base_url), "/models", retry: false) do
+      {:ok, %{status: 200}} ->
+        :ok
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          :timeout
+        else
+          Process.sleep(poll_ms())
+          await_ready(ctx, base_url, deadline)
+        end
+    end
+  end
+
+  defp retarget(%Context{} = ctx, base_url),
+    do: %{ctx | provider: %{ctx.provider | base_url: base_url}}
 
   defp serving_base_url(%Deployment{provider_metadata: meta}) when is_map(meta),
     do: meta["serving_base_url"]
 
   defp serving_base_url(_), do: nil
+
+  # The launch profile Airo stores per deployment (ctx/kv-quant/jinja/reasoning…),
+  # passed through verbatim. Empty ⇒ the agent applies its own default_profile.
+  defp load_profile(%Deployment{provider_metadata: meta}) when is_map(meta),
+    do: meta["launch_profile"] || %{}
+
+  defp load_profile(_), do: %{}
+
+  defp auto_load?, do: Application.get_env(:airo, :airo_agent_auto_load, true)
+  defp load_timeout_ms, do: Application.get_env(:airo, :airo_agent_load_timeout_ms, 120_000)
+  defp poll_ms, do: Application.get_env(:airo, :airo_agent_load_poll_ms, 500)
 
   # --- Airo.LocalProvider: management over the agent control API ---
 

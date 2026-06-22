@@ -131,7 +131,35 @@ defmodule Airo.Adapters.AiroAgentTest do
       assert_received {:served, "agent-host", 51_817, "/v1/chat/completions"}
     end
 
-    test "serving an unloaded model errors with :model_not_loaded" do
+    test "a cold model is auto-loaded, then served" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        case conn.request_path do
+          "/load" ->
+            {:ok, body, conn} = Plug.Conn.read_body(conn)
+            send(test_pid, {:loaded, Jason.decode!(body)})
+            Req.Test.json(conn, %{"base_url" => @engine, "status" => "loading"})
+
+          "/v1/models" ->
+            Req.Test.json(conn, %{"data" => [%{"id" => "org/repo:Q4"}]})
+
+          "/v1/chat/completions" ->
+            send(test_pid, {:served, conn.port})
+            Req.Test.json(conn, %{"choices" => [%{"message" => %{"content" => "hi"}}]})
+        end
+      end)
+
+      dep = %Deployment{model_name: "org/repo:Q4", provider_metadata: %{}}
+      assert {:ok, _} = AiroAgent.chat(%{"messages" => []}, context(deployment: dep))
+      assert_received {:loaded, %{"model" => "org/repo:Q4"}}
+      assert_received {:served, 51_817}
+    end
+
+    test "auto-load disabled ⇒ :model_not_loaded" do
+      Application.put_env(:airo, :airo_agent_auto_load, false)
+      on_exit(fn -> Application.delete_env(:airo, :airo_agent_auto_load) end)
+
       dep = %Deployment{model_name: "org/repo:Q4", provider_metadata: %{}}
 
       assert {:error, :model_not_loaded} =
@@ -139,6 +167,29 @@ defmodule Airo.Adapters.AiroAgentTest do
 
       assert {:error, :model_not_loaded, :acc} =
                AiroAgent.stream(%{}, context(deployment: dep), :acc, fn _, a -> a end)
+    end
+
+    test "a load that never becomes ready ⇒ :load_timeout" do
+      Application.put_env(:airo, :airo_agent_load_timeout_ms, 30)
+      Application.put_env(:airo, :airo_agent_load_poll_ms, 5)
+
+      on_exit(fn ->
+        Application.delete_env(:airo, :airo_agent_load_timeout_ms)
+        Application.delete_env(:airo, :airo_agent_load_poll_ms)
+      end)
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        case conn.request_path do
+          "/load" -> Req.Test.json(conn, %{"base_url" => @engine, "status" => "loading"})
+          # Never ready: 503 loading.
+          "/v1/models" -> Plug.Conn.send_resp(conn, 503, ~s({"status":"loading model"}))
+        end
+      end)
+
+      dep = %Deployment{model_name: "org/repo:Q4", provider_metadata: %{}}
+
+      assert {:error, :load_timeout} =
+               AiroAgent.chat(%{"messages" => []}, context(deployment: dep))
     end
   end
 end
