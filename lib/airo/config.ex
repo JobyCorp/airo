@@ -13,6 +13,7 @@ defmodule Airo.Config do
   alias Airo.Repo
 
   alias Airo.Config.{
+    Agent,
     Alias,
     AliasCandidate,
     ClientKey,
@@ -144,6 +145,24 @@ defmodule Airo.Config do
   def list_providers, do: Repo.all(Provider)
   def get_provider!(id), do: Repo.get!(Provider, id)
   def get_provider_by_name(name), do: Repo.get_by(Provider, name: name)
+
+  ## Agents (Model 2 — host-side control planes that manage providers)
+
+  def list_agents, do: Repo.all(Agent)
+  def get_agent!(id), do: Repo.get!(Agent, id)
+  def get_agent_by_host_id(host_id), do: Repo.get_by(Agent, host_id: host_id)
+
+  def create_agent(attrs), do: %Agent{} |> Agent.changeset(attrs) |> Repo.insert()
+
+  def update_agent(%Agent{} = agent, attrs), do: agent |> Agent.changeset(attrs) |> Repo.update()
+
+  @doc "Insert or update an agent by its durable `host_id`."
+  def upsert_agent(host_id, attrs) when is_binary(host_id) do
+    case get_agent_by_host_id(host_id) do
+      nil -> create_agent(Map.put(attrs, :host_id, host_id))
+      %Agent{} = agent -> update_agent(agent, attrs)
+    end
+  end
 
   def create_provider(attrs) do
     %Provider{} |> Provider.changeset(attrs) |> Repo.insert()

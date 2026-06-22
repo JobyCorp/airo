@@ -9,7 +9,7 @@ defmodule Airo.Config.Provider do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Airo.Config.{Deployment, Secret}
+  alias Airo.Config.{Agent, Deployment, Secret}
 
   @adapter_types [
     :vllm,
@@ -37,6 +37,9 @@ defmodule Airo.Config.Provider do
     field :enabled, :boolean, default: true
 
     belongs_to :credential, Secret
+    # Set ⇒ this provider is a serving slot managed by a host agent (Model 2);
+    # null ⇒ external/static (vllm/ollama/openai run by someone else).
+    belongs_to :agent, Agent
     has_many :deployments, Deployment
 
     timestamps()
@@ -57,10 +60,12 @@ defmodule Airo.Config.Provider do
       :auth_kind,
       :default_params,
       :enabled,
-      :credential_id
+      :credential_id,
+      :agent_id
     ])
     |> validate_required([:name, :adapter_type, :base_url, :auth_kind])
     |> validate_base_url()
+    |> assoc_constraint(:agent)
     |> unique_constraint(:name)
     |> assoc_constraint(:credential)
   end
