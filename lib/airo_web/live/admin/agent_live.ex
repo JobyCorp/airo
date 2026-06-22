@@ -13,7 +13,7 @@ defmodule AiroWeb.Admin.AgentLive do
   """
   use AiroWeb, :live_view
 
-  alias Airo.Agents.{Control, Ingest, SlotState}
+  alias Airo.Agents.{Capacity, Control, Ingest, SlotState}
   alias Airo.Config
   alias Airo.Repo
   alias AiroWeb.CompositeComponents
@@ -346,7 +346,10 @@ defmodule AiroWeb.Admin.AgentLive do
   attr :inventory_error, :any, required: true
 
   defp agent_detail(assigns) do
-    assigns = assign(assigns, loaded: Enum.count(assigns.detail.slots, &(&1.status == :up)))
+    assigns =
+      assigns
+      |> assign(loaded: Enum.count(assigns.detail.slots, &(&1.status == :up)))
+      |> assign(inventory_rows: assess_inventory(assigns))
 
     ~H"""
     <div class="space-y-6">
@@ -370,12 +373,17 @@ defmodule AiroWeb.Admin.AgentLive do
         <:title>GPU posture</:title>
         <%= if gpu_available?(@detail.agent.gpu) do %>
           <div class="mt-2 space-y-5">
-            <CompositeComponents.meter
-              label="VRAM"
-              value={gpu_val(@detail.agent.gpu, :vram_used_mb)}
-              max={gpu_val(@detail.agent.gpu, :vram_total_mb)}
-              display={gpu_summary(@detail.agent.gpu)}
-            />
+            <div>
+              <CompositeComponents.meter
+                label="VRAM"
+                value={gpu_val(@detail.agent.gpu, :vram_used_mb)}
+                max={gpu_val(@detail.agent.gpu, :vram_total_mb)}
+                display={gpu_summary(@detail.agent.gpu)}
+              />
+              <p :if={free_gb(@detail.agent.gpu)} class="mt-1 text-right text-xs text-base-content/50">
+                {free_gb(@detail.agent.gpu)} GB free
+              </p>
+            </div>
             <CompositeComponents.meter
               label="GPU utilization"
               value={gpu_val(@detail.agent.gpu, :util_pct)}
@@ -465,9 +473,19 @@ defmodule AiroWeb.Admin.AgentLive do
         >
           This host reports no models in its inventory. Acquisition is out of band.
         </CompositeComponents.empty_state>
-        <.table :if={@inventory != []} id="inventory" rows={@inventory}>
+        <p :if={@inventory_rows != []} class="mb-3 text-xs text-base-content/55">
+          Footprints are estimates (weights + overhead); a “won't fit” flag is advisory —
+          you can still load.
+        </p>
+        <.table :if={@inventory_rows != []} id="inventory" rows={@inventory_rows}>
           <:col :let={model} label="Model">
             <span class="font-mono text-sm">{model["id"]}</span>
+          </:col>
+          <:col :let={model} label="Footprint">
+            <span class="tabular-nums">{footprint_gb(model.fit.footprint_mb)}</span>
+            <CompositeComponents.tag :if={model.fit.fits? == false} tone="warning">
+              won't fit
+            </CompositeComponents.tag>
           </:col>
           <:col :let={model} label="Revision">
             <span class="font-mono text-xs text-base-content/60">{present(model["revision"])}</span>
@@ -532,6 +550,46 @@ defmodule AiroWeb.Admin.AgentLive do
     <CompositeComponents.tag tone={@tone}>{@label}</CompositeComponents.tag>
     """
   end
+
+  # --- capacity / memory-fit (S18) ---
+
+  # Enrich each inventory model with a fit assessment for the target slot. A swap
+  # into an occupied slot reclaims the outgoing model's footprint, so fit is
+  # computed against that. Sorted fits-first so viable choices lead.
+  defp assess_inventory(%{inventory: inventory, load_target: port, detail: detail}) do
+    gpu = detail.agent.gpu
+    reclaim = reclaim_bytes(detail.slots, port, inventory)
+
+    inventory
+    |> Enum.map(fn model ->
+      Map.put(model, :fit, Capacity.assess(model["size_bytes"], gpu, reclaim_bytes: reclaim))
+    end)
+    |> Enum.sort_by(&fit_rank(&1.fit.fits?))
+  end
+
+  # Size of the model currently resident in the target slot (freed on a swap), or nil.
+  defp reclaim_bytes(slots, port, inventory) do
+    with %{resident_model: id} when is_binary(id) <- Enum.find(slots, &(&1.port == port)),
+         %{"size_bytes" => size} <- Enum.find(inventory, &(&1["id"] == id)) do
+      size
+    else
+      _ -> nil
+    end
+  end
+
+  defp fit_rank(true), do: 0
+  defp fit_rank(:unknown), do: 1
+  defp fit_rank(false), do: 2
+
+  defp free_gb(gpu) do
+    case Capacity.headroom(gpu) do
+      %{free_mb: free} -> Float.round(free / 1024, 1)
+      :unavailable -> nil
+    end
+  end
+
+  defp footprint_gb(mb) when is_number(mb), do: "~#{Float.round(mb / 1024, 1)} GB"
+  defp footprint_gb(_mb), do: "—"
 
   # --- GPU formatting (channel pushes a JSON map → string keys) ---
 
