@@ -345,7 +345,7 @@ auto-load, evict, or block.
   outgoing footprint so no false warning; empty-slot load of the same model
   correctly reports `fits?: false`._
 
-### [ ] S19 — Resident-model identity & provenance
+### [x] S19 — Resident-model identity & provenance
 See [DESIGN-agent-provenance.md](./DESIGN-agent-provenance.md). Depends on S17.
 Make the agent's model identity canonical: a resident model carries its real id +
 provenance and its serving-instance facts, so the Shelf is correct and a loaded
@@ -368,6 +368,15 @@ agent already pushes the data — Airo-side only.
 - **DoD extra:** Model 13 / deployment 18 heal (`up`, provenance populated, "Avoid"
   clears); reconciliation + filename re-key unit-tested; Ingest health keys on
   identity
+- _Complete: `Airo.Agents.Provenance.reconcile/4` (host_model_slot key,
+  display_name = real name, revision/family/quantization/size enrichment, legacy
+  filename re-key guarded to the slot provider, deployment linked by real-id or
+  filename; 6 tests). `SlotState` carries ctx/parallel/engine_build; `Ingest`
+  joins `/inventory` per register/slot and derives health by `model_id` identity.
+  Verified live: jobycorp's model healed to `up`, host-qualified id, full
+  provenance, guidance flipped Avoid→Candidate. precommit + joby_kit.lint green
+  (347 tests). Deferred: serving-facts UI, repo-lineage grouping, revision×build
+  perf attribution._
 
 ### [ ] S20 — Automatic placement & eviction (on dispatch)
 Bumped from S18/S19. Depends on S18 (capacity model) + S19 (identity) + S17. The

@@ -25,13 +25,14 @@ defmodule Airo.Agents.Ingest do
   require Logger
 
   alias Airo.{Agents, Config, Health, Repo}
-  alias Airo.Agents.SlotState
+  alias Airo.Agents.{Control, Provenance, SlotState}
 
-  @doc "Full registration (on channel join/rejoin): structure + per-slot health."
+  @doc "Full registration (on channel join/rejoin): structure + per-slot reconcile."
   def register(host_id, payload) when is_binary(host_id) and is_map(payload) do
     case Agents.register(host_id, payload) do
       {:ok, _} ->
-        payload |> Map.get("slots", []) |> Enum.each(&apply_slot(host_id, &1))
+        index = inventory_index(host_id)
+        payload |> Map.get("slots", []) |> Enum.each(&apply_slot(host_id, &1, index))
         :ok
 
       {:error, reason} ->
@@ -41,7 +42,8 @@ defmodule Airo.Agents.Ingest do
   end
 
   @doc "A single slot transition (load/up/down/swap)."
-  def slot(host_id, slot) when is_binary(host_id) and is_map(slot), do: apply_slot(host_id, slot)
+  def slot(host_id, slot) when is_binary(host_id) and is_map(slot),
+    do: apply_slot(host_id, slot, inventory_index(host_id))
 
   @doc "The agent's socket dropped — mark its deployments down and forget slot state."
   def host_down(host_id) do
@@ -68,18 +70,23 @@ defmodule Airo.Agents.Ingest do
     end
   end
 
-  # Apply one slot's pushed state: record the resident model (SlotState) and
-  # re-derive health for any deployments bound to the slot.
-  defp apply_slot(host_id, slot) do
+  # Apply one slot's pushed state: reconcile the resident model into the Shelf
+  # (identity + provenance), record runtime state (SlotState), and derive
+  # deployment health by **identity** — the deployment linked to the resident
+  # Model is up, the rest are down.
+  defp apply_slot(host_id, slot, index) do
     case Config.get_provider_by_name(slot_name(host_id, slot)) do
       %{} = provider ->
-        provider = Repo.preload(provider, :deployments)
-        resident = slot["resident_model"]
+        provenance = if id = slot["resident_model"], do: Map.get(index, id)
+        model = Provenance.reconcile(host_id, provider, slot, provenance)
         {resident_status, reason} = status_for(slot["status"], slot["reason"])
 
-        Enum.each(provider.deployments, fn deployment ->
+        # Reload deployments — reconcile may have re-linked one's model_id.
+        %{deployments: deployments} = Repo.preload(provider, :deployments, force: true)
+
+        Enum.each(deployments, fn deployment ->
           {status, why} =
-            if deployment.model_name == resident,
+            if model && deployment.model_id == model.id,
               do: {resident_status, reason},
               else: {:down, "not_resident"}
 
@@ -87,16 +94,31 @@ defmodule Airo.Agents.Ingest do
         end)
 
         SlotState.put(provider.id, %{
-          resident_model: resident,
+          resident_model: slot["resident_model"],
           revision: slot["revision"],
           status: slot["status"],
-          reason: clip(slot["reason"])
+          reason: clip(slot["reason"]),
+          ctx: slot["ctx"],
+          parallel: slot["parallel"],
+          engine_build: slot["engine_build"]
         })
 
         broadcast(host_id)
 
       _ ->
         :ok
+    end
+  end
+
+  # Resident-model id → inventory provenance map, fetched once per register/slot.
+  # Empty (no enrichment) when the agent's control API is unreachable — identity
+  # still reconciles from the push.
+  defp inventory_index(host_id) do
+    with %{} = agent <- Config.get_agent_by_host_id(host_id),
+         {:ok, models} <- Control.inventory(agent) do
+      Map.new(models, &{&1["id"], &1})
+    else
+      _ -> %{}
     end
   end
 
