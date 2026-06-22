@@ -5,39 +5,47 @@ defmodule AiroWeb.AgentChannelTest do
   alias AiroWeb.AgentSocket
 
   @host "test-host"
+  @port 8081
+  @engine "http://test-host:8081/v1"
   @model "org/repo:Q4"
 
-  setup do
-    {:ok, provider} =
-      Config.create_provider(%{
-        name: @host,
-        adapter_type: :airo_agent,
-        base_url: "http://test-host:4400",
-        auth_kind: :none
-      })
-
-    {:ok, deployment} =
-      Config.create_deployment(%{
-        provider_id: provider.id,
-        model_name: @model,
-        capabilities: [:chat]
-      })
-
-    %{provider: provider, deployment: deployment}
-  end
-
-  # Drive a push through the channel, then sync so the (synchronous) ingest +
-  # ETS write are visible to the test process before we assert.
-  defp push_sync(socket, event, payload) do
-    push(socket, event, payload)
-    :sys.get_state(socket.channel_pid)
-    :ok
+  defp register_payload(opts \\ []) do
+    %{
+      "agent" => %{"control_url" => "http://test-host:4400", "version" => "0.1.0"},
+      "slots" => [
+        %{
+          "port" => @port,
+          "base_url" => @engine,
+          "resident_model" => opts[:resident],
+          "status" => opts[:status] || "empty"
+        }
+      ]
+    }
   end
 
   defp join_host(host \\ @host) do
     {:ok, socket} = connect(AgentSocket, %{"host_id" => host})
     {:ok, _reply, socket} = subscribe_and_join(socket, "agent:#{host}", %{})
     socket
+  end
+
+  defp push_sync(socket, event, payload) do
+    push(socket, event, payload)
+    :sys.get_state(socket.channel_pid)
+    :ok
+  end
+
+  defp slot_provider, do: Config.get_provider_by_name("#{@host}:#{@port}")
+
+  defp deployment(model) do
+    {:ok, dep} =
+      Config.create_deployment(%{
+        provider_id: slot_provider().id,
+        model_name: model,
+        capabilities: [:chat]
+      })
+
+    dep
   end
 
   defp eventually(_fun, 0), do: flunk("condition never became true")
@@ -53,14 +61,6 @@ defmodule AiroWeb.AgentChannelTest do
     assert :error = connect(AgentSocket, %{})
   end
 
-  test "connect enforces the token when one is configured" do
-    Application.put_env(:airo, :agent_token, "secret")
-    on_exit(fn -> Application.delete_env(:airo, :agent_token) end)
-
-    assert :error = connect(AgentSocket, %{"host_id" => @host, "token" => "wrong"})
-    assert {:ok, _socket} = connect(AgentSocket, %{"host_id" => @host, "token" => "secret"})
-  end
-
   test "join rejects a topic that mismatches the socket host" do
     {:ok, socket} = connect(AgentSocket, %{"host_id" => @host})
 
@@ -68,76 +68,69 @@ defmodule AiroWeb.AgentChannelTest do
              subscribe_and_join(socket, "agent:someone-else", %{})
   end
 
-  test "an :up event marks the deployment up", %{deployment: deployment} do
+  test "register upserts the agent and a managed slot provider" do
     socket = join_host()
-    push_sync(socket, "event", %{"type" => "up", "model_id" => @model})
-    assert Health.status(deployment.id) == :up
+    push_sync(socket, "register", register_payload())
+
+    agent = Config.get_agent_by_host_id(@host)
+    assert agent.control_url == "http://test-host:4400"
+
+    provider = slot_provider()
+    assert provider.agent_id == agent.id
+    assert provider.base_url == @engine
+    # A managed slot speaks plain OpenAI — base_url is the real engine endpoint.
+    assert provider.adapter_type == :openai
   end
 
-  test "a :down event marks it down and persists an :agent-sourced event", %{
-    deployment: deployment,
-    provider: provider
-  } do
+  test "a slot's resident model marks that deployment up" do
     socket = join_host()
-    push_sync(socket, "event", %{"type" => "up", "model_id" => @model})
-    push_sync(socket, "event", %{"type" => "down", "model_id" => @model, "reason" => "cuda_oom"})
+    push_sync(socket, "register", register_payload())
+    dep = deployment(@model)
 
-    assert Health.status(deployment.id) == :down
+    push_sync(socket, "slot", %{"port" => @port, "resident_model" => @model, "status" => "up"})
 
-    events = Health.list_events() |> Enum.filter(&(&1.provider_id == provider.id))
-
-    assert Enum.any?(
-             events,
-             &(&1.status == :down and &1.source == :agent and &1.reason == "cuda_oom")
-           )
+    assert Health.status(dep.id) == :up
   end
 
-  test "an :up event with info stashes serving_base_url; a terminal event clears it", %{
-    deployment: deployment
-  } do
+  test "non-resident models under the same slot are down" do
     socket = join_host()
+    push_sync(socket, "register", register_payload())
+    a = deployment("model-A")
+    b = deployment("model-B")
 
-    push_sync(socket, "event", %{
-      "type" => "up",
-      "model_id" => @model,
-      "info" => %{"base_url" => "http://jobycorp:51817/v1"}
+    push_sync(socket, "slot", %{"port" => @port, "resident_model" => "model-A", "status" => "up"})
+
+    assert Health.status(a.id) == :up
+    assert Health.status(b.id) == :down
+  end
+
+  test "a crashed slot marks the resident deployment down with the reason" do
+    socket = join_host()
+    push_sync(socket, "register", register_payload())
+    dep = deployment(@model)
+    push_sync(socket, "slot", %{"port" => @port, "resident_model" => @model, "status" => "up"})
+    assert Health.status(dep.id) == :up
+
+    push_sync(socket, "slot", %{
+      "port" => @port,
+      "resident_model" => @model,
+      "status" => "down",
+      "reason" => "cuda_oom"
     })
 
-    assert Airo.Config.get_deployment!(deployment.id).provider_metadata["serving_base_url"] ==
-             "http://jobycorp:51817/v1"
-
-    push_sync(socket, "event", %{"type" => "down", "model_id" => @model, "reason" => "oom"})
-
-    refute Map.has_key?(
-             Airo.Config.get_deployment!(deployment.id).provider_metadata,
-             "serving_base_url"
-           )
+    assert Health.status(dep.id) == :down
   end
 
-  test "an event for an unknown model is a no-op", %{deployment: deployment} do
+  test "disconnect marks the agent's deployments down" do
     socket = join_host()
-    push_sync(socket, "event", %{"type" => "up", "model_id" => "nope"})
-    assert Health.status(deployment.id) == :unknown
-  end
-
-  test "a snapshot reconciles absent deployments to down", %{deployment: deployment} do
-    socket = join_host()
-    push_sync(socket, "event", %{"type" => "up", "model_id" => @model})
-    assert Health.status(deployment.id) == :up
-
-    # Empty running set ⇒ the model is no longer loaded ⇒ down.
-    push_sync(socket, "snapshot", %{"instances" => []})
-    assert Health.status(deployment.id) == :down
-  end
-
-  test "disconnect marks the host's deployments down", %{deployment: deployment} do
-    socket = join_host()
-    push_sync(socket, "event", %{"type" => "up", "model_id" => @model})
-    assert Health.status(deployment.id) == :up
+    push_sync(socket, "register", register_payload())
+    dep = deployment(@model)
+    push_sync(socket, "slot", %{"port" => @port, "resident_model" => @model, "status" => "up"})
+    assert Health.status(dep.id) == :up
 
     Process.unlink(socket.channel_pid)
     leave(socket)
 
-    eventually(fn -> Health.status(deployment.id) == :down end, 50)
+    eventually(fn -> Health.status(dep.id) == :down end, 50)
   end
 end

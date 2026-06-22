@@ -1,62 +1,53 @@
 defmodule Airo.Agents.Ingest do
   @moduledoc """
-  Translates pushed `airo_agent` channel messages into Airo state.
+  Channel-facing translation of agent pushes into Airo state (Model 2).
 
-  Mapping: `host_id → Provider` (by name) and `model_id → Deployment` (by
-  `model_name` under that provider). For each, we apply two things:
+  - `register/2` — structural + health: upsert the Agent and its slot-Providers
+    (`Airo.Agents.register/2`), then seed health from each slot's resident model.
+  - `slot/2` — one slot transition: re-derive health for that slot's deployments.
+  - `host_down/1` — the agent disconnected: mark every deployment of its managed
+    providers down.
 
-  - **Health** — `Airo.Health.mark_deployment/4` with `source: :agent`. This
-    REPLACES the `Airo.Health.Prober` for `:airo_agent` providers (which it
-    skips), so health is push-driven, not polled.
-  - **Serving URL** — the engine's `base_url` (from the pushed `InstanceInfo`) is
-    stashed on `provider_metadata["serving_base_url"]` while the model is `:up`,
-    and cleared otherwise. `Airo.Adapters.AiroAgent` reads it to route inference
-    to the engine (decision #5).
-
-  Unknown host or model ⇒ no-op (an agent may connect before its Provider /
-  Deployments are configured).
+  Health is per-deployment but driven by the slot's **resident** model: under a
+  slot Provider, the deployment whose `model_name` is currently loaded takes the
+  slot's status; the others are `:down` (not loaded — routing must swap them in).
+  This REPLACES the prober for agent-managed providers (the prober skips any
+  provider with an `agent_id`).
   """
   require Logger
 
-  alias Airo.{Config, Health, Repo}
-  alias Airo.Config.Deployment
+  alias Airo.{Agents, Config, Health, Repo}
 
-  @doc "One lifecycle transition: `%{\"type\" => ..., \"model_id\" => ..., \"info\" => ..., \"reason\" => ...}`."
-  def event(host_id, %{"type" => type, "model_id" => model_id} = payload) do
-    with %{} = provider <- Config.get_provider_by_name(host_id),
-         %{} = deployment <- Config.get_deployment_by(provider.id, model_id) do
-      {status, reason} = status_for(type, payload["reason"])
-      serving_url = if status == :up, do: get_in(payload, ["info", "base_url"]), else: nil
-      apply_state(deployment, provider, status, reason, serving_url)
-    else
-      _ -> :ok
+  @doc "Full registration (on channel join/rejoin): structure + per-slot health."
+  def register(host_id, payload) when is_binary(host_id) and is_map(payload) do
+    case Agents.register(host_id, payload) do
+      {:ok, _} ->
+        payload |> Map.get("slots", []) |> Enum.each(&apply_slot(host_id, &1))
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("agent #{host_id}: register failed: #{inspect(reason)}")
+        :ok
     end
   end
 
-  def event(_host_id, _payload), do: :ok
+  @doc "A single slot transition (load/up/down/swap)."
+  def slot(host_id, slot) when is_binary(host_id) and is_map(slot), do: apply_slot(host_id, slot)
 
-  @doc """
-  Full running set. Reconciles every deployment of the host's provider: present
-  and serving ⇒ up, present and loading ⇒ unknown, absent ⇒ down. This is how a
-  dropped event self-heals.
-  """
-  def snapshot(host_id, %{"instances" => instances}) when is_list(instances) do
-    case Config.get_provider_by_name(host_id) do
-      %{} = provider ->
-        by_model = Map.new(instances, &{&1["model_id"], &1})
-
-        provider
-        |> Repo.preload(:deployments)
-        |> Map.fetch!(:deployments)
-        |> Enum.each(fn deployment ->
-          case Map.get(by_model, deployment.model_name) do
-            nil ->
-              apply_state(deployment, provider, :down, "not_running", nil)
-
-            instance ->
-              {status, serving_url} = snapshot_state(instance)
-              apply_state(deployment, provider, status, nil, serving_url)
-          end
+  @doc "The agent's socket dropped — mark every deployment of its providers down."
+  def host_down(host_id) do
+    case Config.get_agent_by_host_id(host_id) do
+      %{} = agent ->
+        agent
+        |> Repo.preload(providers: :deployments)
+        |> Map.fetch!(:providers)
+        |> Enum.each(fn provider ->
+          Enum.each(provider.deployments, fn deployment ->
+            Health.mark_deployment(deployment, provider, :down,
+              source: :agent,
+              reason: "agent_disconnected"
+            )
+          end)
         end)
 
       _ ->
@@ -64,57 +55,38 @@ defmodule Airo.Agents.Ingest do
     end
   end
 
-  def snapshot(_host_id, _payload), do: :ok
-
-  @doc "The agent's socket dropped — mark every deployment of its provider down."
-  def host_down(host_id) do
-    case Config.get_provider_by_name(host_id) do
+  # Re-derive health for every deployment under a slot from its resident model.
+  defp apply_slot(host_id, slot) do
+    case Config.get_provider_by_name(slot_name(host_id, slot)) do
       %{} = provider ->
-        provider
-        |> Repo.preload(:deployments)
-        |> Map.fetch!(:deployments)
-        |> Enum.each(&apply_state(&1, provider, :down, "agent_disconnected", nil))
+        provider = Repo.preload(provider, :deployments)
+        resident = slot["resident_model"]
+        {resident_status, reason} = status_for(slot["status"], slot["reason"])
+
+        Enum.each(provider.deployments, fn deployment ->
+          {status, why} =
+            if deployment.model_name == resident,
+              do: {resident_status, reason},
+              else: {:down, "not_resident"}
+
+          Health.mark_deployment(deployment, provider, status, source: :agent, reason: clip(why))
+        end)
 
       _ ->
         :ok
     end
   end
 
-  # Mark health and keep the serving URL in lockstep: present only while :up.
-  defp apply_state(deployment, provider, status, reason, serving_url) do
-    Health.mark_deployment(deployment, provider, status, source: :agent, reason: clip(reason))
-    put_serving_url(deployment, serving_url)
-    :ok
-  end
+  defp slot_name(host_id, slot), do: "#{host_id}:#{slot["port"]}"
 
-  defp put_serving_url(%Deployment{provider_metadata: meta} = deployment, url) do
-    meta = meta || %{}
-
-    if meta["serving_base_url"] == url do
-      :ok
-    else
-      new_meta =
-        if url,
-          do: Map.put(meta, "serving_base_url", url),
-          else: Map.delete(meta, "serving_base_url")
-
-      Config.update_deployment(deployment, %{provider_metadata: new_meta})
-      :ok
-    end
-  end
-
-  # Agent lifecycle type → Airo health status (preference signal, not a gate).
+  # The resident model's status. A loading slot is :unknown (don't route yet but
+  # don't hard-fail); empty/crashed is :down.
   defp status_for("up", _reason), do: {:up, nil}
   defp status_for("loading", _reason), do: {:unknown, "loading"}
   defp status_for("down", reason), do: {:down, reason || "down"}
   defp status_for("failed", reason), do: {:down, reason || "failed"}
-  defp status_for("unloaded", _reason), do: {:down, "unloaded"}
-  defp status_for(_other, _reason), do: {:unknown, nil}
+  defp status_for(_empty_or_nil, _reason), do: {:down, "empty"}
 
-  defp snapshot_state(%{"status" => "up", "base_url" => url}) when is_binary(url), do: {:up, url}
-  defp snapshot_state(_instance), do: {:unknown, nil}
-
-  # HealthEvent.reason is capped at 255; agent reasons can be inspected terms.
   defp clip(nil), do: nil
   defp clip(reason), do: reason |> to_string() |> String.slice(0, 255)
 end

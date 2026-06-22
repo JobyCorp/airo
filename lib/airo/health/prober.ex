@@ -52,9 +52,9 @@ defmodule Airo.Health.Prober do
 
   defp probe_all(state) do
     Config.list_providers()
-    # :airo_agent providers are push-driven (Airo.Agents.Ingest); never probe
-    # them — their base_url is the agent control API, not an OpenAI /models.
-    |> Enum.filter(&(&1.enabled and &1.adapter_type != :airo_agent))
+    # Agent-managed providers (agent_id set) are push-driven (Airo.Agents.Ingest);
+    # never probe them. Only externally-run providers get probed.
+    |> Enum.filter(&(&1.enabled and is_nil(&1.agent_id)))
     |> Enum.map(&probe_provider(&1, state.probe_timeout_ms))
   end
 

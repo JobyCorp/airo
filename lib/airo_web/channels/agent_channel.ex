@@ -1,17 +1,19 @@
 defmodule AiroWeb.AgentChannel do
   @moduledoc """
-  One channel per serving host (`agent:<host_id>`). The agent pushes lifecycle
-  state; Airo never polls (decision #3).
+  One channel per serving host (`agent:<host_id>`). The agent pushes state; Airo
+  never polls (Model 2).
 
-      "snapshot" — full running set, on join and every rejoin (self-heal/reconcile)
-      "event"    — a single AiroAgent.Fleet.Event (lifecycle transition)
+      "register" — agent identity + its serving slots, on join and every rejoin.
+                   Upserts the Agent and its managed slot-Providers, and seeds
+                   per-slot health (self-heal / reconcile).
+      "slot"     — a single slot transition (a model loaded/swapped/down).
 
-  The only server→agent message is `"resync"` (ask for a fresh snapshot). Control
-  (load/unload) stays on the agent's HTTP API — not this channel.
+  Control (load/unload/swap) stays on the agent's HTTP control API — not this
+  channel.
 
   `terminate/2` marks the host's deployments down: when the socket drops (host
   death, agent restart), the channel process dies and Airo reacts immediately. A
-  transient blip is benign — the rejoin snapshot marks everything back up.
+  transient blip is benign — the rejoin `register` marks everything back up.
   """
   use Phoenix.Channel
 
@@ -37,13 +39,13 @@ defmodule AiroWeb.AgentChannel do
   end
 
   @impl true
-  def handle_in("snapshot", payload, socket) do
-    Ingest.snapshot(socket.assigns.host_id, payload)
+  def handle_in("register", payload, socket) do
+    Ingest.register(socket.assigns.host_id, payload)
     {:noreply, socket}
   end
 
-  def handle_in("event", payload, socket) do
-    Ingest.event(socket.assigns.host_id, payload)
+  def handle_in("slot", payload, socket) do
+    Ingest.slot(socket.assigns.host_id, payload)
     {:noreply, socket}
   end
 
