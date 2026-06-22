@@ -43,9 +43,11 @@ and `/inventory` already carries the provenance. No `airo_agent` change.
   id (`repo:quant`) is the *real model name*, and it is **not unique** — the same
   model is copied across hosts for distribution/failover. So:
   - **`Model.upstream_model_id`** (the unique key Airo matches/keys on) is
-    **host-qualified**: `<host_id>_<agent_model_id>` (e.g.
-    `jobycorp_unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_XL`). Collision-free across
-    distributed copies.
+    **host-_and_-slot-qualified**: `<host_id>_<agent_model_id>_<slot>` (e.g.
+    `jobycorp_unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_XL_8081`). Collision-free
+    across distributed copies — and across slots, so the same model loaded into two
+    slots on one host stays two distinct records (no footgun), even though there's
+    no current need for that.
   - **`Model.display_name`** (and any alias) is the **real model name** (the
     agent's `repo:quant`), which may repeat across hosts.
   - `Model.revision` = the HF sha. Keying the *name* on `repo:quant` (not bare
@@ -78,17 +80,18 @@ New `Airo.Agents.Provenance` (or extend `Agents`):
 1. On **register**, fetch `/inventory` once (cached for the call), build an id →
    provenance map.
 2. For each slot with a `resident_model`, resolve provenance and **reconcile the
-   Model**. The unique key is `host_id <> "_" <> resident_id`:
-   - find the Model by the host-qualified `upstream_model_id`, else by **filename**
-     (`path` basename == an existing Model/Deployment name) → re-key it to the
-     host-qualified id, else create one;
+   Model**. The unique key is `host_id <> "_" <> resident_id <> "_" <> slot` (slot =
+   port):
+   - find the Model by that host/slot-qualified `upstream_model_id`, else by
+     **filename** (`path` basename == an existing Model/Deployment name) → re-key it
+     to the qualified id, else create one;
    - set `display_name` = the real model name (`resident_id`); enrich `revision`,
      `family`, `quantization` (`quant`), `size` (humanized `size_bytes`).
 3. **Identify the slot's deployment** with that Model so `Ingest` health marks it
    `up` when resident — health keys on identity (`model_id`), not a raw
-   `model_name` compare. Grain: the key is **host-level**, so the same model in two
-   slots on one host is one Model with two Deployments; the same model on two hosts
-   is two Models sharing a `display_name`.
+   `model_name` compare. Grain: the key is **(host, model, slot)**, so every
+   serving location is its own Model record; copies — across hosts or across slots
+   on one host — never collide and simply share a `display_name`.
 4. Persist a provenance event / version row keyed on `revision` (+ `engine_build`)
    so the shelf's version performance attributes correctly.
 
