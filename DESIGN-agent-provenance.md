@@ -39,10 +39,17 @@ and `/inventory` already carries the provenance. No `airo_agent` change.
 
 ## 2. Fixed decisions (do not re-litigate)
 
-- **The agent's identity is canonical.** `Model.upstream_model_id` becomes the
-  agent's `id` (`repo:quant`, e.g. `unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_XL`);
-  `Model.revision` = the HF sha. Keying on `repo:quant` (not bare `repo`) is v1; a
-  `repo`-lineage grouping with quant-as-variant is a non-goal (§6).
+- **Identity is host-qualified; name/id are separate concepts.** The agent's model
+  id (`repo:quant`) is the *real model name*, and it is **not unique** — the same
+  model is copied across hosts for distribution/failover. So:
+  - **`Model.upstream_model_id`** (the unique key Airo matches/keys on) is
+    **host-qualified**: `<host_id>_<agent_model_id>` (e.g.
+    `jobycorp_unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_XL`). Collision-free across
+    distributed copies.
+  - **`Model.display_name`** (and any alias) is the **real model name** (the
+    agent's `repo:quant`), which may repeat across hosts.
+  - `Model.revision` = the HF sha. Keying the *name* on `repo:quant` (not bare
+    `repo`) is v1; a `repo`-lineage grouping is a non-goal (§6).
 - **Legacy records reconcile by GGUF filename.** An existing Model/Deployment whose
   name is the GGUF filename (`…UD-Q4_K_XL.gguf`) is matched to the resident model
   whose inventory `path` basename equals it, then **re-keyed** to the canonical id
@@ -56,11 +63,13 @@ and `/inventory` already carries the provenance. No `airo_agent` change.
 - **No new agent contract.** Serving facts come from the slot push; provenance
   from `/inventory` joined by id (fetched on register, infrequent).
 
-## 3. Serving facts → `SlotState`
+## 3. Serving facts → `SlotState` (captured, not the focus)
 
-Extend `Airo.Agents.SlotState` records with `ctx`, `parallel`, `engine_build`
-(already in the slot push). `Ingest.apply_slot` writes them through. The `/agents`
-slot view surfaces them: **`ctx 65536 of 262144 max · parallel 4 · engine b1-9633186`**.
+The serving instance facts (`ctx`, `parallel`, `engine_build`) are **noted** this
+sprint, not built out: extend `Airo.Agents.SlotState` to carry them from the slot
+push so the data isn't dropped, but the sprint's focus is provenance/identity (§4).
+A richer serving-facts surface (effective `ctx` of `ctx_max`, `parallel`,
+`engine_build × revision` reproducibility, per-pair performance) is a later pass.
 
 ## 4. Provenance + identity → `Model` (the reconciliation)
 
@@ -69,15 +78,17 @@ New `Airo.Agents.Provenance` (or extend `Agents`):
 1. On **register**, fetch `/inventory` once (cached for the call), build an id →
    provenance map.
 2. For each slot with a `resident_model`, resolve provenance and **reconcile the
-   Model**:
-   - find the Model by canonical id (`upstream_model_id == resident_id`), else by
-     **filename** (`path` basename == an existing Model/Deployment name) → re-key
-     it to the canonical id, else create one;
-   - enrich `revision`, `family`, `quantization` (`quant`), `size` (humanized
-     `size_bytes`); set `display_name` if it's still the filename.
+   Model**. The unique key is `host_id <> "_" <> resident_id`:
+   - find the Model by the host-qualified `upstream_model_id`, else by **filename**
+     (`path` basename == an existing Model/Deployment name) → re-key it to the
+     host-qualified id, else create one;
+   - set `display_name` = the real model name (`resident_id`); enrich `revision`,
+     `family`, `quantization` (`quant`), `size` (humanized `size_bytes`).
 3. **Identify the slot's deployment** with that Model so `Ingest` health marks it
-   `up` when resident. (`Deployment.model_name` aligns to the canonical id, or the
-   match keys on `model_id`.)
+   `up` when resident — health keys on identity (`model_id`), not a raw
+   `model_name` compare. Grain: the key is **host-level**, so the same model in two
+   slots on one host is one Model with two Deployments; the same model on two hosts
+   is two Models sharing a `display_name`.
 4. Persist a provenance event / version row keyed on `revision` (+ `engine_build`)
    so the shelf's version performance attributes correctly.
 
