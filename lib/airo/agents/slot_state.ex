@@ -24,10 +24,17 @@ defmodule Airo.Agents.SlotState do
           revision: String.t() | nil,
           status: status(),
           reason: String.t() | nil,
+          ctx: pos_integer() | nil,
+          parallel: pos_integer() | nil,
+          engine_build: String.t() | nil,
           updated_at: integer()
         }
 
-  @doc "Record a slot's resident-model state. `attrs` keys: `resident_model`, `revision`, `status`, `reason`."
+  @doc """
+  Record a slot's resident-model state. `attrs` keys: `resident_model`,
+  `revision`, `status`, `reason`, and the serving facts `ctx`, `parallel`,
+  `engine_build` (captured from the push; surfacing them richly is a later pass).
+  """
   @spec put(integer(), map()) :: record()
   def put(provider_id, attrs) when is_integer(provider_id) and is_map(attrs) do
     record = %{
@@ -35,6 +42,9 @@ defmodule Airo.Agents.SlotState do
       revision: attrs[:revision],
       status: normalize_status(attrs[:status]),
       reason: attrs[:reason],
+      ctx: attrs[:ctx],
+      parallel: attrs[:parallel],
+      engine_build: attrs[:engine_build],
       updated_at: now()
     }
 
