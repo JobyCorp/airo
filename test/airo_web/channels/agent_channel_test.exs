@@ -92,6 +92,28 @@ defmodule AiroWeb.AgentChannelTest do
            )
   end
 
+  test "an :up event with info stashes serving_base_url; a terminal event clears it", %{
+    deployment: deployment
+  } do
+    socket = join_host()
+
+    push_sync(socket, "event", %{
+      "type" => "up",
+      "model_id" => @model,
+      "info" => %{"base_url" => "http://jobycorp:51817/v1"}
+    })
+
+    assert Airo.Config.get_deployment!(deployment.id).provider_metadata["serving_base_url"] ==
+             "http://jobycorp:51817/v1"
+
+    push_sync(socket, "event", %{"type" => "down", "model_id" => @model, "reason" => "oom"})
+
+    refute Map.has_key?(
+             Airo.Config.get_deployment!(deployment.id).provider_metadata,
+             "serving_base_url"
+           )
+  end
+
   test "an event for an unknown model is a no-op", %{deployment: deployment} do
     socket = join_host()
     push_sync(socket, "event", %{"type" => "up", "model_id" => "nope"})
