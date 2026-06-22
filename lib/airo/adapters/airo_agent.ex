@@ -119,6 +119,19 @@ defmodule Airo.Adapters.AiroAgent do
     {:ok, %{running: running, gpu: gpu}}
   end
 
+  # Lifecycle control over the agent's POST /load and /unload. Profile is the
+  # opaque engine blob (ctx/kv-quant/jinja/reasoning…) the agent passes through.
+  @impl Airo.LocalProvider
+  def load_model(model_id, profile, %Context{} = ctx)
+      when is_binary(model_id) and is_map(profile) do
+    Transport.post(ctx, "/load", %{model: model_id, profile: profile}) |> handle()
+  end
+
+  @impl Airo.LocalProvider
+  def unload_model(model_id, %Context{} = ctx) when is_binary(model_id) do
+    Transport.post(ctx, "/unload", %{model: model_id}) |> handle()
+  end
+
   # The agent's ModelRef JSON → the metadata shape the shelf consumes. `revision`
   # is the HF snapshot sha — the provenance payoff.
   defp model_metadata(model) do

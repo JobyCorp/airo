@@ -81,6 +81,37 @@ defmodule Airo.Adapters.AiroAgentTest do
     end
   end
 
+  describe "lifecycle control over the agent API" do
+    test "load_model POSTs /load with the model and profile" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:posted, conn.method, conn.request_path, Jason.decode!(body)})
+        Req.Test.json(conn, %{"model_id" => "org/repo:Q4", "status" => "loading"})
+      end)
+
+      assert {:ok, %{"status" => "loading"}} =
+               AiroAgent.load_model("org/repo:Q4", %{"ctx" => 4096}, context())
+
+      assert_received {:posted, "POST", "/load",
+                       %{"model" => "org/repo:Q4", "profile" => %{"ctx" => 4096}}}
+    end
+
+    test "unload_model POSTs /unload" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:posted, conn.request_path, Jason.decode!(body)})
+        Req.Test.json(conn, %{"ok" => true})
+      end)
+
+      assert {:ok, %{"ok" => true}} = AiroAgent.unload_model("org/repo:Q4", context())
+      assert_received {:posted, "/unload", %{"model" => "org/repo:Q4"}}
+    end
+  end
+
   describe "serving routes to the engine, not the agent" do
     test "chat retargets to the stashed engine base_url" do
       test_pid = self()
