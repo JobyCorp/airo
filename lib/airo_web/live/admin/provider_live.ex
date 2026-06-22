@@ -90,13 +90,13 @@ defmodule AiroWeb.Admin.ProviderLive do
     end
   end
 
-  defp list, do: Config.list_providers() |> Repo.preload([:credential, :deployments])
+  defp list, do: Config.list_providers() |> Repo.preload([:credential, :agent, :deployments])
 
   defp detail(id) do
     provider =
       id
       |> Config.get_provider!()
-      |> Repo.preload([:credential, deployments: [:model]])
+      |> Repo.preload([:credential, :agent, deployments: [:model]])
 
     capabilities = LocalModels.capabilities(provider)
     {catalog, catalog_error} = local_catalog(provider, capabilities)
@@ -147,7 +147,7 @@ defmodule AiroWeb.Admin.ProviderLive do
     provider =
       provider.id
       |> Config.get_provider!()
-      |> Repo.preload([:credential, deployments: [:model]])
+      |> Repo.preload([:credential, :agent, deployments: [:model]])
 
     assign(socket, detail: %{detail | provider: provider, health: provider_status(provider)})
   end
@@ -421,6 +421,18 @@ defmodule AiroWeb.Admin.ProviderLive do
     >
       <:col :let={{_id, p}} label="Name">{p.name}</:col>
       <:col :let={{_id, p}} label="Adapter">{p.adapter_type}</:col>
+      <:col :let={{_id, p}} label="Managed by">
+        <.link
+          :if={p.agent}
+          navigate={~p"/admin/agents/#{p.agent.id}"}
+          class="text-primary hover:underline"
+        >
+          {p.agent.host_id}
+        </.link>
+        <CompositeComponents.tag :if={is_nil(p.agent)} tone="neutral">
+          external
+        </CompositeComponents.tag>
+      </:col>
       <:col :let={{_id, p}} label="Base URL">{p.base_url}</:col>
       <:col :let={{_id, p}} label="Auth">{p.auth_kind}</:col>
       <:col :let={{_id, p}} label="Credential">{credential_name(p)}</:col>
@@ -498,6 +510,18 @@ defmodule AiroWeb.Admin.ProviderLive do
           <div>
             <span class="text-base-content/60">Loaded/running</span>
             <br />{length(@detail.running)}
+          </div>
+          <div>
+            <span class="text-base-content/60">Managed by</span>
+            <br />
+            <.link
+              :if={@detail.provider.agent}
+              navigate={~p"/admin/agents/#{@detail.provider.agent.id}"}
+              class="text-primary hover:underline"
+            >
+              {@detail.provider.agent.host_id}
+            </.link>
+            <span :if={is_nil(@detail.provider.agent)}>External (unmanaged)</span>
           </div>
         </div>
         <p :if={@detail.catalog_error} class="mt-4 text-sm text-error">

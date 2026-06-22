@@ -263,4 +263,117 @@ defmodule AiroWeb.CompositeComponents do
     </section>
     """
   end
+
+  @doc """
+  A single statistic: a quiet uppercase label over a prominent value, on a
+  bordered surface. The value is the body slot, so it can hold a number, a
+  formatted string, or another wrapper (a status pill). An optional `:sub`
+  slot carries a unit or one-word qualifier.
+
+      <.stat_tile label="Slots">7</.stat_tile>
+      <.stat_tile label="Status"><.health_status status="up" /></.stat_tile>
+
+  Use for dashboard tiles where the eyebrow + value already say everything —
+  the value leads; no explanatory sentence beneath.
+  """
+  attr :class, :any, default: nil
+  attr :label, :string, required: true
+  attr :rest, :global
+
+  slot :inner_block, required: true
+  slot :sub, doc: "Optional unit or qualifier shown under the value."
+
+  def stat_tile(assigns) do
+    ~H"""
+    <div
+      data-component="AiroWeb.CompositeComponents.stat_tile"
+      class={[
+        "rounded-box border border-base-300 bg-base-100 px-4 py-3.5",
+        @class
+      ]}
+      {@rest}
+    >
+      <p class="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-base-content/55">
+        {@label}
+      </p>
+      <div class="mt-1.5 text-2xl font-semibold leading-tight tabular-nums text-base-content">
+        {render_slot(@inner_block)}
+      </div>
+      <p :if={@sub != []} class="mt-1 text-xs text-base-content/55">
+        {render_slot(@sub)}
+      </p>
+    </div>
+    """
+  end
+
+  @doc """
+  A horizontal fill gauge for a "how full" quantity — VRAM, utilization, a
+  budget. The label and a right-aligned monospaced readout sit above the bar;
+  the fill width tracks `value/max` and its color encodes pressure: brand
+  below 70%, warning at 70%+, error at 90%+.
+
+      <.meter label="VRAM" value={2547} max={32607} display="2.5 / 31.8 GB" />
+
+  Pass `display` for the readout text (with units); otherwise the percentage
+  is shown. With no `value`/`max` the bar reads empty and the readout is "—".
+  """
+  attr :class, :any, default: nil
+  attr :label, :string, required: true
+  attr :value, :any, default: nil
+  attr :max, :any, default: nil
+  attr :display, :string, default: nil
+  attr :rest, :global
+
+  def meter(assigns) do
+    fraction = meter_fraction(assigns.value, assigns.max)
+
+    assigns =
+      assign(assigns,
+        fraction: fraction,
+        pct: if(fraction, do: round(fraction * 100), else: 0),
+        fill_tone: meter_tone(fraction)
+      )
+
+    ~H"""
+    <div
+      data-component="AiroWeb.CompositeComponents.meter"
+      class={["space-y-1.5", @class]}
+      {@rest}
+    >
+      <div class="flex items-baseline justify-between gap-3">
+        <span class="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-base-content/55">
+          {@label}
+        </span>
+        <span class="font-mono text-sm tabular-nums text-base-content/85">
+          {@display || if(@fraction, do: "#{@pct}%", else: "—")}
+        </span>
+      </div>
+      <div
+        class="h-2 w-full overflow-hidden rounded-full bg-base-300"
+        role="progressbar"
+        aria-valuenow={@pct}
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-label={@label}
+      >
+        <div
+          class={["h-full rounded-full transition-[width] duration-500", @fill_tone]}
+          style={"width: #{@pct}%"}
+        >
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp meter_fraction(value, max) when is_number(value) and is_number(max) and max > 0 do
+    value |> Kernel./(max) |> max(0.0) |> min(1.0)
+  end
+
+  defp meter_fraction(_value, _max), do: nil
+
+  defp meter_tone(f) when is_number(f) and f >= 0.9, do: "bg-error"
+  defp meter_tone(f) when is_number(f) and f >= 0.7, do: "bg-warning"
+  defp meter_tone(f) when is_number(f), do: "bg-primary"
+  defp meter_tone(_f), do: "bg-base-content/20"
 end

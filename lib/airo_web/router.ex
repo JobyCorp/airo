@@ -60,6 +60,8 @@ defmodule AiroWeb.Router do
     live "/admin/providers/new", Admin.ProviderLive, :new
     live "/admin/providers/:id", Admin.ProviderLive, :show
     live "/admin/providers/:id/edit", Admin.ProviderLive, :edit
+    live "/admin/agents", Admin.AgentLive, :index
+    live "/admin/agents/:id", Admin.AgentLive, :show
     live "/admin/deployments", Admin.DeploymentLive, :index
     live "/admin/deployments/new", Admin.DeploymentLive, :new
     live "/admin/deployments/:id", Admin.DeploymentLive, :show
