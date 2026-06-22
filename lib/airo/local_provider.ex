@@ -23,20 +23,9 @@ defmodule Airo.LocalProvider do
   @doc "Runtime/provider state such as version and loaded models."
   @callback runtime_info(Context.t()) :: result
 
-  @doc "Load (start serving) a model with an opaque, engine-specific profile."
-  @callback load_model(model_id :: String.t(), profile :: map(), Context.t()) :: result
+  @optional_callbacks catalog: 1, inspect_model: 2, pull_model: 2, runtime_info: 1
 
-  @doc "Unload (stop serving) a model."
-  @callback unload_model(model_id :: String.t(), Context.t()) :: result
-
-  @optional_callbacks catalog: 1,
-                      inspect_model: 2,
-                      pull_model: 2,
-                      runtime_info: 1,
-                      load_model: 3,
-                      unload_model: 2
-
-  @capabilities [:catalog, :inspect_model, :pull_model, :runtime_info, :load_model, :unload_model]
+  @capabilities [:catalog, :inspect_model, :pull_model, :runtime_info]
 
   def capabilities, do: @capabilities
 
@@ -47,7 +36,5 @@ defmodule Airo.LocalProvider do
 
   defp arity_for(:inspect_model), do: 2
   defp arity_for(:pull_model), do: 2
-  defp arity_for(:unload_model), do: 2
-  defp arity_for(:load_model), do: 3
   defp arity_for(_), do: 1
 end

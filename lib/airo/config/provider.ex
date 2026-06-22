@@ -19,11 +19,11 @@ defmodule Airo.Config.Provider do
     :anthropic,
     :speaches,
     :infinity,
-    :unsloth,
-    # Host-side control agent (airo_agent): lifecycle-owned, push health via the
-    # control channel; serving routed to the engine base_url. Adapter lands in #5.
-    :airo_agent
+    :unsloth
   ]
+
+  # Agent-managed serving slots use a wire-protocol adapter_type (`:openai`);
+  # "agent-managed" is carried orthogonally by `agent_id`, not an adapter_type.
   @auth_kinds [:none, :api_key, :oauth]
 
   @type t :: %__MODULE__{}

@@ -57,23 +57,6 @@ defmodule Airo.LocalModels do
     end
   end
 
-  @doc "Load a model on a lifecycle-owned provider (e.g. :airo_agent)."
-  @spec load_model(Provider.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def load_model(%Provider{} = provider, model_id, profile \\ %{})
-      when is_binary(model_id) and is_map(profile) do
-    with {:ok, module} <- local_module(provider, :load_model) do
-      provider |> context() |> then(&module.load_model(model_id, profile, &1))
-    end
-  end
-
-  @doc "Unload a model on a lifecycle-owned provider."
-  @spec unload_model(Provider.t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def unload_model(%Provider{} = provider, model_id) when is_binary(model_id) do
-    with {:ok, module} <- local_module(provider, :unload_model) do
-      provider |> context() |> then(&module.unload_model(model_id, &1))
-    end
-  end
-
   def capabilities(%Provider{} = provider) do
     case Registry.fetch(provider.adapter_type) do
       {:ok, module} ->

@@ -10,7 +10,6 @@ defmodule Airo.Registry do
   """
 
   alias Airo.Adapters.{
-    AiroAgent,
     Anthropic,
     Infinity,
     LMStudio,
@@ -29,8 +28,7 @@ defmodule Airo.Registry do
     speaches: Speaches,
     unsloth: Unsloth,
     anthropic: Anthropic,
-    infinity: Infinity,
-    airo_agent: AiroAgent
+    infinity: Infinity
   }
 
   @doc """
