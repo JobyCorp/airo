@@ -37,6 +37,22 @@ instance** — which is what performance should eventually attribute against.
 This is Airo-side only: the agent's slot push already carries the serving facts,
 and `/inventory` already carries the provenance. No `airo_agent` change.
 
+## 1a. Scope — agent-managed providers only
+
+This sprint touches **only agent-managed slot providers** (`Provider.agent_id`
+set). External/unmanaged providers (`agent_id = null` — vLLM, Ollama, Anthropic,
+OpenAI, Infinity, Speaches…) have no slot, no agent push, and no inventory, so:
+
+- their `Model.upstream_model_id` stays **as today** (the upstream id, e.g.
+  `gpt-4o`) — never host/slot-qualified;
+- their health stays **prober-driven** (the prober skips only agent providers);
+- their `Model`-as-artifact / many-deployments grain is unchanged.
+
+This is structurally enforced: all reconciliation is driven from
+`Ingest.apply_slot`, which only runs for agent pushes. The **legacy filename
+re-key (§4) must be guarded to the slot's own provider/deployments** so it can
+never wander onto an external provider's Model.
+
 ## 2. Fixed decisions (do not re-litigate)
 
 - **Identity is host-qualified; name/id are separate concepts.** The agent's model
