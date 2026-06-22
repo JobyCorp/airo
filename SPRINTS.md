@@ -317,6 +317,35 @@ placement coupling.
   state from the push, offline guards. precommit + joby_kit.lint green (329 tests).
   Push→live-update verified end-to-end; happy-path load pending a reachable host._
 
+### [ ] S18 — Host capacity & memory-fit
+See [DESIGN-agent-placement.md](./DESIGN-agent-placement.md). Builds on S17 (merged).
+Make packing several models onto one host safe: surface memory headroom, estimate
+whether a requested load fits, and **warn** before an over-budget load — no
+auto-load, evict, or block.
+- **`Airo.Agents.Capacity`** (pure, no I/O): `footprint_mb(size_bytes)`
+  (`size_bytes × 1.2` margin), `headroom(gpu)` (`total/used/free_mb` or
+  `:unavailable`), `assess(size_bytes, gpu, reclaim_bytes)` → `%{footprint_mb,
+  free_mb, fits?}` (swap-aware; `fits?: :unknown` with no telemetry)
+- **No new data:** `/inventory` already reports `size_bytes`; `agent.gpu` already
+  carries `vram_total/used_mb`; `SlotState` knows the resident model — pure
+  Airo-side arithmetic over what S17 ships
+- **`/agents/:id`:** free/total headroom on the GPU panel; inventory picker shows
+  per-model footprint + an advisory `won't fit` tag (swap-aware), fits-first sort;
+  **Load stays enabled** (advisory). Degrades to footprint-only with no telemetry
+- **Fixed:** footprint = weights × 1.2; advisory only (never block); budget = live
+  telemetry. Automatic placement/eviction is **S19**; Spark unified-memory budget
+  deferred (memory is reported differently there)
+- **DoD extra:** `Capacity` unit-tested (footprint, headroom incl. `:unavailable`,
+  empty-slot vs swap assess, no-telemetry `:unknown`); picker shows footprint +
+  swap-aware warning; Load never blocked
+
+### [ ] S19 — Automatic placement & eviction (on dispatch)
+Bumped from S18. Depends on S18 (capacity model) + S17. The serving-path hook that,
+before serving a managed provider, ensures the right model is resident — slot
+selection, VRAM/memory fit (reusing `Airo.Agents.Capacity`), and what-to-evict
+policy. The open question in airo_agent/DESIGN.md; only safe on a proven manual
+control plane + capacity model.
+
 ---
 
 ## Status log
