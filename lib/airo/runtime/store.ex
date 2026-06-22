@@ -6,6 +6,8 @@ defmodule Airo.Runtime.Store do
 
   - `:airo_health` — per-deployment health snapshots (`Airo.Health`).
   - `:airo_routing` — round-robin counters per alias (`Airo.Routing`).
+  - `:airo_slots` — per-slot resident-model state pushed by agents
+    (`Airo.Agents.SlotState`); runtime, self-heals on agent re-register.
 
   Tables are `:public` with read/write concurrency so callers hit ETS directly
   without serializing through this process; the GenServer exists only to own the
@@ -15,9 +17,11 @@ defmodule Airo.Runtime.Store do
 
   @health :airo_health
   @routing :airo_routing
+  @slots :airo_slots
 
   def health_table, do: @health
   def routing_table, do: @routing
+  def slots_table, do: @slots
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -26,6 +30,7 @@ defmodule Airo.Runtime.Store do
     opts = [:named_table, :public, :set, read_concurrency: true, write_concurrency: true]
     :ets.new(@health, opts)
     :ets.new(@routing, opts)
+    :ets.new(@slots, opts)
     {:ok, %{}}
   end
 end

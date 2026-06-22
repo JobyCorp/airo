@@ -83,14 +83,19 @@ state and leave it stale after an Airo restart until re-register.
   `{resident_model, revision, status, reason, updated_at}`. `put/2`, `get/1`,
   `for_agent/1`, `clear/1`.
 - **`Ingest.register/2` + `Ingest.slot/2`** write `SlotState` from each slot's
-  reported `resident_model`/`revision`/`status`. **Remove** the
-  deployment-health inference of the resident model (deployments stay a pure
-  routing concern; their health is still set by the prober / existing path where
-  applicable).
-- **`Ingest.host_down/1`** clears (or marks `empty`/`down`) the agent's slot states.
-- **PubSub broadcast** on every `SlotState` change → `AgentLive` subscribes and
-  re-renders. This replaces the 10s timer for slot data with push-driven updates
-  (GPU telemetry can ride the same broadcast, since it arrives on the same pushes).
+  reported `resident_model`/`revision`/`status`. They **keep** marking deployment
+  health from the slot push — that is the *only* health source for agent-managed
+  providers (the prober skips any provider with an `agent_id`), so a deployment an
+  operator binds to a slot still gets a routing signal. What moves is the
+  **`/agents` UI**: it reads the resident model from `SlotState`, not by inferring
+  it from deployment health (the old, now-wrong path, since loading writes no
+  deployment row).
+- **`Ingest.host_down/1`** clears the agent's slot states (absent ⇒ empty).
+- **PubSub broadcast** on every change, on a **dedicated topic**
+  (`Ingest.slots_topic/1 = "agent_slots:<host_id>"`, *not* the channel topic
+  `agent:<host_id>` — broadcasting there would deliver to the `AgentChannel`
+  process). `AgentLive` subscribes to both (presence + slots) and re-renders. A
+  10s timer remains only as a fallback for GPU telemetry and roster drift.
 
 ## 4. The control client — `Airo.Agents.Control`
 
