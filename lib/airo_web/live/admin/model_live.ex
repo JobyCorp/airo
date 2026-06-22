@@ -55,6 +55,32 @@ defmodule AiroWeb.Admin.ModelLive do
     end
   end
 
+  # Delete a model from the shelf. Only orphaned models (no deployments) may be
+  # removed: deleting one with live deployments would nilify their `model_id`
+  # (FK is `nilify_all`) and strand them without a catalog entry — the inverse
+  # of the orphan we're cleaning up. Detach the deployments first.
+  def handle_event("delete", %{"id" => id}, socket) do
+    model = Config.get_model_with_deployments!(id)
+
+    if model.deployments == [] do
+      {:ok, _} = Config.delete_model(model)
+      socket = put_flash(socket, :info, "Deleted #{model.display_name}.")
+
+      if socket.assigns.detail do
+        {:noreply, push_navigate(socket, to: ~p"/admin/models")}
+      else
+        {:noreply, stream_delete_by_dom_id(socket, :models, "model-#{id}")}
+      end
+    else
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         "#{model.display_name} still has deployments — detach them before deleting."
+       )}
+    end
+  end
+
   defp save(socket, nil, params) do
     case Config.create_model(params) do
       {:ok, model} ->
@@ -134,6 +160,16 @@ defmodule AiroWeb.Admin.ModelLive do
             <.button navigate={~p"/admin/models/new"} variant="primary">New model</.button>
           </:actions>
           <:actions :if={@live_action == :show}>
+            <.button
+              :if={@detail.summary.deployment_count == 0}
+              size="sm"
+              variant="danger"
+              phx-click="delete"
+              phx-value-id={@detail.model.id}
+              data-confirm={"Delete orphaned model “#{@detail.model.display_name}”? This removes the catalog entry permanently."}
+            >
+              Delete model
+            </.button>
             <.button size="sm" navigate={~p"/admin/models/#{@detail.model.id}/edit"} variant="primary">
               Edit metadata
             </.button>
@@ -213,7 +249,12 @@ defmodule AiroWeb.Admin.ModelLive do
       </:col>
       <:col :let={{_id, summary}} label="Class">{join_values(summary.classes)}</:col>
       <:col :let={{_id, summary}} label="Deployments">
-        {summary.enabled_deployment_count}/{summary.deployment_count}
+        <CompositeComponents.tag :if={summary.deployment_count == 0} tone="warning">
+          orphaned
+        </CompositeComponents.tag>
+        <span :if={summary.deployment_count > 0}>
+          {summary.enabled_deployment_count}/{summary.deployment_count}
+        </span>
       </:col>
       <:col :let={{_id, summary}} label="Health">
         <CompositeComponents.health_status status={to_string(summary.health)} />
@@ -228,6 +269,15 @@ defmodule AiroWeb.Admin.ModelLive do
           icon="hero-pencil-square"
           label={"Edit #{summary.model.display_name}"}
           navigate={~p"/admin/models/#{summary.model.id}/edit"}
+        />
+        <.icon_button
+          :if={summary.deployment_count == 0}
+          icon="hero-trash"
+          variant="danger"
+          label={"Delete #{summary.model.display_name}"}
+          phx-click="delete"
+          phx-value-id={summary.model.id}
+          data-confirm={"Delete orphaned model “#{summary.model.display_name}”? This removes the catalog entry permanently."}
         />
       </:action>
     </.table>
