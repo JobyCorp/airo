@@ -12,7 +12,8 @@ defmodule Airo.Health.HealthEvent do
   alias Airo.Config.{Deployment, Provider}
 
   @statuses [:up, :down, :unknown]
-  @sources [:probe, :dispatch]
+  # :agent — pushed by an airo_agent over the control channel (decision #3).
+  @sources [:probe, :dispatch, :agent]
 
   schema "health_events" do
     field :status, Ecto.Enum, values: @statuses

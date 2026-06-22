@@ -15,6 +15,8 @@ defmodule Airo.Application do
       Airo.Repo,
       {DNSCluster, query: Application.get_env(:airo, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Airo.PubSub},
+      # Presence for connected airo_agent hosts (decision #3).
+      AiroWeb.Presence,
       # Shared HTTP transport for upstream provider calls. Finch pools
       # connections per {scheme, host, port}, so each provider base_url gets its
       # own connection pool (DESIGN §13).

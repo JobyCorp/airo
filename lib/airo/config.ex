@@ -163,6 +163,10 @@ defmodule Airo.Config do
   def list_deployments, do: Repo.all(Deployment)
   def get_deployment!(id), do: Repo.get!(Deployment, id)
 
+  @doc "The deployment for `model_name` under `provider_id` (unique), or nil."
+  def get_deployment_by(provider_id, model_name),
+    do: Repo.get_by(Deployment, provider_id: provider_id, model_name: model_name)
+
   @doc """
   Enabled deployments (with enabled providers) whose `model_name` matches and
   whose `capabilities` include `capability` — for resolving a concrete model id

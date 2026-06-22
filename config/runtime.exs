@@ -22,6 +22,11 @@ end
 
 config :airo, AiroWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# Shared bearer token airo_agent hosts present on the control channel (decision
+# #3). Unset ⇒ the AgentSocket accepts any connection (loopback/dev); auth is a
+# deferred sprint.
+config :airo, :agent_token, System.get_env("AIRO_AGENT_TOKEN")
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

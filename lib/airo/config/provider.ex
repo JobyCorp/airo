@@ -19,7 +19,10 @@ defmodule Airo.Config.Provider do
     :anthropic,
     :speaches,
     :infinity,
-    :unsloth
+    :unsloth,
+    # Host-side control agent (airo_agent): lifecycle-owned, push health via the
+    # control channel; serving routed to the engine base_url. Adapter lands in #5.
+    :airo_agent
   ]
   @auth_kinds [:none, :api_key, :oauth]
 

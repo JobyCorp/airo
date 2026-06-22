@@ -15,6 +15,9 @@ defmodule AiroWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
+  # Control agents (airo_agent) connect here as clients and push host state.
+  socket "/agent", AiroWeb.AgentSocket, websocket: true, longpoll: false
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),
