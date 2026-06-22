@@ -73,6 +73,10 @@ defmodule AiroWeb.Admin.AgentLive do
   @impl true
   def handle_info({:agent_slots, _host_id}, socket), do: {:noreply, refresh(socket)}
 
+  # The agent topic also carries channel control messages (e.g. our own "resync"
+  # fanned out to the agent). We only act on presence diffs; ignore the rest.
+  def handle_info(%Phoenix.Socket.Broadcast{}, socket), do: {:noreply, socket}
+
   # Open the inventory picker for a slot: fetch the host's local models on demand.
   @impl true
   def handle_event(
