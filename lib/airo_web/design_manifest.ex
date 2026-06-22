@@ -115,6 +115,18 @@ defmodule AiroWeb.DesignManifest do
     summary: "Compact tone-colored status/category pill (log levels, event kinds, tiers).",
     preview: &DesignPreviews.tag_preview/1
 
+  component CompositeComponents, :stat_tile,
+    category: :composite,
+    daisy_basis: "stat",
+    summary: "A quiet label over a prominent value; dashboard tile where value leads.",
+    preview: &DesignPreviews.stat_tile_preview/1
+
+  component CompositeComponents, :meter,
+    category: :composite,
+    daisy_basis: "progress",
+    summary: "Horizontal fill gauge with a mono readout; color encodes pressure.",
+    preview: &DesignPreviews.meter_preview/1
+
   # -------------------------------------------------------------------- domain
   # Add domain composites here:
   #

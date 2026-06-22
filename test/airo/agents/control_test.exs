@@ -1,0 +1,116 @@
+defmodule Airo.Agents.ControlTest do
+  # async: false — some tests toggle the global `:airo, :agent_token`.
+  use ExUnit.Case, async: false
+
+  alias Airo.Agents.Control
+  alias Airo.Config.Agent
+
+  defp agent(fields \\ []) do
+    struct(%Agent{host_id: "jobycorp", control_url: "http://jobycorp:4400"}, fields)
+  end
+
+  defp opts, do: [req_options: [plug: {Req.Test, __MODULE__}]]
+
+  describe "inventory/2" do
+    test "returns the models list and hits GET /inventory" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        send(test_pid, {:req, conn.method, conn.request_path})
+
+        Req.Test.json(conn, %{
+          "models" => [%{"id" => "unsloth/Qwen3.6-35B", "revision" => "abc123"}]
+        })
+      end)
+
+      assert {:ok, [%{"id" => "unsloth/Qwen3.6-35B", "revision" => "abc123"}]} =
+               Control.inventory(agent(), opts())
+
+      assert_received {:req, "GET", "/inventory"}
+    end
+
+    test "maps a non-2xx to {:error, {:http_error, status, reason}}" do
+      Req.Test.stub(__MODULE__, fn conn ->
+        conn |> Plug.Conn.put_status(500) |> Req.Test.json(%{"error" => "boom"})
+      end)
+
+      assert {:error, {:http_error, 500, "boom"}} = Control.inventory(agent(), opts())
+    end
+  end
+
+  describe "load/4" do
+    test "posts {model, slot} to /load and returns :accepted" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:load, conn.request_path, Jason.decode!(body)})
+        Req.Test.json(conn, %{"port" => 8081, "status" => "loading"})
+      end)
+
+      assert :accepted = Control.load(agent(), 8081, "unsloth/Qwen3.6-35B", opts())
+      assert_received {:load, "/load", %{"model" => "unsloth/Qwen3.6-35B", "slot" => 8081}}
+    end
+
+    test "404 → {:error, {:unknown_model, id}}" do
+      Req.Test.stub(__MODULE__, fn conn ->
+        conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{"error" => "unknown model"})
+      end)
+
+      assert {:error, {:unknown_model, "ghost"}} = Control.load(agent(), 8081, "ghost", opts())
+    end
+
+    test "422 → {:error, {:rejected, status, reason}}" do
+      Req.Test.stub(__MODULE__, fn conn ->
+        conn |> Plug.Conn.put_status(422) |> Req.Test.json(%{"error" => "no VRAM"})
+      end)
+
+      assert {:error, {:rejected, 422, "no VRAM"}} =
+               Control.load(agent(), 8081, "unsloth/Qwen3.6-35B", opts())
+    end
+  end
+
+  describe "unload/3" do
+    test "posts {slot} to /unload and returns :accepted" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:unload, conn.request_path, Jason.decode!(body)})
+        Req.Test.json(conn, %{"ok" => true})
+      end)
+
+      assert :accepted = Control.unload(agent(), 8081, opts())
+      assert_received {:unload, "/unload", %{"slot" => 8081}}
+    end
+  end
+
+  describe "errors" do
+    test "a missing control_url short-circuits without a request" do
+      assert {:error, :no_control_url} = Control.inventory(agent(control_url: nil), opts())
+    end
+
+    test "a transport failure maps to {:error, {:transport_error, _}}" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+      assert {:error, {:transport_error, _}} = Control.inventory(agent(), opts())
+    end
+  end
+
+  describe "auth" do
+    test "sends the shared bearer when :agent_token is set" do
+      prior = Application.get_env(:airo, :agent_token)
+      Application.put_env(:airo, :agent_token, "s3cr3t")
+      on_exit(fn -> Application.put_env(:airo, :agent_token, prior) end)
+
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        send(test_pid, {:auth, Plug.Conn.get_req_header(conn, "authorization")})
+        Req.Test.json(conn, %{"models" => []})
+      end)
+
+      assert {:ok, []} = Control.inventory(agent(), opts())
+      assert_received {:auth, ["Bearer s3cr3t"]}
+    end
+  end
+end

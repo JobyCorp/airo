@@ -165,6 +165,32 @@ defmodule AiroWeb.DesignPreviews do
     """
   end
 
+  def stat_tile_preview(assigns) do
+    ~H"""
+    <div class="grid max-w-2xl gap-3 sm:grid-cols-3">
+      <CompositeComponents.stat_tile label="Slots">7</CompositeComponents.stat_tile>
+      <CompositeComponents.stat_tile label="Status">
+        <CompositeComponents.health_status status="up" />
+      </CompositeComponents.stat_tile>
+      <CompositeComponents.stat_tile label="Resident">
+        4
+        <:sub>of 7 slots loaded</:sub>
+      </CompositeComponents.stat_tile>
+    </div>
+    """
+  end
+
+  def meter_preview(assigns) do
+    ~H"""
+    <div class="max-w-md space-y-4">
+      <CompositeComponents.meter label="VRAM" value={9_000} max={32_607} display="9.0 / 31.8 GB" />
+      <CompositeComponents.meter label="VRAM" value={24_000} max={32_607} display="24.0 / 31.8 GB" />
+      <CompositeComponents.meter label="VRAM" value={31_200} max={32_607} display="31.2 / 31.8 GB" />
+      <CompositeComponents.meter label="Utilization" />
+    </div>
+    """
+  end
+
   def empty_state_preview(assigns) do
     ~H"""
     <div class="grid gap-4 sm:grid-cols-2">

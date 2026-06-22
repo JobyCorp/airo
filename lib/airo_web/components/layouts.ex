@@ -20,6 +20,7 @@ defmodule AiroWeb.Layouts do
       assign(assigns, :nav_links, [
         %{key: "models", label: "Models", href: "/admin/models"},
         %{key: "providers", label: "Providers", href: "/admin/providers"},
+        %{key: "agents", label: "Agents", href: "/admin/agents"},
         %{key: "deployments", label: "Deployments", href: "/admin/deployments"},
         %{key: "aliases", label: "Aliases", href: "/admin/aliases"},
         %{key: "routing", label: "Routing", href: "/admin/routing"},
