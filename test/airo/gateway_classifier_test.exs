@@ -232,4 +232,44 @@ defmodule Airo.GatewayClassifierTest do
       assert classes(plan) == [:edge, :deep]
     end
   end
+
+  # Regression: the ortex backend threads non-numeric diagnostics (`_dims` map,
+  # `_task` string) into the scores map. `round_scores` once handed every value to
+  # Float.round/2, so a *successful* ortex prediction crashed the shadow logger
+  # before recording — every success silently went unlogged (only errors/timeouts
+  # ever appeared). Exercises the real ONNX artifact, hence :model-tagged.
+  describe "ortex backend shadow logging (real ONNX)" do
+    @tag :model
+    test "a successful prediction logs predicted=/scores= without crashing" do
+      key = seed(:shadow)
+
+      {:ok, _} =
+        Config.update_routing_setting(%{
+          backend: :ortex,
+          model: "nvidia-prompt-task-complexity",
+          classifier: nil,
+          input: :last_user,
+          score: %{"constraint" => 0.55, "reasoning" => 0.35},
+          labels: [%{"label" => nil, "class" => "deep", "min" => 0.2}],
+          default_class: "edge",
+          timeout_ms: 5000
+        })
+
+      {:ok, _state} = Airo.Routing.LocalClassifier.load_model("nvidia-prompt-task-complexity")
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _plan} = Gateway.resolve(chat("reverse a string in python"), key, :chat)
+          drain_shadow_tasks()
+        end)
+
+      # The success branch ran end-to-end: a predicted class and a numeric score
+      # map were logged (not an error=/timeout, and no Float.round crash).
+      assert log =~ "gateway.route.classified"
+      assert log =~ "predicted="
+      assert log =~ "scores=%{"
+      refute log =~ "error="
+      refute log =~ "Float.round"
+    end
+  end
 end

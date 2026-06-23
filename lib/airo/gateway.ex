@@ -373,7 +373,17 @@ defmodule Airo.Gateway do
     })
   end
 
-  defp round_scores(scores), do: Map.new(scores, fn {c, s} -> {c, Float.round(s, 3)} end)
+  # Round the numeric per-class scores. The ortex backend also threads non-numeric
+  # diagnostics into this map for the shadow log (`_dims` map, `_task` string —
+  # see LocalClassifier); pass those through untouched rather than handing them to
+  # Float.round/2, which raises and crashes the shadow logger before the prediction
+  # is ever recorded (so successful predictions silently never logged).
+  defp round_scores(scores) do
+    Map.new(scores, fn
+      {key, value} when is_number(value) -> {key, Float.round(value * 1.0, 3)}
+      {key, value} -> {key, value}
+    end)
+  end
 
   defp concrete_target(model, resource) do
     case Config.list_deployments_by_model(model, resource) do
