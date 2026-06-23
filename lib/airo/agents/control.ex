@@ -51,14 +51,17 @@ defmodule Airo.Agents.Control do
   end
 
   @doc """
-  Load (or swap in) `model_id` on the slot at `port`. Uses the agent's default
-  launch profile (per-load profiles are deferred — DESIGN §2). Returns
-  `:accepted`; the slot transition arrives by push.
+  Load (or swap in) `model_id` on the slot at `port`. Pass a launch profile via
+  `opts[:profile]` (e.g. `profile: %{ctx: 65536}`) — nil values are dropped, and
+  an empty profile falls back to the agent's default. Returns `:accepted`; the
+  slot transition arrives by push.
   """
   @spec load(Agent.t(), pos_integer(), String.t(), keyword()) :: :accepted | {:error, term()}
   def load(%Agent{} = agent, port, model_id, opts \\ [])
       when is_integer(port) and is_binary(model_id) do
-    case request(agent, :post, "/load", %{model: model_id, slot: port}, opts) do
+    body = %{model: model_id, slot: port} |> put_profile(opts[:profile])
+
+    case request(agent, :post, "/load", body, opts) do
       {:ok, %{status: s}} when s in 200..299 -> :accepted
       {:ok, %{status: 404}} -> {:error, {:unknown_model, model_id}}
       {:ok, %{status: s, body: body}} -> {:error, {:rejected, s, reason(body)}}
@@ -116,6 +119,17 @@ defmodule Airo.Agents.Control do
 
   defp maybe_put_json(req_opts, nil), do: req_opts
   defp maybe_put_json(req_opts, json), do: Keyword.put(req_opts, :json, json)
+
+  # Attach a launch profile to the load body, dropping nil values. An empty
+  # profile is omitted entirely so the agent applies its default.
+  defp put_profile(body, profile) when is_map(profile) do
+    case Map.reject(profile, fn {_k, v} -> is_nil(v) end) do
+      empty when map_size(empty) == 0 -> body
+      profile -> Map.put(body, :profile, profile)
+    end
+  end
+
+  defp put_profile(body, _profile), do: body
 
   defp auth_headers do
     case Application.get_env(:airo, :agent_token) do

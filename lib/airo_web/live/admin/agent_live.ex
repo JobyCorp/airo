@@ -13,6 +13,8 @@ defmodule AiroWeb.Admin.AgentLive do
   """
   use AiroWeb, :live_view
 
+  require Logger
+
   alias Airo.Agents.{Capacity, Control, Ingest, SlotState}
   alias Airo.Config
   alias Airo.Repo
@@ -31,7 +33,7 @@ defmodule AiroWeb.Admin.AgentLive do
     {:ok,
      socket
      |> assign(page_title: "Agents", detail: nil, subscribed: MapSet.new())
-     |> assign(load_target: nil, inventory: [], inventory_error: nil)
+     |> assign(config: nil, inventory: [], inventory_error: nil)
      |> assign_agents()
      |> subscribe_presence()}
   end
@@ -77,34 +79,39 @@ defmodule AiroWeb.Admin.AgentLive do
   # fanned out to the agent). We only act on presence diffs; ignore the rest.
   def handle_info(%Phoenix.Socket.Broadcast{}, socket), do: {:noreply, socket}
 
-  # Open the inventory picker for a slot: fetch the host's local models on demand.
+  # Open the config modal for a model — Configure if it's resident in a slot,
+  # otherwise Load into a target slot. Prefills the context window.
   @impl true
-  def handle_event(
-        "pick_model",
-        %{"port" => port},
-        %{assigns: %{detail: %{agent: agent}}} = socket
-      ) do
-    case Control.inventory(agent) do
-      {:ok, models} ->
-        {:noreply,
-         assign(socket,
-           load_target: String.to_integer(port),
-           inventory: models,
-           inventory_error: nil
-         )}
-
-      {:error, reason} ->
-        {:noreply,
-         assign(socket,
-           load_target: String.to_integer(port),
-           inventory: [],
-           inventory_error: describe(reason)
-         )}
-    end
+  def handle_event("open_config", %{"model" => id}, socket) do
+    {:noreply, assign(socket, config: build_config(socket.assigns, id))}
   end
 
-  def handle_event("cancel_pick", _params, socket),
-    do: {:noreply, assign(socket, load_target: nil, inventory: [], inventory_error: nil)}
+  def handle_event("cancel_config", _params, socket), do: {:noreply, assign(socket, config: nil)}
+
+  def handle_event("config_change", %{"config" => params}, %{assigns: %{config: config}} = socket)
+      when is_map(config) do
+    config = %{config | ctx: params["ctx"], port: parse_int(params["port"], config.port)}
+    {:noreply, assign(socket, config: config)}
+  end
+
+  def handle_event(
+        "submit_config",
+        %{"config" => params},
+        %{assigns: %{detail: %{agent: agent}, config: config}} = socket
+      )
+      when is_map(config) do
+    port = parse_int(params["port"], config.port)
+    ctx = parse_int(params["ctx"], nil)
+    model_id = config.model["id"]
+    verb = if config.mode == :configure, do: "Restarting", else: "Loading"
+
+    run_load(agent, port, model_id, ctx)
+
+    {:noreply,
+     socket
+     |> assign(config: nil)
+     |> put_flash(:info, "#{verb} #{model_id} on slot #{port}… watch the slot for status.")}
+  end
 
   def handle_event("refresh_inventory", _params, %{assigns: %{detail: %{agent: agent}}} = socket) do
     case Control.refresh_inventory(agent) do
@@ -113,25 +120,6 @@ defmodule AiroWeb.Admin.AgentLive do
 
       {:error, reason} ->
         {:noreply, assign(socket, inventory: [], inventory_error: describe(reason))}
-    end
-  end
-
-  def handle_event(
-        "load",
-        %{"port" => port, "model" => model},
-        %{assigns: %{detail: %{agent: agent}}} = socket
-      ) do
-    port = String.to_integer(port)
-
-    case Control.load(agent, port, model) do
-      :accepted ->
-        {:noreply,
-         socket
-         |> assign(load_target: nil, inventory: [], inventory_error: nil)
-         |> put_flash(:info, "Loading #{model} into slot #{port}…")}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Load failed: #{describe(reason)}")}
     end
   end
 
@@ -160,7 +148,81 @@ defmodule AiroWeb.Admin.AgentLive do
 
   defp apply_action(socket, :show, %{"id" => id}) do
     detail = detail(id)
-    assign(socket, detail: detail, page_title: detail.agent.host_id)
+
+    socket
+    |> assign(detail: detail, config: nil, page_title: detail.agent.host_id)
+    |> assign_inventory()
+  end
+
+  # Loadable models for the host, fetched when it's online. Always-visible (no
+  # hidden picker); empty + read-only when offline/unreachable.
+  defp assign_inventory(%{assigns: %{detail: %{online: true, agent: agent}}} = socket) do
+    case Control.inventory(agent) do
+      {:ok, models} -> assign(socket, inventory: models, inventory_error: nil)
+      {:error, reason} -> assign(socket, inventory: [], inventory_error: describe(reason))
+    end
+  end
+
+  defp assign_inventory(socket), do: assign(socket, inventory: [], inventory_error: nil)
+
+  # Build the config-modal state for a model: Configure (resident → its slot +
+  # current ctx) or Load (a target slot + the model's ctx_max as a starting point).
+  defp build_config(%{inventory: inventory, detail: %{slots: slots}}, id) do
+    model = Enum.find(inventory, &(&1["id"] == id)) || %{"id" => id}
+
+    case Enum.find(slots, &(&1.resident_model == id)) do
+      %{port: port, ctx: ctx} ->
+        %{
+          mode: :configure,
+          model: model,
+          port: port,
+          slots: [port],
+          ctx: to_string(ctx || model["ctx_max"])
+        }
+
+      nil ->
+        %{
+          mode: :load,
+          model: model,
+          port: load_target_slot(slots),
+          slots: Enum.map(slots, & &1.port),
+          ctx: to_string(model["ctx_max"])
+        }
+    end
+  end
+
+  # Prefer a free slot; otherwise the first slot (Load becomes a swap).
+  defp load_target_slot(slots) do
+    slot = Enum.find(slots, &(&1.status in [:empty, :down])) || List.first(slots)
+    slot && slot.port
+  end
+
+  defp parse_int(value, default) do
+    case value |> to_string() |> Integer.parse() do
+      {n, _} -> n
+      :error -> default
+    end
+  end
+
+  # Load/restart runs off the LiveView process: the agent's /load blocks until the
+  # engine is ready (can take many seconds), and the slot transition (loading → up)
+  # arrives by push regardless. So fire it with a generous timeout and let the push
+  # drive the UI — the operator isn't blocked.
+  defp run_load(agent, port, model_id, ctx) do
+    Task.Supervisor.start_child(Airo.Usage.TaskSupervisor, fn ->
+      case Control.load(agent, port, model_id,
+             profile: %{ctx: ctx},
+             req_options: [receive_timeout: 90_000]
+           ) do
+        :accepted ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("agent #{agent.host_id} slot #{port} load failed: #{inspect(reason)}")
+      end
+    end)
+
+    :ok
   end
 
   defp assign_agents(socket) do
@@ -218,14 +280,17 @@ defmodule AiroWeb.Admin.AgentLive do
   # the agent pushed (`SlotState`) — not inferred from deployments, since loading
   # a model writes no deployment row. No state yet ⇒ treat the slot as empty.
   defp slot_view(provider) do
-    state = SlotState.get(provider.id) || %{resident_model: nil, revision: nil, status: :empty}
+    state = SlotState.get(provider.id) || %{}
 
     %{
       provider: provider,
       port: slot_port(provider),
-      resident_model: state.resident_model,
-      revision: state.revision,
-      status: state.status,
+      resident_model: state[:resident_model],
+      revision: state[:revision],
+      status: state[:status] || :empty,
+      ctx: state[:ctx],
+      parallel: state[:parallel],
+      engine_build: state[:engine_build],
       deployment_count: length(provider.deployments)
     }
   end
@@ -283,7 +348,7 @@ defmodule AiroWeb.Admin.AgentLive do
         <%= if @detail do %>
           <.agent_detail
             detail={@detail}
-            load_target={@load_target}
+            config={@config}
             inventory={@inventory}
             inventory_error={@inventory_error}
           />
@@ -341,7 +406,7 @@ defmodule AiroWeb.Admin.AgentLive do
   end
 
   attr :detail, :map, required: true
-  attr :load_target, :any, required: true
+  attr :config, :any, required: true
   attr :inventory, :list, required: true
   attr :inventory_error, :any, required: true
 
@@ -349,7 +414,7 @@ defmodule AiroWeb.Admin.AgentLive do
     assigns =
       assigns
       |> assign(loaded: Enum.count(assigns.detail.slots, &(&1.status == :up)))
-      |> assign(inventory_rows: assess_inventory(assigns))
+      |> assign(model_rows: model_rows(assigns))
 
     ~H"""
     <div class="space-y-6">
@@ -424,17 +489,22 @@ defmodule AiroWeb.Admin.AgentLive do
               {slot.revision}
             </div>
           </:col>
+          <:col :let={slot} label="Context">
+            <span :if={slot.ctx} class="font-mono text-xs tabular-nums">{slot.ctx}</span>
+            <span :if={is_nil(slot.ctx)} class="text-base-content/40">—</span>
+          </:col>
           <:col :let={slot} label="Status">
             <.slot_status_tag status={slot.status} />
           </:col>
           <:action :let={slot}>
             <.button
+              :if={slot.resident_model}
               size="sm"
-              phx-click="pick_model"
-              phx-value-port={slot.port}
-              disabled={!@detail.online or is_nil(slot.port) or slot.status == :loading}
+              phx-click="open_config"
+              phx-value-model={slot.resident_model}
+              disabled={!@detail.online or slot.status == :loading}
             >
-              {if slot.resident_model, do: "Swap", else: "Load"}
+              Configure
             </.button>
             <.button
               :if={slot.resident_model}
@@ -456,53 +526,67 @@ defmodule AiroWeb.Admin.AgentLive do
         </.table>
       </.card>
 
-      <.card :if={@load_target} variant="bordered">
-        <:eyebrow>Slot {@load_target}</:eyebrow>
-        <:title>Load a model</:title>
+      <.card variant="bordered">
+        <:eyebrow>Models on this host</:eyebrow>
+        <:title>Loadable models</:title>
         <:actions>
-          <.button size="sm" phx-click="refresh_inventory">Refresh inventory</.button>
-          <.button size="sm" phx-click="cancel_pick">Cancel</.button>
+          <.button size="sm" phx-click="refresh_inventory" disabled={!@detail.online}>
+            Refresh
+          </.button>
         </:actions>
         <p :if={@inventory_error} class="text-sm text-error">
           Inventory unavailable: {@inventory_error}
         </p>
         <CompositeComponents.empty_state
-          :if={is_nil(@inventory_error) and @inventory == []}
+          :if={@detail.online and is_nil(@inventory_error) and @inventory == []}
           icon="hero-archive-box"
           title="No local models"
         >
           This host reports no models in its inventory. Acquisition is out of band.
         </CompositeComponents.empty_state>
-        <p :if={@inventory_rows != []} class="mb-3 text-xs text-base-content/55">
-          Footprints are estimates (weights + overhead); a “won't fit” flag is advisory —
-          you can still load.
+        <p :if={!@detail.online} class="text-sm text-base-content/55">
+          Connect the host to list and load its models.
         </p>
-        <.table :if={@inventory_rows != []} id="inventory" rows={@inventory_rows}>
+        <p :if={@model_rows != []} class="mb-3 text-xs text-base-content/55">
+          Footprints are estimates; a “won't fit” flag is advisory. Configuring the loaded
+          model restarts it.
+        </p>
+        <.table :if={@model_rows != []} id="inventory" rows={@model_rows}>
           <:col :let={model} label="Model">
             <span class="font-mono text-sm">{model["id"]}</span>
+            <CompositeComponents.tag :if={model.resident?} tone="success">
+              resident
+            </CompositeComponents.tag>
           </:col>
           <:col :let={model} label="Footprint">
             <span class="tabular-nums">{footprint_gb(model.fit.footprint_mb)}</span>
-            <CompositeComponents.tag :if={model.fit.fits? == false} tone="warning">
+            <CompositeComponents.tag
+              :if={not model.resident? and model.fit.fits? == false}
+              tone="warning"
+            >
               won't fit
             </CompositeComponents.tag>
           </:col>
-          <:col :let={model} label="Revision">
-            <span class="font-mono text-xs text-base-content/60">{present(model["revision"])}</span>
+          <:col :let={model} label="Context max">
+            <span class="font-mono text-xs tabular-nums text-base-content/60">
+              {present(model["ctx_max"])}
+            </span>
           </:col>
           <:action :let={model}>
             <.button
               size="sm"
-              variant="primary"
-              phx-click="load"
-              phx-value-port={@load_target}
+              variant={if model.resident?, do: "secondary", else: "primary"}
+              phx-click="open_config"
               phx-value-model={model["id"]}
+              disabled={!@detail.online}
             >
-              Load
+              {if model.resident?, do: "Configure", else: "Load"}
             </.button>
           </:action>
         </.table>
       </.card>
+
+      <.config_modal :if={@config} config={@config} />
 
       <.card variant="bordered">
         <:title>Control plane</:title>
@@ -551,20 +635,100 @@ defmodule AiroWeb.Admin.AgentLive do
     """
   end
 
+  attr :config, :map, required: true
+
+  defp config_modal(assigns) do
+    assigns =
+      assign(assigns,
+        ctx_max: assigns.config.model["ctx_max"],
+        ctx_value: parse_int(assigns.config.ctx, nil),
+        configure?: assigns.config.mode == :configure
+      )
+
+    ~H"""
+    <CompositeComponents.modal id="slot-config" show on_cancel="cancel_config">
+      <:title>
+        {if @configure?, do: "Configure", else: "Load"}
+        <span class="font-mono text-base">{@config.model["id"]}</span>
+      </:title>
+      <.form
+        for={%{}}
+        as={:config}
+        id="config-form"
+        phx-change="config_change"
+        phx-submit="submit_config"
+        class="space-y-4"
+      >
+        <.input
+          :if={not @configure? and length(@config.slots) > 1}
+          type="select"
+          name="config[port]"
+          value={@config.port}
+          options={@config.slots}
+          label="Slot"
+        />
+        <p :if={@configure? or length(@config.slots) <= 1} class="text-xs text-base-content/55">
+          Slot {@config.port}
+        </p>
+
+        <div>
+          <.input
+            type="number"
+            name="config[ctx]"
+            value={@config.ctx}
+            label="Context window"
+            min="1"
+            max={@ctx_max}
+          />
+          <CompositeComponents.meter
+            :if={@ctx_max}
+            class="mt-2"
+            label="Context"
+            value={@ctx_value}
+            max={@ctx_max}
+            display={ctx_display(@ctx_value, @ctx_max)}
+          />
+        </div>
+
+        <p :if={@configure?} class="text-xs text-warning">
+          Restarting interrupts in-flight requests on slot {@config.port}.
+        </p>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <.button type="button" phx-click="cancel_config">Cancel</.button>
+          <.button variant="primary">
+            {if @configure?, do: "Restart with changes", else: "Load model"}
+          </.button>
+        </div>
+      </.form>
+    </CompositeComponents.modal>
+    """
+  end
+
+  defp ctx_display(nil, max), do: "— / #{max}"
+  defp ctx_display(value, max), do: "#{value} / #{max}"
+
   # --- capacity / memory-fit (S18) ---
 
-  # Enrich each inventory model with a fit assessment for the target slot. A swap
-  # into an occupied slot reclaims the outgoing model's footprint, so fit is
-  # computed against that. Sorted fits-first so viable choices lead.
-  defp assess_inventory(%{inventory: inventory, load_target: port, detail: detail}) do
+  # Enrich each inventory model with a fit assessment and whether it's resident.
+  # Fit is computed against the default load target (a swap there reclaims the
+  # outgoing model's footprint). Sorted resident-first, then fits-first.
+  defp model_rows(%{inventory: inventory, detail: detail}) do
     gpu = detail.agent.gpu
-    reclaim = reclaim_bytes(detail.slots, port, inventory)
+
+    resident_ids =
+      for s <- detail.slots, s.resident_model, into: MapSet.new(), do: s.resident_model
+
+    reclaim = reclaim_bytes(detail.slots, load_target_slot(detail.slots), inventory)
 
     inventory
     |> Enum.map(fn model ->
-      Map.put(model, :fit, Capacity.assess(model["size_bytes"], gpu, reclaim_bytes: reclaim))
+      Map.merge(model, %{
+        fit: Capacity.assess(model["size_bytes"], gpu, reclaim_bytes: reclaim),
+        resident?: MapSet.member?(resident_ids, model["id"])
+      })
     end)
-    |> Enum.sort_by(&fit_rank(&1.fit.fits?))
+    |> Enum.sort_by(fn m -> {if(m.resident?, do: 0, else: 1), fit_rank(m.fit.fits?)} end)
   end
 
   # Size of the model currently resident in the target slot (freed on a swap), or nil.
