@@ -85,4 +85,73 @@ defmodule Airo.Agents.Capacity do
 
   # GPU maps arrive string-keyed over the channel; tolerate atoms too.
   defp fetch(gpu, key), do: Map.get(gpu, key) || Map.get(gpu, to_string(key))
+
+  # --- context-aware VRAM validation (S21, see DESIGN-vram-validation.md) ---
+
+  # Validate against this fraction of total VRAM; over-commit segfaults the engine.
+  @vram_margin 0.95
+
+  @type validation :: %{
+          projected_mb: float() | nil,
+          budget_mb: float() | nil,
+          fits?: boolean() | :cold | :unknown
+        }
+
+  @doc """
+  Measured VRAM cost per KV token, calibrated from the live reading:
+  `(vram_used − weights) / ctx_total`. Captures KV-quant / flash-attn / MTP
+  implicitly. `nil` when the inputs aren't usable.
+  """
+  @spec per_ctx_mb(number() | nil, number() | nil, integer() | nil) :: float() | nil
+  def per_ctx_mb(weights_mb, used_mb, ctx_total)
+      when is_number(weights_mb) and is_number(used_mb) and is_integer(ctx_total) and
+             ctx_total > 0 do
+    nonweights = used_mb - weights_mb
+    if nonweights > 0, do: nonweights / ctx_total, else: nil
+  end
+
+  def per_ctx_mb(_weights_mb, _used_mb, _ctx_total), do: nil
+
+  @doc "Projected VRAM (MB) for a context total: weights + per-token cost × ctx_total."
+  @spec project(number(), number(), number()) :: float()
+  def project(weights_mb, per_ctx_mb, ctx_total_new),
+    do: weights_mb + per_ctx_mb * ctx_total_new
+
+  @doc """
+  Validate a (re)load against VRAM. `opts`:
+  `weights_mb`, `total_mb`, `ctx_total_new`, and — for a **resident** model —
+  `used_mb`, `ctx_total_current`, `resident?: true`.
+
+  Returns `fits?`:
+  - `true` / `false` — calibrated projection within / over the 95% budget (resident);
+  - `:cold` — not calibratable, but the weights alone fit (KV unvalidated);
+  - `false` — even the weights exceed the budget (a definite block);
+  - `:unknown` — no telemetry / size.
+  """
+  @spec validate(map()) :: validation()
+  def validate(opts) do
+    do_validate(budget_mb(opts[:total_mb]), opts[:weights_mb], opts)
+  end
+
+  defp do_validate(nil, _weights, _opts), do: unknown()
+  defp do_validate(_budget, nil, _opts), do: unknown()
+
+  defp do_validate(budget, weights, opts) do
+    per_ctx = opts[:resident?] && per_ctx_mb(weights, opts[:used_mb], opts[:ctx_total_current])
+    new_total = opts[:ctx_total_new]
+
+    if is_number(per_ctx) and is_number(new_total) do
+      projected = Float.round(project(weights, per_ctx, new_total), 1)
+      %{projected_mb: projected, budget_mb: budget, fits?: projected <= budget}
+    else
+      # Cold / uncalibratable: only the weights floor is certain.
+      fits = if weights > budget, do: false, else: :cold
+      %{projected_mb: Float.round(weights, 1), budget_mb: budget, fits?: fits}
+    end
+  end
+
+  defp unknown, do: %{projected_mb: nil, budget_mb: nil, fits?: :unknown}
+
+  defp budget_mb(total) when is_number(total), do: Float.round(total * @vram_margin, 1)
+  defp budget_mb(_total), do: nil
 end

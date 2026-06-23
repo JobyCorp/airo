@@ -26,17 +26,25 @@ defmodule Airo.Agents.SlotState do
           reason: String.t() | nil,
           ctx: pos_integer() | nil,
           parallel: pos_integer() | nil,
+          ctx_total: pos_integer() | nil,
           engine_build: String.t() | nil,
+          profile: map() | nil,
           updated_at: integer()
         }
 
   @doc """
   Record a slot's resident-model state. `attrs` keys: `resident_model`,
-  `revision`, `status`, `reason`, and the serving facts `ctx`, `parallel`,
-  `engine_build` (captured from the push; surfacing them richly is a later pass).
+  `revision`, `status`, `reason`, the serving facts `ctx`/`parallel`/`ctx_total`/
+  `engine_build`, and the resolved `profile` (KV quant, flash-attn, MTP, …).
+
+  `profile` rides only the (heartbeat) register, not slot transition events, so it
+  is **preserved** when a push omits it — a status flip shouldn't blank the
+  serving profile.
   """
   @spec put(integer(), map()) :: record()
   def put(provider_id, attrs) when is_integer(provider_id) and is_map(attrs) do
+    prior = get(provider_id) || %{}
+
     record = %{
       resident_model: attrs[:resident_model],
       revision: attrs[:revision],
@@ -44,7 +52,9 @@ defmodule Airo.Agents.SlotState do
       reason: attrs[:reason],
       ctx: attrs[:ctx],
       parallel: attrs[:parallel],
+      ctx_total: attrs[:ctx_total],
       engine_build: attrs[:engine_build],
+      profile: attrs[:profile] || prior[:profile],
       updated_at: now()
     }
 

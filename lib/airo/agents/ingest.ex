@@ -100,7 +100,9 @@ defmodule Airo.Agents.Ingest do
           reason: clip(slot["reason"]),
           ctx: slot["ctx"],
           parallel: slot["parallel"],
-          engine_build: slot["engine_build"]
+          ctx_total: slot["ctx_total"],
+          engine_build: slot["engine_build"],
+          profile: slot["profile"]
         })
 
         broadcast(host_id)

@@ -69,4 +69,50 @@ defmodule Airo.Agents.CapacityTest do
       assert %{footprint_mb: nil, fits?: :unknown} = Capacity.assess(nil, gpu(2_000.0))
     end
   end
+
+  describe "validate/1 (calibrated VRAM)" do
+    # jobycorp-like: 21795 MB weights, 27481 used at 146432 ctx_total, 32607 total.
+    defp resident_opts(new_total) do
+      %{
+        resident?: true,
+        weights_mb: 21_795.0,
+        used_mb: 27_481.0,
+        ctx_total_current: 146_432,
+        ctx_total_new: new_total,
+        total_mb: 32_607.0
+      }
+    end
+
+    test "a resident reconfigure that fits is allowed" do
+      assert %{fits?: true, projected_mb: p, budget_mb: 30_976.6} =
+               Capacity.validate(resident_opts(146_432))
+
+      assert_in_delta p, 27_481.0, 1.0
+    end
+
+    test "a resident reconfigure that exceeds the 95% budget is blocked" do
+      # max context ~262k projects to ~32 GB > 30.98 GB budget
+      assert %{fits?: false, projected_mb: p} = Capacity.validate(resident_opts(262_144))
+      assert p > 31_000.0
+    end
+
+    test "a cold model whose weights fit is :cold (KV unvalidated)" do
+      assert %{fits?: :cold, projected_mb: 5_000.0} =
+               Capacity.validate(%{
+                 weights_mb: 5_000.0,
+                 total_mb: 32_607.0,
+                 ctx_total_new: 65_536
+               })
+    end
+
+    test "a cold model whose weights exceed the budget is a hard block" do
+      assert %{fits?: false} =
+               Capacity.validate(%{weights_mb: 40_000.0, total_mb: 32_607.0, ctx_total_new: 8192})
+    end
+
+    test "no telemetry or size is :unknown" do
+      assert %{fits?: :unknown} = Capacity.validate(%{weights_mb: 5_000.0, total_mb: nil})
+      assert %{fits?: :unknown} = Capacity.validate(%{weights_mb: nil, total_mb: 32_607.0})
+    end
+  end
 end
