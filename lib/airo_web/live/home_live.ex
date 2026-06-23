@@ -5,13 +5,70 @@ defmodule AiroWeb.HomeLive do
 
   alias Airo.Dashboard
   alias AiroWeb.CompositeComponents
+  alias AiroWeb.Presence
+
+  # GPU telemetry is DB state the host agents push over their channel; a light
+  # timer re-reads the overview so the host rings stay live without a reload.
+  # Online/offline is faster still — a Presence subscription flips it instantly.
+  @refresh_ms 10_000
 
   @impl true
   def mount(_params, _session, socket) do
+    if connected?(socket), do: Process.send_after(self(), :refresh, @refresh_ms)
+
+    overview = Dashboard.overview()
+
     {:ok,
      socket
-     |> assign(page_title: "Airo overview")
-     |> assign(:overview, Dashboard.overview())}
+     |> assign(page_title: "Airo overview", subscribed: MapSet.new())
+     |> assign(overview: overview)
+     |> assign(agents: with_presence(overview.agents))
+     |> subscribe_agents(overview.agents)}
+  end
+
+  @impl true
+  def handle_info(:refresh, socket) do
+    Process.send_after(self(), :refresh, @refresh_ms)
+    overview = Dashboard.overview()
+
+    {:noreply,
+     socket
+     |> assign(overview: overview, agents: with_presence(overview.agents))
+     |> subscribe_agents(overview.agents)}
+  end
+
+  # A host connected or dropped — re-derive the online flags from Presence
+  # without re-running the heavier overview query.
+  @impl true
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
+    {:noreply, assign(socket, agents: with_presence(socket.assigns.overview.agents))}
+  end
+
+  # The agent topic also carries channel control messages; ignore the rest.
+  def handle_info(%Phoenix.Socket.Broadcast{}, socket), do: {:noreply, socket}
+
+  # Watch each host's Presence topic so up/down flips arrive as a push. Tracks
+  # which hosts we already hold so re-listing never double-subscribes.
+  defp subscribe_agents(%{assigns: %{subscribed: subscribed}} = socket, agents) do
+    if connected?(socket) do
+      subscribed =
+        Enum.reduce(agents, subscribed, fn agent, acc ->
+          if MapSet.member?(acc, agent.host_id) do
+            acc
+          else
+            Phoenix.PubSub.subscribe(Airo.PubSub, "agent:#{agent.host_id}")
+            MapSet.put(acc, agent.host_id)
+          end
+        end)
+
+      assign(socket, subscribed: subscribed)
+    else
+      socket
+    end
+  end
+
+  defp with_presence(agents) do
+    Enum.map(agents, &Map.put(&1, :online, Presence.list("agent:#{&1.host_id}") != %{}))
   end
 
   @impl true
@@ -28,6 +85,16 @@ defmodule AiroWeb.HomeLive do
             <.button size="sm" navigate={~p"/admin/usage"} variant="primary">Usage</.button>
           </:actions>
         </CompositeComponents.page_header>
+
+        <CompositeComponents.section_panel :if={@agents != []} body_class="p-4">
+          <:title>Serving hosts</:title>
+          <:actions>
+            <.button size="sm" navigate={~p"/admin/agents"}>All agents</.button>
+          </:actions>
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <.agent_ring_card :for={agent <- @agents} agent={agent} />
+          </div>
+        </CompositeComponents.section_panel>
 
         <div class="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
           <.metric_card
@@ -212,6 +279,101 @@ defmodule AiroWeb.HomeLive do
     </Layouts.app>
     """
   end
+
+  attr :agent, :map, required: true
+
+  # A serving host as three concentric activity rings — VRAM (outer), compute
+  # (middle), power (inner) — with the host id and its slot count in the center.
+  # Each ring's color is fixed to its metric so the trio reads at a glance; the
+  # arc length is the live fraction. Offline or no-telemetry rings sit empty.
+  defp agent_ring_card(assigns) do
+    radii = [56, 43, 30]
+
+    rings =
+      assigns.agent.rings
+      |> Enum.zip(radii)
+      |> Enum.map(fn {ring, r} ->
+        circ = 2 * :math.pi() * r
+
+        Map.merge(ring, %{
+          r: r,
+          circ: Float.round(circ, 2),
+          offset: Float.round(circ * (1 - (ring.fraction || 0.0)), 2)
+        })
+      end)
+
+    assigns = assign(assigns, rings: rings)
+
+    ~H"""
+    <.link
+      navigate={~p"/admin/agents/#{@agent.id}"}
+      class="group relative block rounded-box border border-base-300 bg-base-100 p-5 transition-colors hover:border-base-content/25"
+    >
+      <span class="absolute right-3 top-3 inline-flex items-center gap-1.5">
+        <span class={[
+          "size-2 rounded-full",
+          @agent.online && "bg-success",
+          !@agent.online && "bg-base-content/30"
+        ]} />
+        <span class="text-[0.65rem] font-medium uppercase tracking-[0.14em] text-base-content/50">
+          {if @agent.online, do: "online", else: "offline"}
+        </span>
+      </span>
+
+      <div class="relative mx-auto aspect-square w-40">
+        <svg viewBox="0 0 132 132" class="size-full -rotate-0" aria-hidden="true">
+          <g :for={ring <- @rings}>
+            <circle
+              cx="66"
+              cy="66"
+              r={ring.r}
+              fill="none"
+              stroke="currentColor"
+              stroke-width="9"
+              class="text-base-content/10"
+            />
+            <circle
+              cx="66"
+              cy="66"
+              r={ring.r}
+              fill="none"
+              stroke-width="9"
+              stroke-linecap="round"
+              stroke-dasharray={ring.circ}
+              stroke-dashoffset={ring.offset}
+              transform="rotate(-90 66 66)"
+              style={"stroke: #{ring_color(ring.tone)}"}
+              class="transition-[stroke-dashoffset] duration-700 ease-out"
+            />
+          </g>
+        </svg>
+        <div class="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+          <span class="max-w-full truncate text-sm font-semibold text-base-content">
+            {@agent.host_id}
+          </span>
+          <span class="font-mono text-xs text-base-content/55">
+            {@agent.slots} {if @agent.slots == 1, do: "slot", else: "slots"}
+          </span>
+        </div>
+      </div>
+
+      <dl class="mt-4 space-y-1.5">
+        <div :for={ring <- @rings} class="flex items-center justify-between gap-2">
+          <dt class="flex items-center gap-2 text-xs text-base-content/65">
+            <span class="size-2 rounded-full" style={"background: #{ring_color(ring.tone)}"} />
+            {ring.label}
+          </dt>
+          <dd class="font-mono text-xs tabular-nums text-base-content/85">{ring.display}</dd>
+        </div>
+      </dl>
+    </.link>
+    """
+  end
+
+  defp ring_color("primary"), do: "var(--color-primary)"
+  defp ring_color("success"), do: "var(--color-success)"
+  defp ring_color("warning"), do: "var(--color-warning)"
+  defp ring_color(_), do: "var(--color-base-content)"
 
   attr :label, :string, required: true
   attr :value, :any, required: true

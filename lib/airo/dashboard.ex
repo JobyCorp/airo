@@ -19,6 +19,7 @@ defmodule Airo.Dashboard do
     models = ModelShelf.list_summaries()
 
     %{
+      agents: agents(),
       providers: providers,
       deployments: deployments,
       models: models,
@@ -33,6 +34,81 @@ defmodule Airo.Dashboard do
       recent_health_events: Health.list_events(@recent_limit)
     }
   end
+
+  # Host control agents, each summarized as a three-ring gauge: VRAM, GPU
+  # utilization, and power draw. Online/offline is layered on in the web view
+  # (Presence lives there); here we only shape the telemetry the agent pushed.
+  defp agents do
+    Config.list_agents()
+    |> Repo.preload(:providers)
+    |> Enum.map(&agent_gauge/1)
+    |> Enum.sort_by(& &1.host_id)
+  end
+
+  defp agent_gauge(agent) do
+    gpu = agent.gpu || %{}
+
+    %{
+      id: agent.id,
+      host_id: agent.host_id,
+      slots: length(agent.providers),
+      telemetry?: gpu_val(gpu, :available) == true,
+      rings: [
+        vram_ring(gpu),
+        util_ring(gpu),
+        power_ring(gpu)
+      ]
+    }
+  end
+
+  defp vram_ring(gpu) do
+    used = gpu_val(gpu, :vram_used_mb)
+    total = gpu_val(gpu, :vram_total_mb)
+
+    %{
+      key: "vram",
+      label: "VRAM",
+      tone: "primary",
+      fraction: fraction(used, total),
+      display: if(gb(used) && gb(total), do: "#{gb(used)} / #{gb(total)} GB", else: "—")
+    }
+  end
+
+  defp util_ring(gpu) do
+    pct = gpu_val(gpu, :util_pct)
+
+    %{
+      key: "util",
+      label: "Compute",
+      tone: "success",
+      fraction: fraction(pct, 100),
+      display: if(is_number(pct), do: "#{round(pct)}%", else: "—")
+    }
+  end
+
+  defp power_ring(gpu) do
+    draw = gpu_val(gpu, :power_draw_w)
+    limit = gpu_val(gpu, :power_limit_w)
+
+    %{
+      key: "power",
+      label: "Power",
+      tone: "warning",
+      fraction: fraction(draw, limit),
+      display: if(is_number(draw) && is_number(limit), do: "#{round(draw)} / #{round(limit)} W", else: "—")
+    }
+  end
+
+  defp fraction(value, max) when is_number(value) and is_number(max) and max > 0,
+    do: value |> Kernel./(max) |> min(1.0) |> max(0.0)
+
+  defp fraction(_value, _max), do: nil
+
+  defp gpu_val(gpu, key) when is_map(gpu), do: Map.get(gpu, key) || Map.get(gpu, to_string(key))
+  defp gpu_val(_gpu, _key), do: nil
+
+  defp gb(mb) when is_number(mb), do: Float.round(mb / 1024, 1)
+  defp gb(_mb), do: nil
 
   defp health_counts(deployments) do
     counts =
