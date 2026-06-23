@@ -8,6 +8,8 @@ defmodule AiroWeb.Admin.ModelLive do
   alias Airo.ModelShelf
   alias AiroWeb.CompositeComponents
 
+  @default_filters %{"q" => "", "capability" => "", "class" => "", "health" => "", "sort" => "name"}
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -15,7 +17,7 @@ defmodule AiroWeb.Admin.ModelLive do
      |> assign(page_title: "Model Shelf")
      |> assign(form: nil, editing: nil, detail: nil)
      |> assign(status_options: optionize(Model.statuses()))
-     |> stream(:models, ModelShelf.list_summaries(), dom_id: &"model-#{&1.model.id}")}
+     |> assign(filters: @default_filters, dir: :asc, all_models: [], models: [])}
   end
 
   @impl true
@@ -35,6 +37,22 @@ defmodule AiroWeb.Admin.ModelLive do
 
   def handle_event("save", %{"model" => params}, socket) do
     save(socket, socket.assigns.editing, clean(params))
+  end
+
+  # The shelf's search/filter/sort bar. Filtering and sorting run in-memory over
+  # the loaded summaries — the shelf is a small, bounded catalog.
+  def handle_event("filter", params, socket) do
+    filters = Map.merge(socket.assigns.filters, Map.take(params, Map.keys(@default_filters)))
+    {:noreply, socket |> assign(filters: filters) |> assign_visible()}
+  end
+
+  def handle_event("toggle_dir", _params, socket) do
+    dir = if socket.assigns.dir == :asc, do: :desc, else: :asc
+    {:noreply, socket |> assign(dir: dir) |> assign_visible()}
+  end
+
+  def handle_event("reset_filters", _params, socket) do
+    {:noreply, socket |> assign(filters: @default_filters, dir: :asc) |> assign_visible()}
   end
 
   def handle_event("sync_deployment", %{"id" => id}, socket) do
@@ -69,7 +87,7 @@ defmodule AiroWeb.Admin.ModelLive do
       if socket.assigns.detail do
         {:noreply, push_navigate(socket, to: ~p"/admin/models")}
       else
-        {:noreply, stream_delete_by_dom_id(socket, :models, "model-#{id}")}
+        {:noreply, socket |> load_models() |> assign_visible()}
       end
     else
       {:noreply,
@@ -110,7 +128,8 @@ defmodule AiroWeb.Admin.ModelLive do
   defp apply_action(socket, :index, _params) do
     socket
     |> assign(page_title: "Model Shelf", detail: nil, form: nil, editing: nil)
-    |> stream(:models, ModelShelf.list_summaries(), reset: true)
+    |> load_models()
+    |> assign_visible()
   end
 
   defp apply_action(socket, :show, %{"id" => id}) do
@@ -131,6 +150,65 @@ defmodule AiroWeb.Admin.ModelLive do
     socket
     |> assign(page_title: "Edit model", detail: nil, editing: model)
     |> assign(form: to_form(Config.change_model(model)))
+  end
+
+  defp load_models(socket), do: assign(socket, all_models: ModelShelf.list_summaries())
+
+  # Re-derive the visible cards from the loaded summaries, the active filters,
+  # and the sort direction.
+  defp assign_visible(socket) do
+    %{all_models: all, filters: filters, dir: dir} = socket.assigns
+    assign(socket, models: filter_and_sort(all, filters, dir))
+  end
+
+  defp filter_and_sort(models, filters, dir) do
+    models
+    |> Enum.filter(&matches?(&1, filters))
+    |> sort_models(filters["sort"], dir)
+  end
+
+  defp matches?(summary, filters) do
+    matches_query?(summary, filters["q"]) and
+      member_or_blank?(summary.capabilities, filters["capability"]) and
+      member_or_blank?(summary.classes, filters["class"]) and
+      blank_or_equal?(to_string(summary.health), filters["health"])
+  end
+
+  defp matches_query?(_summary, q) when q in [nil, ""], do: true
+
+  defp matches_query?(%{model: model}, q) do
+    needle = String.downcase(q)
+
+    [model.display_name, model.upstream_model_id, model.family]
+    |> Enum.any?(fn field -> field && String.contains?(String.downcase(to_string(field)), needle) end)
+  end
+
+  defp member_or_blank?(_values, ""), do: true
+  defp member_or_blank?(_values, nil), do: true
+  defp member_or_blank?(values, selected), do: Enum.any?(values, &(to_string(&1) == selected))
+
+  defp blank_or_equal?(_value, ""), do: true
+  defp blank_or_equal?(_value, nil), do: true
+  defp blank_or_equal?(value, selected), do: value == selected
+
+  defp sort_models(models, sort, dir) do
+    sorted = Enum.sort_by(models, &sort_key(&1, sort))
+    if dir == :desc, do: Enum.reverse(sorted), else: sorted
+  end
+
+  # Every field sorts ascending; the direction toggle reverses uniformly. Models
+  # with no sample (nil p95) get a large key so they sit last when ascending.
+  defp sort_key(%{model: model}, "name"), do: String.downcase(model.display_name)
+  defp sort_key(%{requests: requests}, "requests"), do: requests || 0
+  defp sort_key(%{p95_latency_ms: ms}, "p95"), do: ms || 1_000_000_000
+  defp sort_key(%{error_rate: rate}, "errors"), do: parse_percent(rate)
+  defp sort_key(summary, _sort), do: sort_key(summary, "name")
+
+  defp parse_percent(rate) do
+    case rate |> to_string() |> Float.parse() do
+      {value, _rest} -> value
+      :error -> -1.0
+    end
   end
 
   defp refresh_detail(%{assigns: %{detail: %{model: model}}} = socket) do
@@ -185,7 +263,13 @@ defmodule AiroWeb.Admin.ModelLive do
           <% @detail -> %>
             <.detail detail={@detail} />
           <% true -> %>
-            <.shelf models={@streams.models} />
+            <.shelf
+              models={@models}
+              filters={@filters}
+              dir={@dir}
+              facets={facets(@all_models)}
+              total={length(@all_models)}
+            />
         <% end %>
       </div>
     </Layouts.app>
@@ -230,57 +314,217 @@ defmodule AiroWeb.Admin.ModelLive do
     """
   end
 
-  attr :models, :any, required: true
+  attr :models, :list, required: true
+  attr :filters, :map, required: true
+  attr :dir, :atom, required: true
+  attr :facets, :map, required: true
+  attr :total, :integer, required: true
 
   defp shelf(assigns) do
     ~H"""
-    <.table
-      id="models"
-      rows={@models}
-      row_click={fn {_id, summary} -> JS.navigate(~p"/admin/models/#{summary.model.id}") end}
+    <div class="space-y-4">
+      <.shelf_controls filters={@filters} dir={@dir} facets={@facets} />
+
+      <p class="px-1 text-xs text-base-content/55">
+        Showing <span class="font-mono text-base-content/80">{length(@models)}</span>
+        of {@total} {if @total == 1, do: "model", else: "models"}.
+      </p>
+
+      <div class="space-y-3">
+        <div
+          :if={@models == []}
+          class="rounded-box border border-dashed border-base-content/15 bg-base-100/45 px-4 py-10 text-center text-sm text-base-content/60"
+        >
+          <p>No models match these filters.</p>
+          <.button size="sm" phx-click="reset_filters" class="mt-3">Clear filters</.button>
+        </div>
+
+        <.model_card :for={summary <- @models} summary={summary} />
+      </div>
+    </div>
+    """
+  end
+
+  attr :filters, :map, required: true
+  attr :dir, :atom, required: true
+  attr :facets, :map, required: true
+
+  defp shelf_controls(assigns) do
+    ~H"""
+    <.form
+      for={%{}}
+      id="shelf-filters"
+      phx-change="filter"
+      phx-submit="filter"
+      class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-200/60 p-4 lg:flex-row lg:flex-wrap lg:items-end"
     >
-      <:col :let={{_id, summary}} label="Model">
-        <div class="font-medium">{summary.model.display_name}</div>
-        <div class="font-mono text-xs text-base-content/60">{summary.model.upstream_model_id}</div>
-      </:col>
-      <:col :let={{_id, summary}} label="Status">{summary.model.status}</:col>
-      <:col :let={{_id, summary}} label="Capabilities">
-        {join_values(summary.capabilities)}
-      </:col>
-      <:col :let={{_id, summary}} label="Class">{join_values(summary.classes)}</:col>
-      <:col :let={{_id, summary}} label="Deployments">
-        <CompositeComponents.tag :if={summary.deployment_count == 0} tone="warning">
-          orphaned
-        </CompositeComponents.tag>
-        <span :if={summary.deployment_count > 0}>
-          {summary.enabled_deployment_count}/{summary.deployment_count}
-        </span>
-      </:col>
-      <:col :let={{_id, summary}} label="Health">
-        <CompositeComponents.health_status status={to_string(summary.health)} />
-      </:col>
-      <:col :let={{_id, summary}} label="Requests">{summary.requests}</:col>
-      <:col :let={{_id, summary}} label="Errors">{summary.error_rate}</:col>
-      <:col :let={{_id, summary}} label="p95">{latency(summary.p95_latency_ms)}</:col>
-      <:col :let={{_id, summary}} label="Fallbacks">{summary.fallback_rate}</:col>
-      <:col :let={{_id, summary}} label="Cost">{summary.cost}</:col>
-      <:action :let={{_id, summary}}>
+      <div class="min-w-0 flex-1 lg:min-w-64 [&_.fieldset]:mb-0">
+        <.input
+          type="search"
+          name="q"
+          value={@filters["q"]}
+          label="Search"
+          placeholder="Name, id, or family…"
+          autocomplete="off"
+          phx-debounce="150"
+        />
+      </div>
+      <div class="[&_.fieldset]:mb-0">
+        <.input
+          type="select"
+          name="capability"
+          value={@filters["capability"]}
+          label="Capability"
+          prompt="All capabilities"
+          options={@facets.capabilities}
+        />
+      </div>
+      <div class="[&_.fieldset]:mb-0">
+        <.input
+          type="select"
+          name="class"
+          value={@filters["class"]}
+          label="Class"
+          prompt="All classes"
+          options={@facets.classes}
+        />
+      </div>
+      <div class="[&_.fieldset]:mb-0">
+        <.input
+          type="select"
+          name="health"
+          value={@filters["health"]}
+          label="Health"
+          prompt="Any health"
+          options={@facets.health}
+        />
+      </div>
+      <div class="[&_.fieldset]:mb-0">
+        <.input
+          type="select"
+          name="sort"
+          value={@filters["sort"]}
+          label="Sort by"
+          options={sort_options()}
+        />
+      </div>
+      <.button
+        type="button"
+        size="sm"
+        phx-click="toggle_dir"
+        title={"Sorting #{@dir}"}
+        class="lg:mb-0.5"
+      >
+        <.icon name={if @dir == :asc, do: "hero-bars-arrow-up", else: "hero-bars-arrow-down"} />
+        {if @dir == :asc, do: "Asc", else: "Desc"}
+      </.button>
+    </.form>
+    """
+  end
+
+  attr :summary, :map, required: true
+
+  # A model on the shelf: identity on the left, a performance strip on the
+  # right, and a left "spine" colored by health so a shelf of cards reads at a
+  # glance. The body navigates to the detail; the actions stay outside that
+  # click target (mirrors the table's row_click/action split).
+  defp model_card(assigns) do
+    assigns = assign(assigns, model: assigns.summary.model)
+
+    ~H"""
+    <div class={[
+      "group flex flex-col gap-4 rounded-box border border-base-300 border-l-4 bg-base-100 transition-colors hover:border-base-content/25 lg:flex-row lg:items-stretch",
+      spine_class(@summary.health)
+    ]}>
+      <div
+        phx-click={JS.navigate(~p"/admin/models/#{@model.id}")}
+        class="flex min-w-0 flex-1 cursor-pointer flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between"
+      >
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="truncate text-base font-semibold text-base-content">
+              {@model.display_name}
+            </h3>
+            <CompositeComponents.tag tone={status_tone(@model.status)}>
+              {@model.status}
+            </CompositeComponents.tag>
+            <CompositeComponents.tag :if={@summary.deployment_count == 0} tone="warning">
+              orphaned
+            </CompositeComponents.tag>
+          </div>
+          <div class="mt-1 truncate font-mono text-xs text-base-content/55">
+            {@model.upstream_model_id}
+          </div>
+          <div class="mt-3 flex flex-wrap items-center gap-1.5">
+            <span :for={cap <- @summary.capabilities} class={chip_class("primary")}>
+              {cap}
+            </span>
+            <span :for={class <- @summary.classes} class={chip_class("neutral")}>
+              {class}
+            </span>
+            <span :if={@summary.capabilities == [] and @summary.classes == []} class="text-xs text-base-content/40">
+              no capabilities
+            </span>
+          </div>
+        </div>
+
+        <div class="flex shrink-0 items-center gap-5 sm:gap-7">
+          <.shelf_stat label="Health">
+            <CompositeComponents.health_status status={to_string(@summary.health)} />
+          </.shelf_stat>
+          <.shelf_stat label="Copies">
+            <span class="font-mono text-base text-base-content">
+              {@summary.enabled_deployment_count}/{@summary.deployment_count}
+            </span>
+          </.shelf_stat>
+          <.shelf_stat label="Requests">
+            <span class="font-mono text-base text-base-content tabular-nums">{@summary.requests}</span>
+          </.shelf_stat>
+          <.shelf_stat label="p95">
+            <span class={["font-mono text-base tabular-nums", latency_tone(@summary.p95_latency_ms)]}>
+              {latency(@summary.p95_latency_ms)}
+            </span>
+          </.shelf_stat>
+          <.shelf_stat label="Errors" class="hidden xl:block">
+            <span class="font-mono text-base text-base-content/80 tabular-nums">
+              {@summary.error_rate}
+            </span>
+          </.shelf_stat>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-1 border-t border-base-content/10 px-4 py-2 lg:border-l lg:border-t-0 lg:py-0">
         <.icon_button
           icon="hero-pencil-square"
-          label={"Edit #{summary.model.display_name}"}
-          navigate={~p"/admin/models/#{summary.model.id}/edit"}
+          label={"Edit #{@model.display_name}"}
+          navigate={~p"/admin/models/#{@model.id}/edit"}
         />
         <.icon_button
-          :if={summary.deployment_count == 0}
+          :if={@summary.deployment_count == 0}
           icon="hero-trash"
           variant="danger"
-          label={"Delete #{summary.model.display_name}"}
+          label={"Delete #{@model.display_name}"}
           phx-click="delete"
-          phx-value-id={summary.model.id}
-          data-confirm={"Delete orphaned model “#{summary.model.display_name}”? This removes the catalog entry permanently."}
+          phx-value-id={@model.id}
+          data-confirm={"Delete orphaned model “#{@model.display_name}”? This removes the catalog entry permanently."}
         />
-      </:action>
-    </.table>
+      </div>
+    </div>
+    """
+  end
+
+  attr :label, :string, required: true
+  attr :class, :any, default: nil
+  slot :inner_block, required: true
+
+  defp shelf_stat(assigns) do
+    ~H"""
+    <div class={["text-right", @class]}>
+      <div class="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-base-content/45">
+        {@label}
+      </div>
+      <div class="mt-1 leading-tight">{render_slot(@inner_block)}</div>
+    </div>
     """
   end
 
@@ -711,6 +955,53 @@ defmodule AiroWeb.Admin.ModelLive do
   defp join_values([]), do: "—"
   defp join_values(nil), do: "—"
   defp join_values(values), do: Enum.map_join(values, ", ", &to_string/1)
+
+  # --- shelf controls + card presentation ---
+
+  defp sort_options do
+    [{"Name", "name"}, {"Requests", "requests"}, {"p95 latency", "p95"}, {"Error rate", "errors"}]
+  end
+
+  defp facets(models) do
+    %{
+      capabilities: facet_options(models, & &1.capabilities),
+      classes: facet_options(models, & &1.classes),
+      health:
+        models
+        |> Enum.map(&to_string(&1.health))
+        |> distinct_options()
+    }
+  end
+
+  defp facet_options(models, fun) do
+    models |> Enum.flat_map(fun) |> Enum.map(&to_string/1) |> distinct_options()
+  end
+
+  defp distinct_options(values) do
+    values |> Enum.uniq() |> Enum.sort() |> Enum.map(&{humanize(&1), &1})
+  end
+
+  defp status_tone(:preferred), do: "success"
+  defp status_tone(:deprecated), do: "warning"
+  defp status_tone(:disabled), do: "neutral"
+  defp status_tone(_status), do: "primary"
+
+  defp spine_class(:up), do: "border-l-success"
+  defp spine_class(:down), do: "border-l-error"
+  defp spine_class(_health), do: "border-l-base-content/25"
+
+  defp chip_class("primary"),
+    do: "rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[0.7rem] font-medium text-primary"
+
+  defp chip_class(_neutral),
+    do:
+      "rounded border border-base-content/15 bg-base-300/40 px-1.5 py-0.5 text-[0.7rem] font-medium text-base-content/65"
+
+  defp latency_tone(nil), do: "text-base-content/40"
+  defp latency_tone(ms) when ms >= 15_000, do: "text-error"
+  defp latency_tone(ms) when ms >= 5_000, do: "text-warning"
+  defp latency_tone(ms) when ms < 500, do: "text-success"
+  defp latency_tone(_ms), do: "text-base-content"
 
   defp model_identity_fields(%{model: model, summary: summary}) do
     [
