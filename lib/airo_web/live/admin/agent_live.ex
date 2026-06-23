@@ -671,24 +671,26 @@ defmodule AiroWeb.Admin.AgentLive do
           Slot {@config.port}
         </p>
 
-        <div>
-          <.input
-            type="number"
-            name="config[ctx]"
-            value={@config.ctx}
-            label="Context window"
-            min="1"
-            max={@ctx_max}
-          />
-          <CompositeComponents.meter
-            :if={@ctx_max}
-            class="mt-2"
-            label="Context"
-            value={@ctx_value}
-            max={@ctx_max}
-            display={ctx_display(@ctx_value, @ctx_max)}
-          />
-        </div>
+        <CompositeComponents.slider
+          :if={@ctx_max}
+          name="config[ctx]"
+          value={@ctx_value || @ctx_max}
+          min={ctx_min(@ctx_max)}
+          max={@ctx_max}
+          step={ctx_step(@ctx_max)}
+          label="Context window"
+          phx-debounce="100"
+        >
+          <:readout>{ctx_display(@ctx_value, @ctx_max)}</:readout>
+        </CompositeComponents.slider>
+        <.input
+          :if={is_nil(@ctx_max)}
+          type="number"
+          name="config[ctx]"
+          value={@config.ctx}
+          label="Context window"
+          min="1"
+        />
 
         <p :if={@configure?} class="text-xs text-warning">
           Restarting interrupts in-flight requests on slot {@config.port}.
@@ -707,6 +709,13 @@ defmodule AiroWeb.Admin.AgentLive do
 
   defp ctx_display(nil, max), do: "— / #{max}"
   defp ctx_display(value, max), do: "#{value} / #{max}"
+
+  # Context-window slider bounds. A 1024 floor/step keeps stops on the round
+  # values context tends to use; clamp the floor under tiny ceilings.
+  defp ctx_min(max) when is_integer(max), do: min(1024, max)
+  defp ctx_min(_max), do: 0
+  defp ctx_step(max) when is_integer(max) and max <= 1024, do: max
+  defp ctx_step(_max), do: 1024
 
   # --- capacity / memory-fit (S18) ---
 

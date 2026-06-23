@@ -133,6 +133,12 @@ defmodule AiroWeb.DesignManifest do
     summary: "Server-driven centered dialog with title/actions; backdrop + Escape close.",
     preview: &DesignPreviews.modal_preview/1
 
+  component CompositeComponents, :slider,
+    category: :composite,
+    daisy_basis: "range",
+    summary: "Labeled range slider with a right-aligned value readout; a bounded form input.",
+    preview: &DesignPreviews.slider_preview/1
+
   # -------------------------------------------------------------------- domain
   # Add domain composites here:
   #

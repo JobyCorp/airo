@@ -212,6 +212,26 @@ defmodule AiroWeb.DesignPreviews do
     """
   end
 
+  def slider_preview(assigns) do
+    ~H"""
+    <div class="max-w-md space-y-4">
+      <CompositeComponents.slider
+        name="ctx"
+        value={65_536}
+        min={1024}
+        max={262_144}
+        step={1024}
+        label="Context window"
+      >
+        <:readout>65536 / 262144</:readout>
+      </CompositeComponents.slider>
+      <CompositeComponents.slider name="weight" value={40} min={0} max={100} step={5} label="Weight">
+        <:readout>40%</:readout>
+      </CompositeComponents.slider>
+    </div>
+    """
+  end
+
   def empty_state_preview(assigns) do
     ~H"""
     <div class="grid gap-4 sm:grid-cols-2">

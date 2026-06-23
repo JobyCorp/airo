@@ -433,4 +433,53 @@ defmodule AiroWeb.CompositeComponents do
     </div>
     """
   end
+
+  @doc """
+  A labeled range slider (daisyUI `range`) — direct manipulation for a bounded
+  numeric value (context window, a budget, a weight). The label sits left and an
+  optional `:readout` (typically the current value against its max) sits right,
+  above the track. It's a form input: set `name`/`value` and wire `phx-change`.
+
+      <.slider name="config[ctx]" value={65536} min={1024} max={262144} step={1024} label="Context window">
+        <:readout>65536 / 262144</:readout>
+      </.slider>
+  """
+  attr :name, :string, required: true
+  attr :value, :any, default: nil
+  attr :min, :any, default: 0
+  attr :max, :any, required: true
+  attr :step, :any, default: 1
+  attr :label, :string, default: nil
+  attr :class, :any, default: nil
+  attr :rest, :global
+
+  slot :readout, doc: "Optional value display shown right-aligned above the track."
+
+  def slider(assigns) do
+    ~H"""
+    <div data-component="AiroWeb.CompositeComponents.slider" class={["space-y-1.5", @class]}>
+      <div :if={@label || @readout != []} class="flex items-baseline justify-between gap-3">
+        <span
+          :if={@label}
+          class="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-base-content/55"
+        >
+          {@label}
+        </span>
+        <span :if={@readout != []} class="font-mono text-sm tabular-nums text-base-content/85">
+          {render_slot(@readout)}
+        </span>
+      </div>
+      <input
+        type="range"
+        name={@name}
+        value={@value}
+        min={@min}
+        max={@max}
+        step={@step}
+        class="range range-primary range-sm w-full"
+        {@rest}
+      />
+    </div>
+    """
+  end
 end
