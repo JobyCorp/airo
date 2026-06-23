@@ -406,13 +406,33 @@ window — and load/restart it, from an always-visible model list with a config 
   349 tests, precommit + joby_kit.lint green. Deferred: profile keys beyond ctx,
   fast-rejection feedback on async load, drain-on-restart._
 
-### [ ] S21 — Automatic placement & eviction (on dispatch)
-Bumped from S18/S19/S20. Depends on S18 (capacity) + S19 (identity) + S20 (profile)
-+ S17. The serving-path hook that, before serving a managed provider, ensures the
-right model is resident — slot selection, VRAM/memory fit (reusing
-`Airo.Agents.Capacity`), and what-to-evict policy. The open question in
+### [ ] S21 — VRAM validation & context legibility
+See [DESIGN-vram-validation.md](./DESIGN-vram-validation.md). Implements
+airo_agent A4 (VRAM-fit) + A2 (legibility). Depends on S18 (capacity) + S20 (config).
+Hard-block a context that won't fit VRAM before loading — over-commit segfaults
+llama-server (KV `cudaMalloc` OOM) — and make ctx/parallel/KV-quant legible.
+- **Calibrated VRAM** (no arch formula): `per_ctx = (vram_used − weights)/ctx_total`
+  from live telemetry; `projected = weights + per_ctx × ctx_total'`; fits =
+  `projected ≤ vram_total × 0.95`. Captures KV-quant/flash-attn/MTP implicitly
+- **Two cases:** resident reconfigure → calibrated **hard block** (exact, the
+  documented danger); cold load → weights-floor hard block + KV "not validated"
+- **Groundwork:** `SlotState`/`Ingest` ingest `ctx_total` + `profile`
+  (`resolved_profile`); `profile` preserved when a push omits it
+- **`Capacity`:** `per_ctx_mb`, `project`, `validate` → `fits?: true|false|:cold`
+- **UI:** A2 — slots/list/modal show "ctx per-request × parallel = total" + tags
+  (KV `q8_0`, flash-attn, MTP); A4 — config modal projected-VRAM meter, submit
+  **disabled** with a reason when over budget
+- **Fixed:** hard limit (not advisory); 95% margin; calibrate not model
+- **DoD extra:** an over-budget reconfigure is blocked with a reason; a fitting one
+  allowed; `Capacity` projection/validation + cold-floor unit-tested
+
+### [ ] S22 — Automatic placement & eviction (on dispatch)
+Bumped from S18–S21. Depends on S18 (capacity) + S19 (identity) + S20 (profile) +
+S21 (VRAM validation) + S17. The serving-path hook that, before serving a managed
+provider, ensures the right model is resident — slot selection, VRAM/memory fit
+(reusing `Airo.Agents.Capacity`), and what-to-evict policy. The open question in
 airo_agent/DESIGN.md; only safe on a proven manual control plane + capacity +
-canonical identity.
+canonical identity + VRAM validation.
 
 ---
 
