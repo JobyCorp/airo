@@ -91,7 +91,7 @@ defmodule AiroWeb.Admin.AgentLive do
   def handle_event("config_change", %{"config" => params}, %{assigns: %{config: config}} = socket)
       when is_map(config) do
     config = %{config | ctx: params["ctx"], port: parse_int(params["port"], config.port)}
-    {:noreply, assign(socket, config: config)}
+    {:noreply, assign(socket, config: %{config | validation: validate_config(config)})}
   end
 
   def handle_event(
@@ -104,13 +104,25 @@ defmodule AiroWeb.Admin.AgentLive do
     ctx = parse_int(params["ctx"], nil)
     model_id = config.model["id"]
     verb = if config.mode == :configure, do: "Restarting", else: "Loading"
+    validation = validate_config(%{config | ctx: params["ctx"], port: port})
 
-    run_load(agent, port, model_id, ctx)
+    # Hard limit (A4): over-commit segfaults the engine, so refuse server-side too,
+    # not only via the disabled button.
+    if validation.fits? == false do
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         "Won't fit VRAM: ~#{gb(validation.projected_mb)} GB projected exceeds the #{gb(validation.budget_mb)} GB budget. Reduce the context."
+       )}
+    else
+      run_load(agent, port, model_id, ctx)
 
-    {:noreply,
-     socket
-     |> assign(config: nil)
-     |> put_flash(:info, "#{verb} #{model_id} on slot #{port}… watch the slot for status.")}
+      {:noreply,
+       socket
+       |> assign(config: nil)
+       |> put_flash(:info, "#{verb} #{model_id} on slot #{port}… watch the slot for status.")}
+    end
   end
 
   def handle_event("refresh_inventory", _params, %{assigns: %{detail: %{agent: agent}}} = socket) do
@@ -166,30 +178,64 @@ defmodule AiroWeb.Admin.AgentLive do
   defp assign_inventory(socket), do: assign(socket, inventory: [], inventory_error: nil)
 
   # Build the config-modal state for a model: Configure (resident → its slot +
-  # current ctx) or Load (a target slot + the model's ctx_max as a starting point).
-  defp build_config(%{inventory: inventory, detail: %{slots: slots}}, id) do
+  # current ctx, calibrated against its live VRAM) or Load (a target slot, the
+  # model's ctx_max as a starting point, cold weights-floor validation).
+  defp build_config(%{inventory: inventory, detail: detail}, id) do
     model = Enum.find(inventory, &(&1["id"] == id)) || %{"id" => id}
+    gpu = detail.agent.gpu
+    weights_mb = mb(model["size_bytes"])
+    total_mb = gpu_val(gpu, :vram_total_mb)
+    used_mb = gpu_val(gpu, :vram_used_mb)
 
-    case Enum.find(slots, &(&1.resident_model == id)) do
-      %{port: port, ctx: ctx} ->
-        %{
-          mode: :configure,
-          model: model,
-          port: port,
-          slots: [port],
-          ctx: to_string(ctx || model["ctx_max"])
-        }
+    base =
+      case Enum.find(detail.slots, &(&1.resident_model == id)) do
+        %{port: port, ctx: ctx, parallel: parallel, ctx_total: ctx_total} ->
+          %{
+            mode: :configure,
+            model: model,
+            port: port,
+            slots: [port],
+            parallel: parallel || 1,
+            ctx: to_string(ctx || model["ctx_max"]),
+            calib: %{
+              resident?: true,
+              weights_mb: weights_mb,
+              used_mb: used_mb,
+              total_mb: total_mb,
+              ctx_total_current: ctx_total
+            }
+          }
 
-      nil ->
-        %{
-          mode: :load,
-          model: model,
-          port: load_target_slot(slots),
-          slots: Enum.map(slots, & &1.port),
-          ctx: to_string(model["ctx_max"])
-        }
-    end
+        nil ->
+          %{
+            mode: :load,
+            model: model,
+            port: load_target_slot(detail.slots),
+            slots: Enum.map(detail.slots, & &1.port),
+            parallel: 1,
+            ctx: to_string(model["ctx_max"]),
+            calib: %{
+              resident?: false,
+              weights_mb: weights_mb,
+              used_mb: used_mb,
+              total_mb: total_mb,
+              ctx_total_current: nil
+            }
+          }
+      end
+
+    Map.put(base, :validation, validate_config(base))
   end
+
+  # Project the chosen context against VRAM (A4). ctx_total' = ctx × parallel.
+  defp validate_config(config) do
+    ctx = parse_int(config.ctx, nil)
+    ctx_total_new = ctx && ctx * (config.parallel || 1)
+    Capacity.validate(Map.put(config.calib, :ctx_total_new, ctx_total_new))
+  end
+
+  defp mb(bytes) when is_integer(bytes), do: bytes / 1_048_576
+  defp mb(_bytes), do: nil
 
   # Prefer a free slot; otherwise the first slot (Load becomes a swap).
   defp load_target_slot(slots) do
@@ -290,7 +336,9 @@ defmodule AiroWeb.Admin.AgentLive do
       status: state[:status] || :empty,
       ctx: state[:ctx],
       parallel: state[:parallel],
+      ctx_total: state[:ctx_total],
       engine_build: state[:engine_build],
+      profile: state[:profile] || %{},
       deployment_count: length(provider.deployments)
     }
   end
@@ -490,8 +538,11 @@ defmodule AiroWeb.Admin.AgentLive do
             </div>
           </:col>
           <:col :let={slot} label="Context">
-            <span :if={slot.ctx} class="font-mono text-xs tabular-nums">{slot.ctx}</span>
+            <span :if={slot.ctx} class="font-mono text-xs tabular-nums">{context_line(slot)}</span>
             <span :if={is_nil(slot.ctx)} class="text-base-content/40">—</span>
+          </:col>
+          <:col :let={slot} label="Serving">
+            <.profile_tags profile={slot.profile} />
           </:col>
           <:col :let={slot} label="Status">
             <.slot_status_tag status={slot.status} />
@@ -638,10 +689,18 @@ defmodule AiroWeb.Admin.AgentLive do
   attr :config, :map, required: true
 
   defp config_modal(assigns) do
+    ctx_value = parse_int(assigns.config.ctx, nil)
+    parallel = assigns.config.parallel || 1
+    validation = assigns.config.validation
+
     assigns =
       assign(assigns,
         ctx_max: assigns.config.model["ctx_max"],
-        ctx_value: parse_int(assigns.config.ctx, nil),
+        ctx_value: ctx_value,
+        parallel: parallel,
+        ctx_total: ctx_value && ctx_value * parallel,
+        validation: validation,
+        blocked?: validation.fits? == false,
         configure?: assigns.config.mode == :configure
       )
 
@@ -692,13 +751,35 @@ defmodule AiroWeb.Admin.AgentLive do
           min="1"
         />
 
+        <p :if={@ctx_value} class="text-xs text-base-content/55">
+          {@ctx_value} per request × {@parallel} = <span class="font-mono">{@ctx_total}</span>
+          total KV
+        </p>
+
+        <div :if={@validation.projected_mb}>
+          <CompositeComponents.meter
+            label="VRAM (projected)"
+            value={@validation.projected_mb}
+            max={@config.calib.total_mb}
+            display={vram_display(@validation)}
+          />
+          <p :if={@blocked?} class="mt-1 text-xs text-error">
+            Over budget — won't fit. Projected ~{gb(@validation.projected_mb)} GB exceeds the {gb(
+              @validation.budget_mb
+            )} GB safe budget. Reduce the context.
+          </p>
+          <p :if={@validation.fits? == :cold} class="mt-1 text-xs text-base-content/55">
+            Cold model: weights fit, but the context's KV cost can't be validated until it's loaded.
+          </p>
+        </div>
+
         <p :if={@configure?} class="text-xs text-warning">
           Restarting interrupts in-flight requests on slot {@config.port}.
         </p>
 
         <div class="flex justify-end gap-2 pt-2">
           <.button type="button" phx-click="cancel_config">Cancel</.button>
-          <.button variant="primary">
+          <.button variant="primary" disabled={@blocked?}>
             {if @configure?, do: "Restart with changes", else: "Load model"}
           </.button>
         </div>
@@ -706,6 +787,34 @@ defmodule AiroWeb.Admin.AgentLive do
     </CompositeComponents.modal>
     """
   end
+
+  defp vram_display(%{projected_mb: p, budget_mb: b}) when is_number(p) and is_number(b),
+    do: "#{gb(p)} / #{gb(b)} GB"
+
+  defp vram_display(%{projected_mb: p}), do: "#{gb(p)} GB"
+
+  attr :profile, :map, default: %{}
+
+  defp profile_tags(assigns) do
+    ~H"""
+    <div class="flex flex-wrap gap-1">
+      <CompositeComponents.tag :if={@profile["cache_type_k"]} tone="neutral">
+        KV {@profile["cache_type_k"]}
+      </CompositeComponents.tag>
+      <CompositeComponents.tag :if={@profile["flash_attn"] == "on"} tone="neutral">
+        flash-attn
+      </CompositeComponents.tag>
+      <CompositeComponents.tag :if={@profile["spec_type"] == "draft-mtp"} tone="primary">
+        MTP
+      </CompositeComponents.tag>
+    </div>
+    """
+  end
+
+  defp context_line(%{ctx: ctx, parallel: parallel, ctx_total: total}) when is_integer(ctx),
+    do: "#{ctx} × #{parallel || 1} = #{total || ctx}"
+
+  defp context_line(_slot), do: "—"
 
   defp ctx_display(nil, max), do: "— / #{max}"
   defp ctx_display(value, max), do: "#{value} / #{max}"

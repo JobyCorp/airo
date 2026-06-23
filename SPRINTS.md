@@ -406,7 +406,7 @@ window — and load/restart it, from an always-visible model list with a config 
   349 tests, precommit + joby_kit.lint green. Deferred: profile keys beyond ctx,
   fast-rejection feedback on async load, drain-on-restart._
 
-### [ ] S21 — VRAM validation & context legibility
+### [x] S21 — VRAM validation & context legibility
 See [DESIGN-vram-validation.md](./DESIGN-vram-validation.md). Implements
 airo_agent A4 (VRAM-fit) + A2 (legibility). Depends on S18 (capacity) + S20 (config).
 Hard-block a context that won't fit VRAM before loading — over-commit segfaults
@@ -425,6 +425,14 @@ llama-server (KV `cudaMalloc` OOM) — and make ctx/parallel/KV-quant legible.
 - **Fixed:** hard limit (not advisory); 95% margin; calibrate not model
 - **DoD extra:** an over-budget reconfigure is blocked with a reason; a fitting one
   allowed; `Capacity` projection/validation + cold-floor unit-tested
+- _Complete: `Capacity.per_ctx_mb`/`project`/`validate` (calibrated; 15 tests incl.
+  cold floor + over-budget); `SlotState`/`Ingest` carry `ctx_total` + `profile`
+  (profile preserved across pushes). UI: slots show "ctx × parallel = total" + KV/
+  flash-attn/MTP tags; config modal projects VRAM as the slider moves and **hard-
+  blocks** (disabled submit + server guard) over the 95% budget. Verified live on
+  jobycorp: at 146432 → 27.2/30.3 GB allowed; at max 262144 → 31.8/30.3 GB blocked
+  ("reduce the context"). 354 tests, precommit + joby_kit.lint green. Deferred:
+  per-model KV learning, parallel editing, agent-side pre-flight guard._
 
 ### [ ] S22 — Automatic placement & eviction (on dispatch)
 Bumped from S18–S21. Depends on S18 (capacity) + S19 (identity) + S20 (profile) +
