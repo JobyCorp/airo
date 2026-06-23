@@ -191,6 +191,27 @@ defmodule AiroWeb.DesignPreviews do
     """
   end
 
+  def modal_preview(assigns) do
+    ~H"""
+    <div class="rounded-box border border-base-300 bg-base-100 p-5">
+      <p class="text-sm text-base-content/60">
+        Renders a centered dialog over a backdrop. Shown here inert; in use it's
+        gated on a <code class="font-mono text-xs">show</code>
+        assign with an <code class="font-mono text-xs">on_cancel</code>
+        event.
+      </p>
+      <div class="mt-4 rounded-box border border-base-300 bg-base-100 p-4 shadow-lg">
+        <h3 class="text-lg font-semibold">Configure model</h3>
+        <p class="mt-2 text-sm text-base-content/70">Modal body content goes here.</p>
+        <div class="mt-4 flex justify-end gap-2">
+          <CoreComponents.button>Cancel</CoreComponents.button>
+          <CoreComponents.button variant="primary">Save</CoreComponents.button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
   def empty_state_preview(assigns) do
     ~H"""
     <div class="grid gap-4 sm:grid-cols-2">

@@ -378,12 +378,41 @@ agent already pushes the data — Airo-side only.
   (347 tests). Deferred: serving-facts UI, repo-lineage grouping, revision×build
   perf attribution._
 
-### [ ] S20 — Automatic placement & eviction (on dispatch)
-Bumped from S18/S19. Depends on S18 (capacity model) + S19 (identity) + S17. The
-serving-path hook that, before serving a managed provider, ensures the right model
-is resident — slot selection, VRAM/memory fit (reusing `Airo.Agents.Capacity`),
-and what-to-evict policy. The open question in airo_agent/DESIGN.md; only safe on a
-proven manual control plane + capacity + canonical identity.
+### [x] S20 — Slot configuration & reload
+See [DESIGN-slot-config.md](./DESIGN-slot-config.md). Depends on S17 + S19. Let an
+operator configure how a model is served on a slot — starting with the context
+window — and load/restart it, from an always-visible model list with a config modal.
+- **`Control.load/4` profile:** `POST /load {model, slot, profile}`; v1
+  `profile = %{ctx: n}` (nils dropped). Configure = load the resident model into
+  its slot with the new profile → the agent restarts it (interrupts in-flight)
+- **`<.modal>` wrapper:** wrap daisyUI `<dialog class="modal">` as a registered
+  composite (backdrop/Esc close, focus, reduced-motion); + preview
+- **`/agents/:id`:** always-visible "Models on this host" list (online) — each
+  model has **Load** (not resident) or **Configure** (resident); slots gain a
+  Configure action. The **config modal** shows the context window **against
+  `ctx_max`** (reuse the `meter` visual); Load → "Load model", Configure →
+  "Restart with changes" with an interrupt note. Offline ⇒ read-only
+- **Fixed:** v1 = `ctx` only (extensible); advisory bounds `1..ctx_max`; no drain
+- **DoD extra:** Load sets a ctx and loads; Configure prefills current ctx and
+  restarts; new ctx shows after the push; `<.modal>` lint-clean; `Control.load/4`
+  profile unit-tested vs a stubbed Req plug
+- _Complete: `Control.load/4` profile (nils dropped; 11 tests); `<.modal>` wrapper
+  (registered + preview); `/agents/:id` shows an always-visible "Models on this
+  host" list (Load/Configure per model, resident-tagged), a Context column on
+  slots, and a config modal with the context window shown against `ctx_max` (meter
+  signature). Load/restart fire async (90s timeout, off the LiveView) so the slow
+  blocking `/load` doesn't freeze the page — the slot transitions via push.
+  Verified live (jobycorp): modal prefills 65536, meter 65536/262144, copy/flow.
+  349 tests, precommit + joby_kit.lint green. Deferred: profile keys beyond ctx,
+  fast-rejection feedback on async load, drain-on-restart._
+
+### [ ] S21 — Automatic placement & eviction (on dispatch)
+Bumped from S18/S19/S20. Depends on S18 (capacity) + S19 (identity) + S20 (profile)
++ S17. The serving-path hook that, before serving a managed provider, ensures the
+right model is resident — slot selection, VRAM/memory fit (reusing
+`Airo.Agents.Capacity`), and what-to-evict policy. The open question in
+airo_agent/DESIGN.md; only safe on a proven manual control plane + capacity +
+canonical identity.
 
 ---
 

@@ -52,6 +52,43 @@ defmodule Airo.Agents.ControlTest do
       assert_received {:load, "/load", %{"model" => "unsloth/Qwen3.6-35B", "slot" => 8081}}
     end
 
+    test "sends a launch profile and drops nil values" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:load, Jason.decode!(body)})
+        Req.Test.json(conn, %{"status" => "loading"})
+      end)
+
+      assert :accepted =
+               Control.load(
+                 agent(),
+                 8081,
+                 "m",
+                 Keyword.put(opts(), :profile, %{ctx: 65_536, parallel: nil})
+               )
+
+      assert_received {:load, %{"profile" => %{"ctx" => 65_536} = profile}}
+      refute Map.has_key?(profile, "parallel")
+    end
+
+    test "an empty profile is omitted (agent default)" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:load, Jason.decode!(body)})
+        Req.Test.json(conn, %{"status" => "loading"})
+      end)
+
+      assert :accepted =
+               Control.load(agent(), 8081, "m", Keyword.put(opts(), :profile, %{ctx: nil}))
+
+      assert_received {:load, body}
+      refute Map.has_key?(body, "profile")
+    end
+
     test "404 → {:error, {:unknown_model, id}}" do
       Req.Test.stub(__MODULE__, fn conn ->
         conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{"error" => "unknown model"})

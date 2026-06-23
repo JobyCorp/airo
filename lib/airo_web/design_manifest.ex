@@ -127,6 +127,12 @@ defmodule AiroWeb.DesignManifest do
     summary: "Horizontal fill gauge with a mono readout; color encodes pressure.",
     preview: &DesignPreviews.meter_preview/1
 
+  component CompositeComponents, :modal,
+    category: :composite,
+    daisy_basis: "modal",
+    summary: "Server-driven centered dialog with title/actions; backdrop + Escape close.",
+    preview: &DesignPreviews.modal_preview/1
+
   # -------------------------------------------------------------------- domain
   # Add domain composites here:
   #
