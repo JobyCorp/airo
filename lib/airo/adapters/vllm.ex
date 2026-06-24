@@ -34,6 +34,14 @@ defmodule Airo.Adapters.VLLM do
   @impl Airo.Adapter
   def embed(params, %Context{} = ctx), do: OpenAICompatible.embed(params, ctx)
 
+  # vLLM's omni/audio builds (e.g. Qwen3-TTS) expose OpenAI's `/audio/speech` and
+  # `/audio/transcriptions` on the same `/v1` surface — delegate like the rest.
+  @impl Airo.Adapter
+  def speech(params, %Context{} = ctx), do: OpenAICompatible.speech(params, ctx)
+
+  @impl Airo.Adapter
+  def transcribe(params, %Context{} = ctx), do: OpenAICompatible.transcribe(params, ctx)
+
   @impl Airo.Adapter
   def list_models(%Context{} = ctx), do: OpenAICompatible.list_models(ctx)
 
