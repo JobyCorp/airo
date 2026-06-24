@@ -15,8 +15,9 @@ defmodule Airo.VoicesTest do
       case conn.request_path do
         "/v1/audio/voices" ->
           Req.Test.json(conn, %{
+            # `serena` intentionally appears in both arrays — the adapter dedups.
             "voices" => ["serena", "ryan"],
-            "uploaded_voices" => [%{"name" => "my_clone"}]
+            "uploaded_voices" => [%{"name" => "my_clone"}, %{"name" => "serena"}]
           })
 
         "/v1/models" ->
@@ -78,6 +79,7 @@ defmodule Airo.VoicesTest do
   test "?model restricts to one model's voices" do
     voices = Voices.list(client_key: %ClientKey{allowed_aliases: ["*"]}, model: @qwen_model)
 
+    # serena deduped despite appearing in both voices + uploaded_voices.
     assert Enum.map(voices, & &1["id"]) |> Enum.sort() == ["my_clone", "ryan", "serena"]
     refute Enum.any?(voices, &(&1["model"] == @kokoro_model))
   end
