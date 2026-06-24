@@ -30,6 +30,7 @@ defmodule AiroWeb.Router do
     post "/classify", ClassifyController, :create
     post "/audio/speech", AudioController, :speech
     post "/audio/transcriptions", AudioController, :transcriptions
+    get "/audio/voices", VoicesController, :index
     get "/models", ModelsController, :index
   end
 
