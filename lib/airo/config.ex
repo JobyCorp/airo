@@ -148,7 +148,7 @@ defmodule Airo.Config do
 
   ## Agents (Model 2 — host-side control planes that manage providers)
 
-  def list_agents, do: Repo.all(Agent)
+  def list_agents, do: Repo.all(from a in Agent, order_by: a.host_id)
   def get_agent!(id), do: Repo.get!(Agent, id)
   def get_agent_by_host_id(host_id), do: Repo.get_by(Agent, host_id: host_id)
 

@@ -93,14 +93,21 @@ defmodule Airo.Agents.Provenance do
 
   # Point the slot's matching deployment at the canonical Model (a no-op once
   # aligned). A deployment matches when it's already linked, or its `model_name`
-  # is the resident model's real id (the natural binding) or its GGUF filename
-  # (legacy). Only the slot provider's own deployments are considered.
+  # is the resident model's real id (the natural binding), the resident GGUF's
+  # full local path, or just its filename (an operator can bind a slot by any of
+  # these — llama-server is launched with the path). Path matching compares
+  # basenames on both sides so a full-path `model_name` lines up with a bare
+  # filename. Only the slot provider's own deployments are considered.
   defp link_deployment(provider, model, resident_id, prov) do
-    base = prov && basename(prov["path"])
+    path = prov && prov["path"]
+    base = basename(path)
     %{deployments: deployments} = Repo.preload(provider, :deployments)
 
     matches? = fn d ->
-      d.model_id == model.id or d.model_name == resident_id or (base && d.model_name == base)
+      d.model_id == model.id or
+        d.model_name == resident_id or
+        (path && d.model_name == path) or
+        (base && basename(d.model_name) == base)
     end
 
     case Enum.find(deployments, matches?) do

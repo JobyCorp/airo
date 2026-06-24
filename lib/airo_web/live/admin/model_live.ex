@@ -76,26 +76,38 @@ defmodule AiroWeb.Admin.ModelLive do
   # Delete a model from the shelf. Only orphaned models (no deployments) may be
   # removed: deleting one with live deployments would nilify their `model_id`
   # (FK is `nilify_all`) and strand them without a catalog entry — the inverse
-  # of the orphan we're cleaning up. Detach the deployments first.
+  # of the orphan we're cleaning up. Detach the deployments first. A model resident
+  # in an agent slot has no deployments by design but is actively served, so it is
+  # likewise off-limits.
   def handle_event("delete", %{"id" => id}, socket) do
     model = Config.get_model_with_deployments!(id)
 
-    if model.deployments == [] do
-      {:ok, _} = Config.delete_model(model)
-      socket = put_flash(socket, :info, "Deleted #{model.display_name}.")
+    cond do
+      model.deployments != [] ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "#{model.display_name} still has deployments — detach them before deleting."
+         )}
 
-      if socket.assigns.detail do
-        {:noreply, push_navigate(socket, to: ~p"/admin/models")}
-      else
-        {:noreply, socket |> load_models() |> assign_visible()}
-      end
-    else
-      {:noreply,
-       put_flash(
-         socket,
-         :error,
-         "#{model.display_name} still has deployments — detach them before deleting."
-       )}
+      ModelShelf.resident?(model) ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "#{model.display_name} is resident in an agent slot — unload it before deleting."
+         )}
+
+      true ->
+        {:ok, _} = Config.delete_model(model)
+        socket = put_flash(socket, :info, "Deleted #{model.display_name}.")
+
+        if socket.assigns.detail do
+          {:noreply, push_navigate(socket, to: ~p"/admin/models")}
+        else
+          {:noreply, socket |> load_models() |> assign_visible()}
+        end
     end
   end
 
@@ -239,7 +251,7 @@ defmodule AiroWeb.Admin.ModelLive do
           </:actions>
           <:actions :if={@live_action == :show}>
             <.button
-              :if={@detail.summary.deployment_count == 0}
+              :if={orphaned?(@detail.summary)}
               size="sm"
               variant="danger"
               phx-click="delete"
@@ -448,8 +460,11 @@ defmodule AiroWeb.Admin.ModelLive do
             <CompositeComponents.tag tone={status_tone(@model.status)}>
               {@model.status}
             </CompositeComponents.tag>
-            <CompositeComponents.tag :if={@summary.deployment_count == 0} tone="warning">
+            <CompositeComponents.tag :if={orphaned?(@summary)} tone="warning">
               orphaned
+            </CompositeComponents.tag>
+            <CompositeComponents.tag :if={@summary.resident? and @summary.deployment_count == 0} tone="success">
+              serving in slot
             </CompositeComponents.tag>
           </div>
           <div class="mt-1 truncate font-mono text-xs text-base-content/55">
@@ -500,7 +515,7 @@ defmodule AiroWeb.Admin.ModelLive do
           navigate={~p"/admin/models/#{@model.id}/edit"}
         />
         <.icon_button
-          :if={@summary.deployment_count == 0}
+          :if={orphaned?(@summary)}
           icon="hero-trash"
           variant="danger"
           label={"Delete #{@model.display_name}"}
@@ -980,6 +995,11 @@ defmodule AiroWeb.Admin.ModelLive do
   defp distinct_options(values) do
     values |> Enum.uniq() |> Enum.sort() |> Enum.map(&{humanize(&1), &1})
   end
+
+  # Orphaned = no deployments AND not held by an agent slot. A slot-resident model
+  # has no deployment row by design (its state lives in `SlotState`) yet is actively
+  # served, so it is neither abandoned nor safe to delete.
+  defp orphaned?(summary), do: summary.deployment_count == 0 and not summary.resident?
 
   defp status_tone(:preferred), do: "success"
   defp status_tone(:deprecated), do: "warning"
