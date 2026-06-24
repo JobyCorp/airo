@@ -54,8 +54,16 @@ defmodule Airo.Adapters.OpenAICompatible do
   end
 
   defp to_voices({:ok, body}) when is_map(body) do
-    names = List.wrap(body["voices"]) ++ List.wrap(body["uploaded_voices"])
-    {:ok, for(v <- names, id = voice_name(v), is_binary(id), do: %{id: id})}
+    # A name can appear in both "voices" and "uploaded_voices" (a registered
+    # clone), so dedup by id — built-in listed first wins.
+    voices =
+      (List.wrap(body["voices"]) ++ List.wrap(body["uploaded_voices"]))
+      |> Enum.map(&voice_name/1)
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+      |> Enum.map(&%{id: &1})
+
+    {:ok, voices}
   end
 
   defp to_voices({:ok, _body}), do: {:ok, []}
