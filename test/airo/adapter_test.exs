@@ -18,6 +18,12 @@ defmodule Airo.AdapterTest do
     assert Adapter.supports?(VLLM, :chat)
   end
 
+  test "speech adapters expose voice discovery (voices/1)" do
+    for mod <- [VLLM, Airo.Adapters.Speaches, OpenAICompatible] do
+      assert Code.ensure_loaded?(mod) and function_exported?(mod, :voices, 1)
+    end
+  end
+
   test "capabilities/0 lists the contract callbacks" do
     assert :chat in Adapter.capabilities()
     assert :stream in Adapter.capabilities()

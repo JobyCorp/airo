@@ -33,6 +33,28 @@ defmodule Airo.Adapters.Speaches do
   @impl Airo.Adapter
   def list_models(%Context{} = ctx), do: OpenAICompatible.list_models(ctx)
 
+  # Speaches has no `/audio/voices`; voices ride the model catalog. Return the
+  # deployment model's voices (Kokoro carries name/language/gender per voice).
+  @impl Airo.Adapter
+  def voices(%Context{deployment: %{model_name: model}} = ctx) when is_binary(model) do
+    with {:ok, models} <- catalog(ctx) do
+      case Enum.find(models, &(&1.id == model)) do
+        %{voices: voices} when is_list(voices) -> {:ok, Enum.flat_map(voices, &normalize_voice/1)}
+        _ -> {:ok, []}
+      end
+    end
+  end
+
+  def voices(%Context{}), do: {:ok, []}
+
+  defp normalize_voice(%{"name" => name} = v) when is_binary(name),
+    do: [reject_nil(%{id: name, language: v["language"], gender: v["gender"]})]
+
+  defp normalize_voice(name) when is_binary(name), do: [%{id: name}]
+  defp normalize_voice(_), do: []
+
+  defp reject_nil(map), do: Map.reject(map, fn {_k, v} -> is_nil(v) end)
+
   @impl Airo.LocalProvider
   def catalog(%Context{} = ctx) do
     ctx

@@ -205,6 +205,22 @@ defmodule Airo.Config do
     |> Enum.filter(& &1.provider.enabled)
   end
 
+  @doc """
+  Enabled deployments (with enabled providers) whose `capabilities` include
+  `capability`, regardless of model — for discovery that spans every deployment
+  of a kind (e.g. listing TTS voices across all speech providers). Provider +
+  credential preloaded.
+  """
+  def list_deployments_by_capability(capability) do
+    cap = to_string(capability)
+
+    Deployment
+    |> where([d], fragment("? = ANY(?)", ^cap, d.capabilities) and d.enabled == true)
+    |> preload(provider: :credential)
+    |> Repo.all()
+    |> Enum.filter(& &1.provider.enabled)
+  end
+
   def create_deployment(attrs) do
     with {:ok, attrs} <- ensure_model_id(attrs) do
       %Deployment{} |> Deployment.changeset(attrs) |> Repo.insert()

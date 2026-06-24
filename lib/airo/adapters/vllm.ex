@@ -43,6 +43,9 @@ defmodule Airo.Adapters.VLLM do
   def transcribe(params, %Context{} = ctx), do: OpenAICompatible.transcribe(params, ctx)
 
   @impl Airo.Adapter
+  def voices(%Context{} = ctx), do: OpenAICompatible.voices(ctx)
+
+  @impl Airo.Adapter
   def list_models(%Context{} = ctx), do: OpenAICompatible.list_models(ctx)
 
   @impl Airo.LocalProvider

@@ -45,6 +45,26 @@ defmodule Airo.Adapters.OpenAICompatible do
     ctx |> Transport.get("/models") |> handle_response() |> to_model_ids()
   end
 
+  # Voices: the `/audio/voices` endpoint vLLM-omni / Speaches-style servers expose.
+  # Body is `%{"voices" => [...], "uploaded_voices" => [...]}` where each entry is
+  # a bare name string or an object with a "name". Built-in and uploaded merge.
+  @impl Airo.Adapter
+  def voices(%Context{} = ctx) do
+    ctx |> Transport.get("/audio/voices") |> handle_response() |> to_voices()
+  end
+
+  defp to_voices({:ok, body}) when is_map(body) do
+    names = List.wrap(body["voices"]) ++ List.wrap(body["uploaded_voices"])
+    {:ok, for(v <- names, id = voice_name(v), is_binary(id), do: %{id: id})}
+  end
+
+  defp to_voices({:ok, _body}), do: {:ok, []}
+  defp to_voices({:error, _} = error), do: error
+
+  defp voice_name(name) when is_binary(name), do: name
+  defp voice_name(%{"name" => name}), do: name
+  defp voice_name(_), do: nil
+
   # Text-to-speech: JSON in, binary audio out (Speaches `/v1/audio/speech`).
   @impl Airo.Adapter
   def speech(params, %Context{} = ctx) when is_map(params) do

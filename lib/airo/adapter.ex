@@ -73,6 +73,20 @@ defmodule Airo.Adapter do
   """
   @callback list_models(Context.t()) :: {:ok, [String.t()]} | {:error, term()}
 
+  @typedoc """
+  A TTS voice the upstream offers. `id` is the name a client passes as `voice`;
+  `language`/`gender` are optional metadata (Kokoro carries them, Qwen-TTS omits).
+  """
+  @type voice :: %{:id => String.t(), optional(:language) => String.t(), optional(:gender) => String.t()}
+
+  @doc """
+  List the TTS voices the upstream offers (its `/audio/voices` endpoint or model
+  catalog). Discovery only — like `list_models/1` it takes a `Context` (the
+  deployment scopes which model's voices) and no request body. Returns the voices,
+  or an error reason when the upstream is unreachable or has none.
+  """
+  @callback voices(Context.t()) :: {:ok, [voice()]} | {:error, term()}
+
   @optional_callbacks chat: 2,
                       stream: 4,
                       embed: 2,
@@ -80,7 +94,8 @@ defmodule Airo.Adapter do
                       classify: 2,
                       speech: 2,
                       transcribe: 2,
-                      list_models: 1
+                      list_models: 1,
+                      voices: 1
 
   @capabilities [:chat, :stream, :embed, :rerank, :classify, :speech, :transcribe]
 
