@@ -83,6 +83,32 @@ defmodule Airo.Agents.ProvenanceTest do
     assert Config.get_deployment!(deployment.id).model_id == legacy.id
   end
 
+  test "links a deployment bound by the resident GGUF's full local path to the canonical Model" do
+    a = agent("jodys-mac-mini")
+    provider = slot_provider(a, 8081)
+
+    # The operator bound the slot with the engine's launch path — the full local
+    # file path, not the HF repo id the agent reports as `resident_model`. This
+    # auto-created its own path-named Model (split identity, the prod symptom).
+    {:ok, path_model} = Config.create_model(%{display_name: @path, upstream_model_id: @path})
+
+    {:ok, deployment} =
+      Config.create_deployment(%{
+        provider_id: provider.id,
+        model_id: path_model.id,
+        model_name: @path,
+        capabilities: [:chat]
+      })
+
+    model = Provenance.reconcile("jodys-mac-mini", provider, slot(), provenance())
+
+    # Canonical Model is keyed by repo id; the path-bound deployment is re-pointed
+    # to it, so `apply_slot` will mark it up instead of :down/"not_resident".
+    assert model.upstream_model_id == "jodys-mac-mini_#{@resident}_8081"
+    assert Config.get_deployment!(deployment.id).model_id == model.id
+    refute model.id == path_model.id
+  end
+
   test "the legacy re-key is scoped to the slot provider — never an external Model" do
     a = agent("jobycorp")
     slot_p = slot_provider(a, 8081)

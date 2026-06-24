@@ -1,6 +1,7 @@
 defmodule Airo.ModelShelfTest do
   use Airo.DataCase, async: true
 
+  alias Airo.Agents.{Provenance, SlotState}
   alias Airo.{Config, Health, ModelShelf, Usage}
 
   defp provider(name, url) do
@@ -113,5 +114,39 @@ defmodule Airo.ModelShelfTest do
            ]
 
     assert length(detail.health_events) == 2
+  end
+
+  test "a deployment-less model resident in an agent slot is not orphaned" do
+    {:ok, agent} =
+      Config.create_agent(%{host_id: "jodys-mac-mini", control_url: "http://jodys-mac-mini:4400"})
+
+    {:ok, slot} =
+      Config.create_provider(%{
+        name: "jodys-mac-mini:8081",
+        adapter_type: :openai,
+        base_url: "http://jodys-mac-mini:8081/v1",
+        auth_kind: :none,
+        agent_id: agent.id
+      })
+
+    resident_id = "ggml-org/moondream2-20250414-GGUF"
+    slot_push = %{"resident_model" => resident_id, "port" => 8081, "status" => "up"}
+
+    # Provenance mints the Model but writes no deployment row (the slot owns it).
+    model = Provenance.reconcile("jodys-mac-mini", slot, slot_push, nil)
+    SlotState.put(slot.id, %{resident_model: resident_id, status: "up"})
+
+    [summary] = ModelShelf.list_summaries()
+
+    assert summary.model.id == model.id
+    assert summary.deployment_count == 0
+    assert summary.resident?
+    assert ModelShelf.resident?(model)
+
+    # With nothing resident, the same deployment-less model reads as orphaned.
+    SlotState.clear(slot.id)
+    [orphan] = ModelShelf.list_summaries()
+    refute orphan.resident?
+    refute ModelShelf.resident?(model)
   end
 end

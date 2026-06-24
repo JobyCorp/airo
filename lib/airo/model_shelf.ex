@@ -8,6 +8,7 @@ defmodule Airo.ModelShelf do
   """
   import Ecto.Query, warn: false
 
+  alias Airo.Agents.{Provenance, SlotState}
   alias Airo.Config
   alias Airo.Config.{Alias, AliasCandidate, Deployment, Model}
   alias Airo.Health
@@ -19,8 +20,10 @@ defmodule Airo.ModelShelf do
   @recent_limit 25
 
   def list_summaries do
+    resident = resident_identities()
+
     Config.list_models_with_deployments()
-    |> Enum.map(&summary/1)
+    |> Enum.map(&summary(&1, resident))
   end
 
   def get_detail!(id) do
@@ -30,7 +33,7 @@ defmodule Airo.ModelShelf do
 
     %{
       model: model,
-      summary: summary(model),
+      summary: summary(model, resident_identities()),
       deployment_summaries: deployment_summaries,
       leading_deployment: leading_deployment(deployment_summaries),
       version_summaries: version_summaries(records),
@@ -40,7 +43,7 @@ defmodule Airo.ModelShelf do
     }
   end
 
-  defp summary(%Model{} = model) do
+  defp summary(%Model{} = model, resident) do
     deployments = model.deployments || []
     records = usage_records(deployments: deployments, model_id: model.id)
     metrics = metrics(records)
@@ -49,6 +52,7 @@ defmodule Airo.ModelShelf do
       model: model,
       deployment_count: length(deployments),
       enabled_deployment_count: Enum.count(deployments, & &1.enabled),
+      resident?: MapSet.member?(resident, model.upstream_model_id),
       capabilities: capabilities(deployments),
       classes: classes(deployments),
       health: aggregate_health(deployments),
@@ -59,6 +63,47 @@ defmodule Airo.ModelShelf do
       p95_latency_ms: metrics.p95_latency_ms,
       cost: metrics.cost
     }
+  end
+
+  @doc """
+  Whether a model is currently resident in a live agent slot. Such a model has no
+  `deployments` row by design — its runtime state lives in `Airo.Agents.SlotState`
+  — so anything that keys off deployment count ("orphaned", deletable) must consult
+  this too, or it will mistake a slot-served model for an abandoned catalog entry.
+  """
+  def resident?(%Model{upstream_model_id: id}), do: resident?(id)
+
+  def resident?(upstream_model_id) when is_binary(upstream_model_id),
+    do: MapSet.member?(resident_identities(), upstream_model_id)
+
+  # Canonical ids of models resident in a live agent slot. A slot records its
+  # resident model in `SlotState` (ETS) and writes no `deployments` row, so a
+  # served-by-slot model looks deployment-less. Rebuild the ids provenance minted
+  # for them (`<host_id>_<resident_id>_<port>`) so the shelf can tell "served by a
+  # slot" apart from "truly orphaned".
+  defp resident_identities do
+    Config.list_agents()
+    |> Repo.preload(:providers)
+    |> Enum.flat_map(fn agent ->
+      for provider <- agent.providers,
+          state = SlotState.get(provider.id),
+          resident = state[:resident_model],
+          is_binary(resident) and resident != "",
+          port = slot_port(provider.name),
+          not is_nil(port) do
+        Provenance.identity(agent.host_id, resident, port)
+      end
+    end)
+    |> MapSet.new()
+  end
+
+  # The serving port is the suffix of a slot provider's "<host_id>:<port>" name —
+  # the same `port` provenance folds into the model's canonical id.
+  defp slot_port(name) do
+    case name |> to_string() |> String.split(":") |> List.last() |> Integer.parse() do
+      {port, _} -> port
+      :error -> nil
+    end
   end
 
   defp deployment_summaries(deployments) do
