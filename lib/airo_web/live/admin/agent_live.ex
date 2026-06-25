@@ -90,7 +90,13 @@ defmodule AiroWeb.Admin.AgentLive do
 
   def handle_event("config_change", %{"config" => params}, %{assigns: %{config: config}} = socket)
       when is_map(config) do
-    config = %{config | ctx: params["ctx"], port: parse_int(params["port"], config.port)}
+    config = %{
+      config
+      | ctx: params["ctx"],
+        port: parse_int(params["port"], config.port),
+        disable_thinking: params["disable_thinking"] == "true"
+    }
+
     {:noreply, assign(socket, config: %{config | validation: validate_config(config)})}
   end
 
@@ -102,6 +108,7 @@ defmodule AiroWeb.Admin.AgentLive do
       when is_map(config) do
     port = parse_int(params["port"], config.port)
     ctx = parse_int(params["ctx"], nil)
+    disable_thinking = params["disable_thinking"] == "true"
     model_id = config.model["id"]
     verb = if config.mode == :configure, do: "Restarting", else: "Loading"
     validation = validate_config(%{config | ctx: params["ctx"], port: port})
@@ -116,7 +123,7 @@ defmodule AiroWeb.Admin.AgentLive do
          "Won't fit VRAM: ~#{gb(validation.projected_mb)} GB projected exceeds the #{gb(validation.budget_mb)} GB budget. Reduce the context."
        )}
     else
-      run_load(agent, port, model_id, ctx)
+      run_load(agent, port, model_id, ctx, disable_thinking)
 
       {:noreply,
        socket
@@ -189,7 +196,7 @@ defmodule AiroWeb.Admin.AgentLive do
 
     base =
       case Enum.find(detail.slots, &(&1.resident_model == id)) do
-        %{port: port, ctx: ctx, parallel: parallel, ctx_total: ctx_total} ->
+        %{port: port, ctx: ctx, parallel: parallel, ctx_total: ctx_total, profile: profile} ->
           %{
             mode: :configure,
             model: model,
@@ -197,6 +204,7 @@ defmodule AiroWeb.Admin.AgentLive do
             slots: [port],
             parallel: parallel || 1,
             ctx: to_string(ctx || model["ctx_max"]),
+            disable_thinking: reasoning_off?(profile),
             calib: %{
               resident?: true,
               weights_mb: weights_mb,
@@ -214,6 +222,7 @@ defmodule AiroWeb.Admin.AgentLive do
             slots: Enum.map(detail.slots, & &1.port),
             parallel: 1,
             ctx: to_string(model["ctx_max"]),
+            disable_thinking: false,
             calib: %{
               resident?: false,
               weights_mb: weights_mb,
@@ -254,10 +263,10 @@ defmodule AiroWeb.Admin.AgentLive do
   # engine is ready (can take many seconds), and the slot transition (loading → up)
   # arrives by push regardless. So fire it with a generous timeout and let the push
   # drive the UI — the operator isn't blocked.
-  defp run_load(agent, port, model_id, ctx) do
+  defp run_load(agent, port, model_id, ctx, disable_thinking) do
     Task.Supervisor.start_child(Airo.Usage.TaskSupervisor, fn ->
       case Control.load(agent, port, model_id,
-             profile: %{ctx: ctx},
+             profile: %{ctx: ctx, extra_argv: reasoning_argv(disable_thinking)},
              req_options: [receive_timeout: 90_000]
            ) do
         :accepted ->
@@ -270,6 +279,28 @@ defmodule AiroWeb.Admin.AgentLive do
 
     :ok
   end
+
+  # Disabling thinking is a launch-time flag (`--reasoning off`) on the engine, so
+  # it rides the load profile as raw argv. nil ⇒ no flag (the profile helper drops
+  # nil values, falling back to the engine's default — thinking on).
+  defp reasoning_argv(true), do: ["--reasoning", "off"]
+  defp reasoning_argv(false), do: nil
+
+  # Does a resident slot's reported profile carry the disable-thinking flag? Used to
+  # prefill the toggle when reconfiguring. Wire keys are strings; argv is the adjacent
+  # pair `--reasoning off`.
+  defp reasoning_off?(profile) when is_map(profile) do
+    argv = (profile["extra_argv"] || profile[:extra_argv] || []) |> Enum.map(&to_string/1)
+
+    argv
+    |> Enum.drop_while(&(&1 != "--reasoning"))
+    |> case do
+      ["--reasoning", "off" | _] -> true
+      _ -> false
+    end
+  end
+
+  defp reasoning_off?(_profile), do: false
 
   defp assign_agents(socket) do
     agents = list()
@@ -756,6 +787,20 @@ defmodule AiroWeb.Admin.AgentLive do
           total KV
         </p>
 
+        <div>
+          <.input
+            type="checkbox"
+            name="config[disable_thinking]"
+            value={@config.disable_thinking}
+            label="Disable thinking"
+          />
+          <p class="-mt-1 text-xs text-base-content/55">
+            Launches the engine with <span class="font-mono">--reasoning off</span>
+            so the model skips reasoning traces. Takes effect on
+            {if @configure?, do: "restart", else: "load"}.
+          </p>
+        </div>
+
         <div :if={@validation.projected_mb}>
           <CompositeComponents.meter
             label="VRAM (projected)"
@@ -806,6 +851,9 @@ defmodule AiroWeb.Admin.AgentLive do
       </CompositeComponents.tag>
       <CompositeComponents.tag :if={@profile["spec_type"] == "draft-mtp"} tone="primary">
         MTP
+      </CompositeComponents.tag>
+      <CompositeComponents.tag :if={reasoning_off?(@profile)} tone="neutral">
+        no-think
       </CompositeComponents.tag>
     </div>
     """
