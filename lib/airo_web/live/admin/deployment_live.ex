@@ -19,6 +19,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
     {:ok,
      socket
      |> assign(page_title: "Deployments", form: nil, editing: nil, detail: nil)
+     |> assign(disable_thinking: false)
      |> assign(capabilities: Deployment.capabilities(), classes: Deployment.classes())
      |> assign(model_options: [], model_error: nil, models_provider_id: nil)
      |> assign_model_id_options()
@@ -50,16 +51,19 @@ defmodule AiroWeb.Admin.DeploymentLive do
     do: {:noreply, push_navigate(socket, to: deployment_return_path(socket.assigns.editing))}
 
   def handle_event("validate", %{"deployment" => params}, socket) do
-    changeset = Config.change_deployment(socket.assigns.editing || %Deployment{}, clean(params))
+    disable_thinking = params["disable_thinking"] == "true"
+    params = params |> clean() |> apply_thinking(socket.assigns.editing)
+    changeset = Config.change_deployment(socket.assigns.editing || %Deployment{}, params)
 
     {:noreply,
      socket
-     |> assign(form: to_form(changeset, action: :validate))
+     |> assign(form: to_form(changeset, action: :validate), disable_thinking: disable_thinking)
      |> assign_models(params["provider_id"])}
   end
 
   def handle_event("save", %{"deployment" => params}, socket) do
-    save(socket, socket.assigns.editing, clean(params))
+    params = params |> clean() |> apply_thinking(socket.assigns.editing)
+    save(socket, socket.assigns.editing, params)
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
@@ -121,7 +125,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
   defp apply_action(socket, :new, _params) do
     socket
     |> assign(page_title: "New deployment", detail: nil, editing: nil)
-    |> assign(form: to_form(Config.change_deployment(%Deployment{})))
+    |> assign(form: to_form(Config.change_deployment(%Deployment{})), disable_thinking: false)
     |> assign_models(nil)
   end
 
@@ -131,6 +135,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
     socket
     |> assign(page_title: "Edit deployment", detail: nil, editing: deployment)
     |> assign(form: to_form(Config.change_deployment(deployment)))
+    |> assign(disable_thinking: thinking_disabled?(deployment.default_params))
     |> assign_models(deployment.provider_id)
   end
 
@@ -223,6 +228,41 @@ defmodule AiroWeb.Admin.DeploymentLive do
 
   defp clean_value(value), do: value
 
+  # "Disable thinking" is not a column — it's a per-request default that rides
+  # `default_params.chat_template_kwargs.enable_thinking`, which the gateway
+  # deep-merges into every upstream chat body (Airo.Gateway.Params). Fold the
+  # checkbox into the existing params bag, preserving any other keys; we start
+  # from the saved value so unrelated default_params survive the round-trip.
+  defp apply_thinking(params, editing) do
+    disable_thinking = params["disable_thinking"] == "true"
+    base = (editing && editing.default_params) || %{}
+
+    params
+    |> Map.delete("disable_thinking")
+    |> Map.put("default_params", put_enable_thinking(base, disable_thinking))
+  end
+
+  # Set enable_thinking:false when disabling; drop the key when enabling so the
+  # engine default (thinking on) rules and default_params stays minimal. Empty
+  # bags are pruned so we don't persist `%{"chat_template_kwargs" => %{}}`.
+  defp put_enable_thinking(params, true) do
+    kwargs = params |> Map.get("chat_template_kwargs", %{}) |> Map.put("enable_thinking", false)
+    Map.put(params, "chat_template_kwargs", kwargs)
+  end
+
+  defp put_enable_thinking(params, false) do
+    kwargs = params |> Map.get("chat_template_kwargs", %{}) |> Map.delete("enable_thinking")
+
+    if map_size(kwargs) == 0,
+      do: Map.delete(params, "chat_template_kwargs"),
+      else: Map.put(params, "chat_template_kwargs", kwargs)
+  end
+
+  defp thinking_disabled?(default_params) when is_map(default_params),
+    do: get_in(default_params, ["chat_template_kwargs", "enable_thinking"]) == false
+
+  defp thinking_disabled?(_default_params), do: false
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -265,6 +305,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
               model_error={@model_error}
               capabilities={@capabilities}
               classes={@classes}
+              disable_thinking={@disable_thinking}
             />
           <% @detail -> %>
             <.deployment_detail deployment={@detail} health={@health[@detail.id] || "unknown"} />
@@ -285,6 +326,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
   attr :model_error, :string, default: nil
   attr :capabilities, :list, required: true
   attr :classes, :list, required: true
+  attr :disable_thinking, :boolean, default: false
 
   defp deployment_form(assigns) do
     ~H"""
@@ -324,6 +366,19 @@ defmodule AiroWeb.Admin.DeploymentLive do
         <.checkbox_group field={@form[:capabilities]} label="Capabilities" options={@capabilities} />
         <.input field={@form[:class]} type="select" label="Class" options={@classes} prompt="(none)" />
         <.input field={@form[:tool_use]} type="checkbox" label="Tool use" />
+        <div>
+          <.input
+            type="checkbox"
+            name="deployment[disable_thinking]"
+            value={@disable_thinking}
+            label="Disable thinking"
+          />
+          <p class="-mt-1 text-xs text-base-content/55">
+            Sends <span class="font-mono">chat_template_kwargs.enable_thinking=false</span>
+            on every request to this deployment, so the model skips reasoning traces.
+            Per-request values override it.
+          </p>
+        </div>
         <.input field={@form[:context_window]} type="number" label="Context window" />
         <.input field={@form[:price_input]} label="Price input (per 1k)" />
         <.input field={@form[:price_output]} label="Price output (per 1k)" />
@@ -420,6 +475,10 @@ defmodule AiroWeb.Admin.DeploymentLive do
           <div>
             <span class="text-base-content/60">Tool use</span>
             <br />{@deployment.tool_use}
+          </div>
+          <div>
+            <span class="text-base-content/60">Thinking</span>
+            <br />{if thinking_disabled?(@deployment.default_params), do: "disabled", else: "on"}
           </div>
           <div>
             <span class="text-base-content/60">Context window</span>
