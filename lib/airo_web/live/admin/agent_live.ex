@@ -221,7 +221,11 @@ defmodule AiroWeb.Admin.AgentLive do
             port: load_target_slot(detail.slots),
             slots: Enum.map(detail.slots, & &1.port),
             parallel: 1,
-            ctx: to_string(model["ctx_max"]),
+            # Prefill a modest window, not the model's full ctx_max: a cold
+            # (non-resident) load has no KV calibration, so validation can't
+            # catch a 262k window OOMing a 16 GB card. Big ctx is a deliberate
+            # slide up, not the default.
+            ctx: to_string(default_ctx(model["ctx_max"])),
             disable_thinking: false,
             calib: %{
               resident?: false,
@@ -266,7 +270,7 @@ defmodule AiroWeb.Admin.AgentLive do
   defp run_load(agent, port, model_id, ctx, disable_thinking) do
     Task.Supervisor.start_child(Airo.Usage.TaskSupervisor, fn ->
       case Control.load(agent, port, model_id,
-             profile: %{ctx: ctx, extra_argv: reasoning_argv(disable_thinking)},
+             profile: %{ctx: ctx, disable_thinking: disable_thinking || nil},
              req_options: [receive_timeout: 90_000]
            ) do
         :accepted ->
@@ -280,24 +284,31 @@ defmodule AiroWeb.Admin.AgentLive do
     :ok
   end
 
-  # Disabling thinking is a launch-time flag (`--reasoning off`) on the engine, so
-  # it rides the load profile as raw argv. nil ⇒ no flag (the profile helper drops
-  # nil values, falling back to the engine's default — thinking on).
-  defp reasoning_argv(true), do: ["--reasoning", "off"]
-  defp reasoning_argv(false), do: nil
+  # Cold-load ctx prefill: modest by default (see build_config); nil ctx_max
+  # renders the free-form number input empty.
+  @default_ctx_prefill 32_768
+  defp default_ctx(ctx_max) when is_integer(ctx_max), do: min(ctx_max, @default_ctx_prefill)
+  defp default_ctx(_), do: nil
 
-  # Does a resident slot's reported profile carry the disable-thinking flag? Used to
-  # prefill the toggle when reconfiguring. Wire keys are strings; argv is the adjacent
-  # pair `--reasoning off`.
+  # Does a resident slot's reported profile have thinking disabled? Used to
+  # prefill the toggle when reconfiguring. The engine-neutral knob is the
+  # `disable_thinking` profile key (each agent adapter maps it to its engine's
+  # flag); slots loaded before that knob existed carry the legacy raw argv pair
+  # `--reasoning off` in extra_argv, so keep recognizing it.
   defp reasoning_off?(profile) when is_map(profile) do
+    knob = profile["disable_thinking"] || profile[:disable_thinking]
+
     argv = (profile["extra_argv"] || profile[:extra_argv] || []) |> Enum.map(&to_string/1)
 
-    argv
-    |> Enum.drop_while(&(&1 != "--reasoning"))
-    |> case do
-      ["--reasoning", "off" | _] -> true
-      _ -> false
-    end
+    legacy? =
+      argv
+      |> Enum.drop_while(&(&1 != "--reasoning"))
+      |> case do
+        ["--reasoning", "off" | _] -> true
+        _ -> false
+      end
+
+    knob == true or legacy?
   end
 
   defp reasoning_off?(_profile), do: false
@@ -795,9 +806,9 @@ defmodule AiroWeb.Admin.AgentLive do
             label="Disable thinking"
           />
           <p class="-mt-1 text-xs text-base-content/55">
-            Launches the engine with <span class="font-mono">--reasoning off</span>
-            so the model skips reasoning traces. Takes effect on
-            {if @configure?, do: "restart", else: "load"}.
+            Launches the engine with reasoning traces off (llama.cpp <span class="font-mono">--reasoning off</span>, vLLM <span class="font-mono">enable_thinking: false</span>). Takes effect on {if @configure?,
+              do: "restart",
+              else: "load"}.
           </p>
         </div>
 
