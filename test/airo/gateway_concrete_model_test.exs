@@ -48,6 +48,36 @@ defmodule Airo.GatewayConcreteModelTest do
     refute info.fallback_used
   end
 
+  test "chat/stream attempts carry a generous upstream receive_timeout" do
+    key = setup_model("qwen3.5-9b")
+
+    for capability <- [:chat, :stream] do
+      assert {:ok, plan} =
+               Gateway.resolve(%{"model" => "qwen3.5-9b", "messages" => []}, key, capability)
+
+      req_opts = plan.attempts |> hd() |> get_in([Access.key!(:context), Access.key!(:opts)]) |> Keyword.get(:req_options, [])
+      assert Keyword.get(req_opts, :receive_timeout) == 300_000
+    end
+  end
+
+  test "non-chat capabilities keep the transport default receive_timeout" do
+    key = setup_model("bge-m3", :embeddings)
+
+    assert {:ok, plan} = Gateway.resolve(%{"model" => "bge-m3", "input" => "x"}, key, :embed)
+    opts = plan.attempts |> hd() |> Map.fetch!(:context) |> Map.fetch!(:opts)
+    refute Keyword.has_key?(Keyword.get(opts, :req_options, []), :receive_timeout)
+  end
+
+  test "the chat receive_timeout is overridable via app config" do
+    key = setup_model("qwen3.5-9b")
+    Application.put_env(:airo, Airo.Gateway, chat_receive_timeout: 123_456)
+    on_exit(fn -> Application.delete_env(:airo, Airo.Gateway) end)
+
+    assert {:ok, plan} = Gateway.resolve(%{"model" => "qwen3.5-9b", "messages" => []}, key, :chat)
+    req_opts = plan.attempts |> hd() |> Map.fetch!(:context) |> Map.fetch!(:opts) |> Keyword.get(:req_options, [])
+    assert Keyword.get(req_opts, :receive_timeout) == 123_456
+  end
+
   test "maps the request capability to the deployment capability (embed → embeddings)" do
     key = setup_model("bge-m3", :embeddings)
 
