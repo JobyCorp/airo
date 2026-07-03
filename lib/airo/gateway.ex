@@ -28,6 +28,18 @@ defmodule Airo.Gateway do
   alias Airo.Routing
   alias Airo.Routing.Classifier
 
+  # Chat/stream upstream calls can legitimately run for minutes — a big-context +
+  # tools request spends a long time in prefill before the first token, and
+  # multi-step / non-streaming completions generate for a while. The transport
+  # default receive_timeout (60s) is tuned for quick calls (embeddings, model
+  # lists); on a slow step it trips mid-request → {:transport_error, :timeout} →
+  # 502 upstream_unavailable, and — being retryable — burns a failover attempt
+  # that times out the same way. So give chat/stream a generous upstream
+  # receive_timeout; other capabilities keep the transport default. Override via:
+  #
+  #     config :airo, Airo.Gateway, chat_receive_timeout: <ms>
+  @chat_receive_timeout 300_000
+
   @type attempt :: %{
           adapter: module(),
           provider: Provider.t(),
@@ -425,7 +437,7 @@ defmodule Airo.Gateway do
               adapter: adapter,
               provider: provider,
               deployment: deployment,
-              context: Context.new(provider, deployment: deployment),
+              context: Context.new(provider, deployment: deployment, opts: context_opts(capability)),
               body:
                 Params.normalize(params, %{
                   provider: provider,
@@ -449,6 +461,19 @@ defmodule Airo.Gateway do
     if Enum.any?(candidates, &match?({:ok, _}, Registry.fetch(&1.provider.adapter_type))),
       do: {:unsupported_capability, capability},
       else: {:no_adapter, hd(candidates).provider.adapter_type}
+  end
+
+  # Chat/stream upstream calls get a generous receive_timeout (see
+  # @chat_receive_timeout); other capabilities keep the transport default. Threads
+  # through `Context.opts[:req_options]`, which the transport merges last.
+  defp context_opts(capability) when capability in [:chat, :stream],
+    do: [req_options: [receive_timeout: chat_receive_timeout()]]
+
+  defp context_opts(_capability), do: []
+
+  defp chat_receive_timeout do
+    Application.get_env(:airo, __MODULE__, [])
+    |> Keyword.get(:chat_receive_timeout, @chat_receive_timeout)
   end
 
   defp retryable?({:transport_error, _}), do: true
