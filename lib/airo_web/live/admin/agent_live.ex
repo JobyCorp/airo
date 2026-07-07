@@ -94,7 +94,10 @@ defmodule AiroWeb.Admin.AgentLive do
       config
       | ctx: params["ctx"],
         port: parse_int(params["port"], config.port),
-        disable_thinking: params["disable_thinking"] == "true"
+        disable_thinking: params["disable_thinking"] == "true",
+        repeat_penalty: params["repeat_penalty"] || config.repeat_penalty,
+        presence_penalty: params["presence_penalty"] || config.presence_penalty,
+        frequency_penalty: params["frequency_penalty"] || config.frequency_penalty
     }
 
     {:noreply, assign(socket, config: %{config | validation: validate_config(config)})}
@@ -108,7 +111,15 @@ defmodule AiroWeb.Admin.AgentLive do
       when is_map(config) do
     port = parse_int(params["port"], config.port)
     ctx = parse_int(params["ctx"], nil)
-    disable_thinking = params["disable_thinking"] == "true"
+
+    profile = %{
+      ctx: ctx,
+      disable_thinking: if(params["disable_thinking"] == "true", do: true),
+      repeat_penalty: parse_float(params["repeat_penalty"]),
+      presence_penalty: parse_float(params["presence_penalty"]),
+      frequency_penalty: parse_float(params["frequency_penalty"])
+    }
+
     model_id = config.model["id"]
     verb = if config.mode == :configure, do: "Restarting", else: "Loading"
     validation = validate_config(%{config | ctx: params["ctx"], port: port})
@@ -123,7 +134,7 @@ defmodule AiroWeb.Admin.AgentLive do
          "Won't fit VRAM: ~#{gb(validation.projected_mb)} GB projected exceeds the #{gb(validation.budget_mb)} GB budget. Reduce the context."
        )}
     else
-      run_load(agent, port, model_id, ctx, disable_thinking)
+      run_load(agent, port, model_id, profile)
 
       {:noreply,
        socket
@@ -205,6 +216,9 @@ defmodule AiroWeb.Admin.AgentLive do
             parallel: parallel || 1,
             ctx: to_string(ctx || model["ctx_max"]),
             disable_thinking: reasoning_off?(profile),
+            repeat_penalty: penalty_prefill(profile, :repeat_penalty),
+            presence_penalty: penalty_prefill(profile, :presence_penalty),
+            frequency_penalty: penalty_prefill(profile, :frequency_penalty),
             calib: %{
               resident?: true,
               weights_mb: weights_mb,
@@ -227,6 +241,9 @@ defmodule AiroWeb.Admin.AgentLive do
             # slide up, not the default.
             ctx: to_string(default_ctx(model["ctx_max"])),
             disable_thinking: false,
+            repeat_penalty: "",
+            presence_penalty: "",
+            frequency_penalty: "",
             calib: %{
               resident?: false,
               weights_mb: weights_mb,
@@ -263,14 +280,23 @@ defmodule AiroWeb.Admin.AgentLive do
     end
   end
 
+  # Blank/garbage → nil, so `Control.put_profile/2` drops the key and the
+  # engine keeps its own default (repeat 1.0, presence/frequency 0 — all off).
+  defp parse_float(value) do
+    case value |> to_string() |> Float.parse() do
+      {f, _} -> f
+      :error -> nil
+    end
+  end
+
   # Load/restart runs off the LiveView process: the agent's /load blocks until the
   # engine is ready (can take many seconds), and the slot transition (loading → up)
   # arrives by push regardless. So fire it with a generous timeout and let the push
   # drive the UI — the operator isn't blocked.
-  defp run_load(agent, port, model_id, ctx, disable_thinking) do
+  defp run_load(agent, port, model_id, profile) do
     Task.Supervisor.start_child(Airo.Usage.TaskSupervisor, fn ->
       case Control.load(agent, port, model_id,
-             profile: %{ctx: ctx, disable_thinking: disable_thinking || nil},
+             profile: profile,
              req_options: [receive_timeout: 90_000]
            ) do
         :accepted ->
@@ -312,6 +338,22 @@ defmodule AiroWeb.Admin.AgentLive do
   end
 
   defp reasoning_off?(_profile), do: false
+
+  # A slot's reported profile arrives as JSON (string keys); a profile we just
+  # built locally has atom keys. Read either.
+  defp profile_penalty(profile, key) when is_map(profile),
+    do: profile[Atom.to_string(key)] || profile[key]
+
+  defp profile_penalty(_profile, _key), do: nil
+
+  # Form value for the config modal: the slot's current setting, or blank
+  # (= engine default) when the launch never set one.
+  defp penalty_prefill(profile, key) do
+    case profile_penalty(profile, key) do
+      nil -> ""
+      value -> to_string(value)
+    end
+  end
 
   defp assign_agents(socket) do
     agents = list()
@@ -812,6 +854,49 @@ defmodule AiroWeb.Admin.AgentLive do
           </p>
         </div>
 
+        <div>
+          <p class="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-base-content/55">
+            Sampling penalties
+          </p>
+          <div class="mt-1.5 grid grid-cols-3 gap-3">
+            <.input
+              type="number"
+              name="config[repeat_penalty]"
+              value={@config.repeat_penalty}
+              label="Repeat"
+              placeholder="1.0"
+              min="0"
+              max="2"
+              step="0.05"
+            />
+            <.input
+              type="number"
+              name="config[presence_penalty]"
+              value={@config.presence_penalty}
+              label="Presence"
+              placeholder="0"
+              min="-2"
+              max="2"
+              step="0.1"
+            />
+            <.input
+              type="number"
+              name="config[frequency_penalty]"
+              value={@config.frequency_penalty}
+              label="Frequency"
+              placeholder="0"
+              min="-2"
+              max="2"
+              step="0.1"
+            />
+          </div>
+          <p class="-mt-1 text-xs text-base-content/55">
+            Engine defaults baked into the launch; a request that sends its own sampler
+            params still overrides. Blank keeps the penalty off. Example: Qwen recommends
+            presence <span class="font-mono">1.5</span> on quantized builds.
+          </p>
+        </div>
+
         <div :if={@validation.projected_mb}>
           <CompositeComponents.meter
             label="VRAM (projected)"
@@ -865,6 +950,15 @@ defmodule AiroWeb.Admin.AgentLive do
       </CompositeComponents.tag>
       <CompositeComponents.tag :if={reasoning_off?(@profile)} tone="neutral">
         no-think
+      </CompositeComponents.tag>
+      <CompositeComponents.tag :if={profile_penalty(@profile, :repeat_penalty)} tone="neutral">
+        repeat {profile_penalty(@profile, :repeat_penalty)}
+      </CompositeComponents.tag>
+      <CompositeComponents.tag :if={profile_penalty(@profile, :presence_penalty)} tone="neutral">
+        presence {profile_penalty(@profile, :presence_penalty)}
+      </CompositeComponents.tag>
+      <CompositeComponents.tag :if={profile_penalty(@profile, :frequency_penalty)} tone="neutral">
+        freq {profile_penalty(@profile, :frequency_penalty)}
       </CompositeComponents.tag>
     </div>
     """
