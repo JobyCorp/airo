@@ -1,7 +1,9 @@
 # Airo — Agent management: operator-driven control plane (S17)
 
+> **Status: shipped (S17).** Historical sprint hand-off; describes implemented behavior.
+
 Spec for **S17 — Agent control plane (operator-driven)**. Companion to
-[airo_agent/DESIGN.md](../airo_agent/DESIGN.md) (Model 2: "Engine serves, agent
+[airo_agent/DESIGN.md](../../../airo_agent/DESIGN.md) (Model 2: "Engine serves, agent
 controls, Airo decides" — the control contract this consumes). This is the
 implementation hand-off: self-contained, names exact files/functions, and fixes
 the decisions so the build doesn't re-derive them.
@@ -11,13 +13,10 @@ the decisions so the build doesn't re-derive them.
 > host's slot from Airo, browse the host's inventory, and watch slot state
 > update live — without coupling to deployments, routing, or placement policy.
 
-> **Why now.** The Model 2 *spine* shipped as interim work (the `Agent` entity,
-> channel ingest, slot-Providers via `agent_id`, presence, the read-only
-> `/agents` LiveView). The **control half is entirely absent**: `Airo.Agents`
-> has only `register/2`, `list_agents`, `get_agent` — nothing calls the agent's
-> `control_url`. The agent already exposes the full control API; this sprint is
-> the Airo-side client + UI + the runtime state that makes "what's loaded"
-> representable.
+> **Original motivation (pre-S17).** The Model 2 *spine* existed (the `Agent`
+> entity, channel ingest, slot-Providers via `agent_id`, presence, the read-only
+> `/agents` LiveView), but the control half was absent — nothing called the
+> agent's `control_url`. S17 added the Airo-side client + UI + runtime state.
 
 ---
 
@@ -63,7 +62,7 @@ the decisions so the build doesn't re-derive them.
   the resident model. Draining is a non-goal (§7).
 - **No placement, no routing coupling.** Automatic "ensure the right model is
   resident before serving" (placement + eviction policy, the dispatch hook) is
-  **S18**, not this sprint (§7).
+  out of scope, not this sprint (§7).
 
 ## 3. The one schema/ingest change: resident slot state
 
@@ -142,7 +141,7 @@ new secrets.
 
 ## 7. Non-goals (explicit — deferred sprints)
 
-- **Automatic placement / eviction on the serving path (S18).** The dispatch hook
+- **Automatic placement / eviction on the serving path — out of scope.** The dispatch hook
   that ensures the right model is resident before serving a managed provider, plus
   slot-selection / VRAM-fit / what-to-evict policy. Open question in
   airo_agent/DESIGN.md; only safe to build on a proven manual client.
@@ -163,4 +162,4 @@ new secrets.
 - `Airo.Agents.Control` unit-tested against a **stubbed Req plug** (per the sprint
   rule — not a live agent): `load`/`unload`/`inventory`/error mapping.
 - `Ingest` writes/clears `SlotState` and broadcasts; an offline host disables controls.
-- `mix precommit` + `mix joby_kit.lint` green; `DESIGN.md` / `SPRINTS.md` updated.
+- `mix precommit` + `mix joby_kit.lint` green; `docs/design/` + sprint file updated.

@@ -1,7 +1,7 @@
 defmodule Airo.Agents.SlotState do
   @moduledoc """
   Per-slot **resident-model runtime state**, kept in ETS (S17, see
-  [DESIGN-agent-management.md](../../../DESIGN-agent-management.md) §3).
+  [DESIGN-agent-management.md](../../../docs/design/DESIGN-agent-management.md) §3).
 
   A managed slot Provider holds at most one model at a time; *which* model is
   resident — and whether it is `loading`/`up`/`down` — is runtime state the agent

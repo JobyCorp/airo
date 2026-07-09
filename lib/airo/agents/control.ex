@@ -1,7 +1,7 @@
 defmodule Airo.Agents.Control do
   @moduledoc """
   HTTP client for an agent's **control API** (S17, see
-  [DESIGN-agent-management.md](../../../DESIGN-agent-management.md) §4).
+  [DESIGN-agent-management.md](../../../docs/design/DESIGN-agent-management.md) §4).
 
   The control plane is request/response over `agent.control_url`; slot *state*
   flows the other way, by channel push (`Airo.Agents.Ingest`). So `load/4` and

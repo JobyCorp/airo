@@ -1,7 +1,7 @@
 defmodule Airo.Agents.Capacity do
   @moduledoc """
   Memory-fit estimation for loading a model onto a host slot (S18, see
-  [DESIGN-agent-placement.md](../../../DESIGN-agent-placement.md)).
+  [DESIGN-agent-placement.md](../../../docs/design/DESIGN-agent-placement.md)).
 
   Pure arithmetic over data S17 already surfaces — the model's `size_bytes`
   (inventory) and the host's live `vram_total_mb`/`vram_used_mb` (`agent.gpu`).

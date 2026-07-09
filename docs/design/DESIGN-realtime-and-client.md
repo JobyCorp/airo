@@ -2,10 +2,11 @@
 
 > Extends [DESIGN.md](./DESIGN.md). This is the reference for two follow-on
 > pieces after the HTTP gateway (S0–S6) and consumer migration: a **realtime
-> WebSocket proxy** in Airo, and a shared **`airo_client` hex package** that both
+> WebSocket proxy** in Airo, and a shared **`airo_client` package** that both
 > consumers use instead of `openai_ex`.
 
-Status: **design**. Code follows it.
+Status: **S8 + S9 shipped.** Realtime proxy in Airo; `airo_client` consumed via
+git (`JobyCorp/airo_client`). Hex publish deferred.
 
 ---
 
@@ -17,8 +18,8 @@ What's already true (DESIGN.md, S0–S6, plus the concrete-model change):
   (+SSE), `/v1/embeddings`, `/v1/rerank`, `/v1/audio/{speech,transcriptions}`,
   `/v1/models`, with routing/failover, health, usage, and a config UI.
 - `model` resolves as **either an alias or a concrete deployment id**.
-- incogito is validated against Airo for chat / embeddings / speech (TTS) via
-  concrete model ids; STT is still a direct browser→Speaches realtime WebSocket.
+- incogito/orchester use Airo for chat / embeddings / speech / STT. STT relays
+  through Airo via `AiroClient.Realtime` (S8 + S9).
 
 What this doc adds:
 
@@ -248,14 +249,18 @@ The package owns the **WS to Airo** only. The **app** owns the browser WS/WebRTC
 and wires it to this relay: browser audio in → `send_audio`; transcript messages
 out → the app's UI.
 
-### 6.5 Packaging
+### 6.5 Packaging (as-built)
 
-Layered so apps take only what they need:
+**Monolithic git package** — one `:airo_client` app with HTTP + streaming +
+`AiroClient.Realtime`. Distributed via GitHub (`JobyCorp/airo_client`); Hex
+publish deferred until there are external consumers.
 
-- **`airo_client`** — HTTP capabilities + streaming. (Both apps; ship first — it
-  unblocks the migration cleanup immediately.)
-- **`airo_client_realtime`** — the realtime relay. (Apps doing realtime; ship
-  with the Airo realtime proxy.)
+```elixir
+{:airo_client, git: "git@github.com:JobyCorp/airo_client.git", branch: "main"}
+```
+
+*(Design originally sketched a separate `airo_client_realtime` hex app; that
+split was dropped — realtime deps are light and both apps need the relay.)*
 
 ---
 
@@ -300,9 +305,8 @@ carried-over config works either way — but configure the "airo" connection's
   health routing, internal/external brokering (incl. ephemeral-token minting for
   external), session usage records, transparency on the upgrade. Transparent
   pass-through.
-- **S9 — `airo_client` (+ `_realtime`).** The Elixir client; replace `openai_ex`
-  in both apps; collapse their per-provider transport code; move STT to the
-  realtime relay.
+- **S9 — `airo_client` (done).** Monolithic git package; replace `openai_ex` in
+  both apps; collapse per-provider transport; STT via realtime relay.
 
 (Order is flexible: `airo_client` core can land first against the existing HTTP
 surface, independent of the realtime proxy.)

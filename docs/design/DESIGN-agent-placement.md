@@ -1,5 +1,7 @@
 # Airo — Host capacity & memory-fit (S18)
 
+> **Status: shipped (S18).** Historical sprint hand-off; describes implemented behavior. Automatic placement on dispatch is out of scope.
+
 Spec for **S18 — Host capacity & memory-fit**. Companion to
 [DESIGN-agent-management.md](./DESIGN-agent-management.md) (S17, the operator
 control plane this builds on). Implementation hand-off: self-contained, names
@@ -48,7 +50,7 @@ So S18 is pure Airo-side arithmetic + presentation over data we already have.
   so the fit check adds the outgoing model's footprint back to `free` (looked up
   from inventory by `resident_model` id; treated as 0 if unknown — conservative).
 - **No automatic placement or eviction.** Auto-loading the right model before
-  serving, slot selection, and what-to-evict policy are **S19** (bumped), not this
+  serving, slot selection, and what-to-evict policy are out of scope, not this
   sprint.
 - **Spark is out of scope for v1.** Unified-memory hosts (GB10) report memory
   differently from discrete-VRAM `nvidia-smi`; the budget there is a slice of
@@ -87,7 +89,7 @@ assess(size_bytes, gpu, opts)       # opts[:reclaim_bytes] = outgoing model on a
 
 ## 5. Non-goals (deferred)
 
-- **Automatic placement / eviction on dispatch (S19).**
+- **Automatic placement / eviction on dispatch — out of scope (not planned).**
 - **Spark / unified-memory budget.** Detect unified-memory hosts and budget
   against system memory; the agent may need to report a memory-kind + total.
 - **ctx-aware footprint** (KV-cache from `ctx_max` × layers × kv-quant).
@@ -101,4 +103,4 @@ assess(size_bytes, gpu, opts)       # opts[:reclaim_bytes] = outgoing model on a
   `:unknown` path.
 - The inventory picker shows per-model footprint and a swap-aware advisory "won't
   fit" tag; the GPU panel shows free/total; Load is never blocked.
-- `mix precommit` + `mix joby_kit.lint` green; `SPRINTS.md` ticked.
+- `mix precommit` + `mix joby_kit.lint` green; sprint file ticked; `docs/sprints/STATUS.md` updated.

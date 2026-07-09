@@ -1,5 +1,7 @@
 # Airo — Slot configuration & reload (S20)
 
+> **Status: shipped (S20).** Historical sprint hand-off; describes implemented behavior.
+
 Spec for **S20 — Slot configuration & reload**. Companion to
 [DESIGN-agent-management.md](./DESIGN-agent-management.md) (S17 control plane) and
 [DESIGN-agent-provenance.md](./DESIGN-agent-provenance.md) (S19, `ctx_max` and
@@ -81,7 +83,7 @@ composite `AiroWeb.CompositeComponents.modal`:
 ## 6. Non-goals (deferred)
 
 - Profile keys beyond `ctx` (parallel, flash_attn, KV-quant, jinja, …).
-- Drain-on-restart; automatic placement (S21); Spark unified-memory.
+- Drain-on-restart; automatic placement on dispatch (out of scope); Spark unified-memory.
 
 ## 7. Definition of Done
 
@@ -91,4 +93,4 @@ composite `AiroWeb.CompositeComponents.modal`:
   `ctx` shows in `SlotState`/slots after the push.
 - `<.modal>` registered + lint-clean; `Control.load/4` profile unit-tested
   (profile sent, nils dropped) against a stubbed Req plug.
-- `mix precommit` + `mix joby_kit.lint` green; `SPRINTS.md` ticked.
+- `mix precommit` + `mix joby_kit.lint` green; sprint file ticked; `docs/sprints/STATUS.md` updated.

@@ -1,5 +1,7 @@
 # Airo — Local ONNX routing classifier (S15)
 
+> **Status: shipped (S15).** Historical sprint hand-off; describes implemented behavior. Config keys moved to RoutingSetting in S16.
+
 Spec for **S15 — Local ONNX classifier (Ortex, on-CPU validation slice)**.
 Companion to [DESIGN-chat-routing.md](./DESIGN-chat-routing.md) (the S13 classifier
 this extends) and [DESIGN.md](./DESIGN.md) §9 (Routing). This is the implementation
@@ -300,7 +302,7 @@ CPU:
 - `DESIGN.md` §9: note `router_config.backend` (`infinity | ortex`) as a classifier
   **engine** dimension *and* that ortex routes on a **graded complexity score**
   (threshold ladder) rather than topic entailment.
-- `SPRINTS.md`: tick S15 + append the status-log line on merge.
+- Sprint file: tick S15; append status-log line in `docs/sprints/STATUS.md`.
 
 ---
 
@@ -322,8 +324,8 @@ CPU:
 
 ## 7. Definition of Done (this sprint)
 
-Global DoD from `SPRINTS.md` (`mix precommit` green; new behavior tested against a real
-artifact, not live; `SPRINTS.md` ticked; branch merged) **plus**:
+Global DoD from `docs/sprints/README.md` (`mix precommit` green; new behavior tested against a real
+artifact, not live; sprint file ticked; `docs/sprints/STATUS.md` updated; branch merged) **plus**:
 - Dep chain compiles clean **on the build host** (Rust/ORT present); the release
   tarball carries the NIF `.so` + ORT lib + the model artifact, and the model loads on
   the VM at boot. *(Not "compiles on the VM" — the VM never runs `mix compile`.)*

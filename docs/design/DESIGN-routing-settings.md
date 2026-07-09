@@ -1,5 +1,7 @@
 # Airo — Routing settings: system classifier (S16)
 
+> **Status: shipped (S16).** Historical sprint hand-off; describes implemented behavior.
+
 Spec for **S16 — Routing settings (system-level classifier)**. Companion to
 [DESIGN-chat-routing.md](./DESIGN-chat-routing.md) (S13, the classifier + per-alias
 `router_config`) and [DESIGN-local-classifier.md](./DESIGN-local-classifier.md) (S15,
@@ -148,7 +150,7 @@ green):
   in via `router`/`router_mode`. Update the §15 checklist.
 - `DESIGN-chat-routing.md` / `DESIGN-local-classifier.md`: note `router_config` is
   superseded by the system setting (pointer, not a rewrite).
-- `SPRINTS.md`: tick S16 + status-log line on merge.
+- Sprint file: tick S16; append status-log line in `docs/sprints/STATUS.md`.
 
 ## 5. Rollout
 1. Migrate (one routed alias today → seed singleton; backfill `router_mode`).
@@ -157,7 +159,7 @@ green):
 3. Enforce per alias via `router_mode` (no deploy). Engine and enforce are independent.
 
 ## 6. Definition of Done
-Global DoD (`mix precommit` green; behavior tested; `DESIGN.md`/`SPRINTS.md` updated;
+Global DoD (`mix precommit` green; behavior tested; `docs/design/` + sprint file updated;
 merged) **plus**: classifier config lives in one system row; `/admin/routing` switches
 Local↔Remote + edits ladder/weights + tests a prompt; the alias form only toggles
 `router`/`router_mode` (no clobber); migration carries existing config with no routing

@@ -1,5 +1,7 @@
 # Airo — Logging & traceability (S14)
 
+> **Status: shipped (S14).** Historical sprint hand-off; describes implemented behavior.
+
 Spec for **S14 — Logging & traceability**. Companion to [DESIGN.md](./DESIGN.md)
 §10 (Observability). Builds on S11 (request trace ids + structured gateway logs)
 and S13 (classifier predictions). This is the implementation hand-off: it names
@@ -142,7 +144,7 @@ Emission points:
   a `trace_id`. Test: a seeded request's prediction + usage row + health appear in
   order for its trace.
 - **T5 — docs.** DESIGN.md §10: add a "Logs & traceability" note pointing here.
-  SPRINTS.md: tick S14 + status-log line on merge.
+  Sprint file: tick S14; append status-log line in `docs/sprints/STATUS.md`.
 
 ## 8. Non-goals / deferred
 
@@ -157,7 +159,7 @@ Emission points:
 ## 9. Definition of Done
 
 Global DoD (`mix precommit` green; new behavior tested against stubs, not live;
-`DESIGN.md`/`SPRINTS.md` updated; `joby_kit.lint` green; branch merged) **plus**:
+`docs/design/` + sprint file updated; `joby_kit.lint` green; branch merged) **plus**:
 - Route predictions **and** health transitions are visible and filterable in
   `/admin/logs`, persisted across restarts.
 - A `trace_id` correlates a single request across `/usage` and `/admin/logs`, with

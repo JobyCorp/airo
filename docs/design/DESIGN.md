@@ -4,8 +4,9 @@
 > Extracted from the shared model-dispatch layer that drifted between
 > [`orchester`](~/orchester) and [`incogito`](~/incogito).
 
-Status: **design** (no implementation yet). This document is the reference;
-code follows it.
+Status: **living architecture reference.** Core gateway, client, Model Shelf, and
+agent control plane are shipped (S0–S21). No open sprints.
+See [`../sprints/STATUS.md`](../sprints/STATUS.md).
 
 ---
 
@@ -317,12 +318,12 @@ shadow-first). Local on-CPU engine: [`DESIGN-local-classifier.md`](./DESIGN-loca
 - **Usage + cost attribution**: every call → `UsageRecord` (promoted Runlog),
   cost computed from Deployment pricing. The reason this matters the moment two
   apps share a pool.
-- **Model Shelf**: admin model-management layer over deployments. It shows one
-  model/version with all runnable deployment copies across machines, aggregate
-  and per-deployment latency/error/fallback/cost, recent traces, health
-  transitions, alias participation, and version-performance groups. Routing
-  remains explicit in Alias; the shelf explains which models are safe to lean on
-  and whether version changes improved observed behavior.
+- **Model Shelf** (S12): admin model-management layer over deployments
+  (`Airo.ModelShelf`, `/admin/models`). One model/version with runnable copies
+  across machines, aggregate and per-deployment latency/error/fallback/cost,
+  recent traces, health transitions, alias participation, and version-performance
+  groups. Routing remains explicit in Alias. See
+  [`DESIGN-model-shelf.md`](./DESIGN-model-shelf.md).
 - **Local provider management**: provider-specific management APIs are focused
   on local runtimes first. Ollama exposes native catalog/inspect/pull/runtime
   APIs and is the reference implementation: a deployment-level sync stores
@@ -364,14 +365,14 @@ shadow-first). Local on-CPU engine: [`DESIGN-local-classifier.md`](./DESIGN-loca
 
 ## 12. Consumer migration
 
-- **incogito first** (trivial): already single OpenAI-compatible adapter — repoint
-  `base_url` at Airo, map its one-model-per-capability assignments to single-
-  candidate Aliases. Gains routing/fallback for free; loses nothing.
-- **orchester second** (the real work): repoint dispatch at Airo, **delete the
-  resolver**, translate strict-binding pins to `route.binding`. Keep `Sink`,
-  agent loop, `:queued`/Oban entirely app-side — they consume Airo's SSE.
+**Done (S7).** Both apps use Airo as the sole path to AI models.
 
-## 13. OTP shape (sketch — to be detailed)
+- **incogito**: repointed `base_url` at Airo; concrete model ids / single-candidate
+  aliases. App-side sinks stay local.
+- **orchester**: resolver deleted; dispatch repointed; strict pins → `route.binding`.
+  `Sink`, agent loop, and `:queued`/Oban remain app-side and consume Airo's SSE.
+
+## 13. OTP shape
 
 - `Airo.Gateway` — request entry, alias resolution, param normalization, dispatch.
 - `Airo.Adapter` — behaviour; one impl per upstream type.
@@ -414,15 +415,18 @@ Reused from the scaffold: `req`, `ecto_sql`/`postgrex`, `jason`, `telemetry_*`,
       (tool-call argument streaming, Anthropic content-block boundaries).
       *(S3: OpenAI-compatible passthrough; S5: Anthropic `stream_event/1` maps
       content-block deltas → `content`/`reasoning_content`/`tool_calls`.)*
-- [ ] Migration mechanics for orchester's `:queued`/Oban path (it calls Airo from
-      a worker; nothing special, but confirm error/retry semantics).
-- [ ] Homelab ops: deploy as a Phoenix release behind Traefik
-      (`airo.local.joby.gg`) + its own Postgres; client keys for orchester/incogito.
+- [x] **Classification-driven routing (S13–S16)**: routed aliases compute
+      `route.class` via Infinity or local Ortex; system-level `RoutingSetting`;
+      shadow/enforce. Specs: `DESIGN-chat-routing.md`, `DESIGN-local-classifier.md`,
+      `DESIGN-routing-settings.md`.
+- [x] Homelab ops: Phoenix release deploy behind Traefik (noted in S10 status).
+- [ ] Migration mechanics for orchester's `:queued`/Oban path (confirm error/retry
+      semantics when calling Airo from a worker).
 - [ ] Pricing source for cost attribution (manual per-Deployment vs a price feed).
-- [ ] **Classification-driven routing (S13)**: routed aliases compute `route.class`
-      from the prompt via a zero-shot classifier (Infinity deberta-zeroshot), shipped
-      shadow-first; v1 is `:edge`-vs-`:deep`. Spec + live calibration:
-      `DESIGN-chat-routing.md`.
+- [x] **S9 — `airo_client`**: git package (monolith); Hex deferred. See
+      `DESIGN-realtime-and-client.md` §6.5.
+- [x] **S12 — Model Shelf**: shipped; optional deferred in
+      `DESIGN-model-shelf.md` §6 (revisit in deep dive).
 
 **Anthropic claude-code OAuth** is configurable (the exact token endpoint /
 client id / beta header are deployment-specific):

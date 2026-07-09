@@ -1,5 +1,7 @@
 # Airo — Classification-driven chat routing (S13)
 
+> **Status: shipped (S13).** Historical sprint hand-off; describes implemented behavior. Config location superseded by S16 — see DESIGN-routing-settings.md for the current schema.
+
 Spec for **S13 — Routed `chat` alias**. Companion to [DESIGN.md](./DESIGN.md) §9
 (Routing) and §5.1 (the opt-in `route` object). This is the implementation
 hand-off: it is self-contained, names exact files/functions, and fixes the
@@ -287,7 +289,7 @@ class on `UsageRecord` is a non-goal — see §9.)*
   aliases)"** describing `router`/`router_config`, the compute-`route.class`
   mechanic, caller-precedence, and fail-open. Add a one-line pointer in §5.1
   (the `route` object now has a server-side default source) and an entry in §15.
-- `SPRINTS.md`: tick S13 + append the status-log line on merge.
+- Sprint file: tick S13; append status-log line in `docs/sprints/STATUS.md`.
 
 ---
 
@@ -303,9 +305,9 @@ class on `UsageRecord` is a non-goal — see §9.)*
 
 ## 7. Definition of Done (this sprint)
 
-Global DoD from `SPRINTS.md` (`mix precommit` green — compile
+Global DoD from `docs/sprints/README.md` (`mix precommit` green — compile
 `--warnings-as-errors`, `deps.unlock --unused`, `format`, `test`; new behavior
-tested against a stubbed Req plug, not live; `DESIGN.md` updated; `SPRINTS.md`
+tested against a stubbed Req plug, not live; `docs/design/` updated; sprint file
 ticked; branch merged to `main`) **plus**:
 - T0 verdict recorded in §10; classifier parses the real response shape.
 - Routed alias in **enforce** filters to the predicted class; in **shadow**

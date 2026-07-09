@@ -1,5 +1,7 @@
 # Airo — Resident-model identity & provenance (S19)
 
+> **Status: shipped (S19).** Historical sprint hand-off; describes implemented behavior.
+
 Spec for **S19 — Resident-model identity & provenance**. Companion to
 [DESIGN-agent-management.md](./DESIGN-agent-management.md) (S17, slot state + the
 control client this builds on). Implementation hand-off: self-contained, names
@@ -128,7 +130,7 @@ Family/Revision/Quantization/Size populate.
 - **Per-(revision × engine_build) performance attribution depth** — store the pair
   now; the comparison UI is later.
 - **Spark unified-memory** (carried from S18).
-- **Automatic placement & eviction** — now **S20**.
+- **Automatic placement & eviction on dispatch** — out of scope (not planned).
 
 ## 7. Definition of Done (sprint-specific)
 
@@ -139,4 +141,4 @@ Family/Revision/Quantization/Size populate.
   them paired with `revision`.
 - Reconciliation + the filename re-key are unit-tested (incl. the legacy path);
   `Ingest` health keys on identity, not the raw string.
-- `mix precommit` + `mix joby_kit.lint` green; `SPRINTS.md` ticked.
+- `mix precommit` + `mix joby_kit.lint` green; sprint file ticked; `docs/sprints/STATUS.md` updated.

@@ -1,5 +1,7 @@
 # Airo — VRAM validation & context legibility (S21)
 
+> **Status: shipped (S21).** Historical sprint hand-off; describes implemented behavior.
+
 Spec for **S21 — VRAM validation**. Implements `airo_agent/DESIGN.md` issues
 **A4** (VRAM-fit validation) and **A2** (context/parallel legibility). Companion
 to [DESIGN-slot-config.md](./DESIGN-slot-config.md) (S20, the config modal) and
@@ -98,7 +100,7 @@ Add to the S18 module:
 - Per-model KV learning/persistence across loads (cold models stay weights-floor).
 - An agent-side pre-flight VRAM guard (defense-in-depth; needs GGUF metadata).
 - `parallel` editing (v1 config is still `ctx`-only; `parallel` shown, from the slot).
-- Automatic placement/eviction (**S22**).
+- Automatic placement/eviction on dispatch — out of scope (not planned).
 
 ## 8. Definition of Done
 
@@ -109,4 +111,4 @@ Add to the S18 module:
   flash-attn / MTP tags.
 - `Capacity` projection + validation unit-tested (calibrated fit, over-budget
   block, cold-model weights floor); `SlotState` carries `ctx_total`/`profile`.
-- `mix precommit` + `mix joby_kit.lint` green; `SPRINTS.md` ticked.
+- `mix precommit` + `mix joby_kit.lint` green; sprint file ticked; `docs/sprints/STATUS.md` updated.

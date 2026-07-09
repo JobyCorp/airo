@@ -1,7 +1,7 @@
 defmodule Airo.Agents.Provenance do
   @moduledoc """
   Reconcile a managed slot's resident model into the Model Shelf (S19, see
-  [DESIGN-agent-provenance.md](../../../DESIGN-agent-provenance.md)).
+  [DESIGN-agent-provenance.md](../../../docs/design/DESIGN-agent-provenance.md)).
 
   The agent's model id (`repo:quant`) is the *real model name* and is **not
   unique** — the same model is copied across hosts (and could share a host across
