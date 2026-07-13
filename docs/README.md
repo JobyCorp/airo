@@ -2,6 +2,7 @@
 
 - [`design/`](./design/) — architecture and sprint design notes
 - [`sprints/`](./sprints/) — sprint process, backlog, and per-sprint scope
+- [`reviews/`](./reviews/) — point-in-time gap / performance / code reviews
 
 Cadence: **Design → Sprint → Branch → Squash merge → Close**.
 
