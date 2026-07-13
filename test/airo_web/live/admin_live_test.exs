@@ -535,7 +535,7 @@ defmodule AiroWeb.AdminLiveTest do
 
       html =
         view
-        |> element("button[phx-value-id='gt_trace_target'][aria-label='Filter to this trace']")
+        |> element("button[phx-click='trace'][phx-value-id='gt_trace_target']")
         |> render_click()
 
       assert html =~ "gt_trace_target"

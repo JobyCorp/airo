@@ -17,49 +17,30 @@ defmodule AiroWeb.Admin.UsageLive do
   @impl true
   def mount(_params, _session, socket) do
     filters = @default_filters
-    records = Usage.list_usage_records(filters, 200)
 
     {:ok,
      socket
      |> assign(
        page_title: "Usage",
-       filters: filters,
-       filter_form: to_form(filters, as: :filters),
-       summary: Usage.usage_summary(filters),
+       show_routing: false,
        client_options: Usage.client_options(),
        capability_options: optionize(Usage.capability_options()),
        outcome_options: optionize(Usage.outcome_options())
      )
-     |> stream(:records, records)}
+     |> apply_filters(filters)}
   end
 
   @impl true
   def handle_event("filter", %{"filters" => params}, socket) do
-    filters = normalize_filters(params)
-    records = Usage.list_usage_records(filters, 200)
-
-    {:noreply,
-     socket
-     |> assign(
-       filters: filters,
-       filter_form: to_form(filters, as: :filters),
-       summary: Usage.usage_summary(filters)
-     )
-     |> stream(:records, records, reset: true)}
+    {:noreply, apply_filters(socket, normalize_filters(params))}
   end
 
   def handle_event("reset", _params, socket) do
-    filters = @default_filters
-    records = Usage.list_usage_records(filters, 200)
+    {:noreply, apply_filters(socket, @default_filters)}
+  end
 
-    {:noreply,
-     socket
-     |> assign(
-       filters: filters,
-       filter_form: to_form(filters, as: :filters),
-       summary: Usage.usage_summary(filters)
-     )
-     |> stream(:records, records, reset: true)}
+  def handle_event("toggle_routing", _params, socket) do
+    {:noreply, assign(socket, show_routing: !socket.assigns.show_routing)}
   end
 
   def handle_event("trace", %{"id" => trace_id}, socket) do
@@ -68,16 +49,7 @@ defmodule AiroWeb.Admin.UsageLive do
       |> Map.put("trace_id", trace_id)
       |> Map.put("range", "all")
 
-    records = Usage.list_usage_records(filters, 200)
-
-    {:noreply,
-     socket
-     |> assign(
-       filters: filters,
-       filter_form: to_form(filters, as: :filters),
-       summary: Usage.usage_summary(filters)
-     )
-     |> stream(:records, records, reset: true)}
+    {:noreply, apply_filters(socket, filters)}
   end
 
   @impl true
@@ -88,6 +60,9 @@ defmodule AiroWeb.Admin.UsageLive do
         <CompositeComponents.page_header subtitle="Traceable gateway traffic, failures, latency, and cost.">
           <:crumb>Usage</:crumb>
           <:actions>
+            <.button id="usage-toggle-routing" size="sm" variant="ghost" phx-click="toggle_routing">
+              {if @show_routing, do: "Hide routing", else: "Show routing"}
+            </.button>
             <.button id="usage-header-reset" size="sm" phx-click="reset">Reset filters</.button>
           </:actions>
         </CompositeComponents.page_header>
@@ -120,7 +95,7 @@ defmodule AiroWeb.Admin.UsageLive do
           </.card>
           <.card variant="bordered">
             <:eyebrow>Cost</:eyebrow>
-            <:title>{@summary.total_cost}</:title>
+            <:title>{cost(@summary.total_cost)}</:title>
             Matching records.
           </.card>
         </div>
@@ -165,42 +140,67 @@ defmodule AiroWeb.Admin.UsageLive do
           </.form>
         </.card>
 
-        <.table
-          id="usage"
-          rows={@streams.records}
-          row_click={
-            fn {_id, r} ->
-              r.trace_id && JS.push("trace", value: %{id: r.trace_id})
-            end
-          }
-        >
-          <:col :let={{_id, r}} label="When">{r.inserted_at}</:col>
-          <:col :let={{_id, r}} label="Client">{r.client_key && r.client_key.name}</:col>
-          <:col :let={{_id, r}} label="Trace">
-            <span class="font-mono text-xs">{r.trace_id || "—"}</span>
+        <.table id="usage" rows={@records} row_id={&"usage-#{&1.id}"}>
+          <:col :let={r} label="When">
+            <span class="whitespace-nowrap">{format_at(r.inserted_at)}</span>
           </:col>
-          <:col :let={{_id, r}} label="Requested">{r.request_model || r.alias_name}</:col>
-          <:col :let={{_id, r}} label="Capability">{r.capability}</:col>
-          <:col :let={{_id, r}} label="Served">{r.deployment && r.deployment.model_name}</:col>
-          <:col :let={{_id, r}} label="Status">{status_label(r)}</:col>
-          <:col :let={{_id, r}} label="Error">{r.error_code || "—"}</:col>
-          <:col :let={{_id, r}} label="Tokens">{r.tokens_in}/{r.tokens_out}</:col>
-          <:col :let={{_id, r}} label="Latency">{latency(r.latency_ms)}</:col>
-          <:col :let={{_id, r}} label="Fallback">{if r.fallback_used, do: "yes", else: "no"}</:col>
-          <:col :let={{_id, r}} label="Cost">{r.cost}</:col>
-          <:action :let={{_id, r}}>
-            <.icon_button
-              :if={r.trace_id}
-              icon="hero-funnel"
-              label="Filter to this trace"
-              phx-click="trace"
-              phx-value-id={r.trace_id}
-            />
-          </:action>
+          <:col :let={r} :if={@show_routing} label="Client">
+            {r.client_key && r.client_key.name}
+          </:col>
+          <:col :let={r} label="Trace">
+            <span class="font-mono text-xs">{short_trace(r.trace_id)}</span>
+          </:col>
+          <:col :let={r} :if={@show_routing} label="Requested">
+            {r.request_model || r.alias_name}
+          </:col>
+          <:col :let={r} label="Capability">{r.capability}</:col>
+          <:col :let={r} :if={@show_routing} label="Served">
+            {r.deployment && r.deployment.model_name}
+          </:col>
+          <:col :let={r} label="Status">{status_label(r)}</:col>
+          <:col :let={r} label="Tokens">{r.tokens_in}/{r.tokens_out}</:col>
+          <:col :let={r} label="Latency">
+            <span class="whitespace-nowrap">{latency(r.latency_ms)}</span>
+          </:col>
+          <:col :let={r} label="Cost">{cost(r.cost)}</:col>
+          <:detail :let={r}>
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <dl class="grid flex-1 gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div :for={{label, value} <- detail_fields(r)}>
+                  <dt class="text-xs font-semibold uppercase tracking-wide text-base-content/45">
+                    {label}
+                  </dt>
+                  <dd class={[
+                    "mt-0.5 text-sm text-base-content/85",
+                    label == "Trace" && "font-mono text-xs"
+                  ]}>
+                    {value}
+                  </dd>
+                </div>
+              </dl>
+              <.button
+                :if={r.trace_id}
+                size="sm"
+                phx-click="trace"
+                phx-value-id={r.trace_id}
+              >
+                Filter to this trace
+              </.button>
+            </div>
+          </:detail>
         </.table>
       </div>
     </Layouts.app>
     """
+  end
+
+  defp apply_filters(socket, filters) do
+    assign(socket,
+      filters: filters,
+      filter_form: to_form(filters, as: :filters),
+      summary: Usage.usage_summary(filters),
+      records: Usage.list_usage_records(filters, 200)
+    )
   end
 
   defp normalize_filters(params),
@@ -211,6 +211,35 @@ defmodule AiroWeb.Admin.UsageLive do
   defp humanize(value) do
     value |> to_string() |> String.replace("_", " ") |> String.capitalize()
   end
+
+  defp detail_fields(r) do
+    [
+      {"Client", r.client_key && r.client_key.name},
+      {"Requested", r.request_model || r.alias_name},
+      {"Alias", r.alias_name},
+      {"Served", r.deployment && r.deployment.model_name},
+      {"Model", r.model_display_name},
+      {"Version", r.model_version},
+      {"Revision", r.model_revision},
+      {"Finish reason", r.finish_reason},
+      {"Error", r.error_code},
+      {"HTTP status", r.http_status},
+      {"Upstream status", r.upstream_status},
+      {"Fallback", if(r.fallback_used, do: "yes", else: "no")},
+      {"Tokens", "#{r.tokens_in} in / #{r.tokens_out} out"},
+      {"Cost", cost(r.cost)},
+      {"Trace", r.trace_id}
+    ]
+    |> Enum.reject(fn {_label, value} -> is_nil(value) or value == "" end)
+  end
+
+  defp format_at(%NaiveDateTime{} = at), do: Calendar.strftime(at, "%b %d  %H:%M:%S")
+
+  defp short_trace(nil), do: "—"
+  defp short_trace(trace_id), do: String.slice(trace_id, 0, 10) <> "…"
+
+  defp cost(nil), do: "—"
+  defp cost(%Decimal{} = d), do: "$" <> Decimal.to_string(Decimal.round(d, 4), :normal)
 
   defp latency(nil), do: "—"
   defp latency(ms), do: "#{ms} ms"

@@ -10,6 +10,7 @@ defmodule AiroWeb.CoreComponents do
   use Phoenix.Component
 
   alias JobyKit.CoreComponents, as: JobyKitCoreComponents
+  alias Phoenix.LiveView.JS
 
   @doc """
   Standard Airo button.
@@ -193,6 +194,11 @@ defmodule AiroWeb.CoreComponents do
 
   Rows use calmer separators instead of zebra blocks. When `row_click` is
   provided, non-action cells receive the click target and hover affordance.
+
+  An optional `:detail` slot turns rows into expand/collapse disclosures:
+  clicking a row toggles an inline panel rendered from the slot. Detail mode
+  requires `row_id` (for the panel's DOM id), takes precedence over
+  `row_click`, and expects a plain list rather than a stream.
   """
   attr :id, :string, required: true
   attr :rows, :list, required: true
@@ -207,6 +213,7 @@ defmodule AiroWeb.CoreComponents do
   end
 
   slot :action
+  slot :detail
 
   def table(assigns) do
     assigns =
@@ -223,6 +230,9 @@ defmodule AiroWeb.CoreComponents do
       <table class={["w-full border-separate border-spacing-0 text-sm", @class]}>
         <thead>
           <tr class="border-b border-base-300 bg-base-200/20 text-left">
+            <th :if={@detail != []} class="w-8 py-3 pl-4">
+              <span class="sr-only">Expand</span>
+            </th>
             <th
               :for={col <- @col}
               class="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-base-content/55"
@@ -239,37 +249,70 @@ defmodule AiroWeb.CoreComponents do
           phx-update={is_struct(@rows, Phoenix.LiveView.LiveStream) && "stream"}
           class="divide-y divide-base-300/65"
         >
-          <tr
-            :for={row <- @rows}
-            id={@row_id && @row_id.(row)}
-            class={[
-              "group transition-colors duration-150",
-              @row_click && "hover:bg-base-200/45",
-              !@row_click && "hover:bg-base-200/20"
-            ]}
-          >
-            <td
-              :for={col <- @col}
-              phx-click={@row_click && @row_click.(row)}
+          <%= for row <- @rows do %>
+            <tr
+              id={@row_id && @row_id.(row)}
+              data-expanded={@detail != [] && "false"}
               class={[
-                "px-4 py-3 align-middle text-base-content/80",
-                @row_click && "cursor-pointer"
+                "group transition-colors duration-150",
+                (@row_click || @detail != []) && "hover:bg-base-200/45",
+                !(@row_click || @detail != []) && "hover:bg-base-200/20"
               ]}
             >
-              {render_slot(col, @row_item.(row))}
-            </td>
-            <td :if={@action != []} class="w-0 px-4 py-3 align-middle">
-              <div class="flex justify-end gap-1 opacity-80 transition-opacity group-hover:opacity-100">
-                <%= for action <- @action do %>
-                  {render_slot(action, @row_item.(row))}
-                <% end %>
-              </div>
-            </td>
-          </tr>
+              <td
+                :if={@detail != []}
+                phx-click={toggle_detail(@row_id.(row))}
+                class="w-8 cursor-pointer py-3 pl-4 align-middle"
+              >
+                <JobyKitCoreComponents.icon
+                  name="hero-chevron-right"
+                  class="size-3.5 text-base-content/40 transition-transform duration-150 group-data-[expanded=true]:rotate-90"
+                />
+              </td>
+              <td
+                :for={col <- @col}
+                phx-click={row_cell_click(@detail, @row_click, @row_id, row)}
+                class={[
+                  "px-4 py-3 align-middle text-base-content/80",
+                  (@row_click || @detail != []) && "cursor-pointer"
+                ]}
+              >
+                {render_slot(col, @row_item.(row))}
+              </td>
+              <td :if={@action != []} class="w-0 px-4 py-3 align-middle">
+                <div class="flex justify-end gap-1 opacity-80 transition-opacity group-hover:opacity-100">
+                  <%= for action <- @action do %>
+                    {render_slot(action, @row_item.(row))}
+                  <% end %>
+                </div>
+              </td>
+            </tr>
+            <tr :if={@detail != []} id={"#{@row_id.(row)}-detail"} class="hidden">
+              <td
+                colspan={length(@col) + 1 + if(@action != [], do: 1, else: 0)}
+                class="bg-base-200/15 px-6 py-4"
+              >
+                {render_slot(@detail, @row_item.(row))}
+              </td>
+            </tr>
+          <% end %>
         </tbody>
       </table>
     </div>
     """
+  end
+
+  defp toggle_detail(row_id) do
+    JS.toggle(to: "##{row_id}-detail", display: "table-row")
+    |> JS.toggle_attribute({"data-expanded", "true", "false"}, to: "##{row_id}")
+  end
+
+  defp row_cell_click(detail, row_click, row_id, row) do
+    cond do
+      detail != [] -> toggle_detail(row_id.(row))
+      row_click -> row_click.(row)
+      true -> nil
+    end
   end
 
   defp button_variant("primary"), do: "btn-primary"
