@@ -19,6 +19,21 @@ defmodule Airo.Agents.CapacityTest do
     end
   end
 
+  describe "shard_bytes/2" do
+    test "a two-node load puts half the weights on each host" do
+      assert Capacity.shard_bytes(@ten_gib, 2) == div(@ten_gib, 2)
+    end
+
+    test "single-node (or unset) passes through" do
+      assert Capacity.shard_bytes(@ten_gib, 1) == @ten_gib
+      assert Capacity.shard_bytes(@ten_gib, nil) == @ten_gib
+    end
+
+    test "unknown size stays nil" do
+      assert Capacity.shard_bytes(nil, 2) == nil
+    end
+  end
+
   describe "headroom/1" do
     test "computes free from total - used" do
       assert Capacity.headroom(gpu(2_000.0, 32_607.0)) ==

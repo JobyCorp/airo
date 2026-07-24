@@ -15,6 +15,7 @@ defmodule AiroWeb.Admin.AgentLive do
 
   require Logger
 
+  alias Airo.Agents
   alias Airo.Agents.{Capacity, Control, Ingest, SlotState}
   alias Airo.Config
   alias Airo.Repo
@@ -25,6 +26,10 @@ defmodule AiroWeb.Admin.AgentLive do
   # pushes (`Agents.Ingest`); a light timer re-reads them without a manual reload.
   # Online/offline is NOT on this timer — it's a Presence subscription (below).
   @refresh_ms 10_000
+
+  # Launch-profile keys the config modal owns as first-class fields; everything
+  # else a profile carries rides in the advanced-JSON editor verbatim.
+  @form_profile_keys ~w(ctx disable_thinking repeat_penalty presence_penalty frequency_penalty nnodes tensor_parallel_size)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -97,8 +102,13 @@ defmodule AiroWeb.Admin.AgentLive do
         disable_thinking: params["disable_thinking"] == "true",
         repeat_penalty: params["repeat_penalty"] || config.repeat_penalty,
         presence_penalty: params["presence_penalty"] || config.presence_penalty,
-        frequency_penalty: params["frequency_penalty"] || config.frequency_penalty
+        frequency_penalty: params["frequency_penalty"] || config.frequency_penalty,
+        nnodes: parse_int(params["nnodes"], config.nnodes),
+        tensor_parallel_size: params["tensor_parallel_size"] || config.tensor_parallel_size,
+        launch_json: params["launch_json"] || config.launch_json
     }
+
+    config = %{config | launch_error: launch_json_error(config.launch_json)}
 
     {:noreply, assign(socket, config: %{config | validation: validate_config(config)})}
   end
@@ -111,42 +121,65 @@ defmodule AiroWeb.Admin.AgentLive do
       when is_map(config) do
     port = parse_int(params["port"], config.port)
     ctx = parse_int(params["ctx"], nil)
+    nnodes = parse_int(params["nnodes"], 1)
+    launch_json = params["launch_json"] || ""
 
-    profile = %{
-      ctx: ctx,
-      disable_thinking: if(params["disable_thinking"] == "true", do: true),
-      repeat_penalty: parse_float(params["repeat_penalty"]),
-      presence_penalty: parse_float(params["presence_penalty"]),
-      frequency_penalty: parse_float(params["frequency_penalty"])
-    }
+    # The form owns its first-class fields; the advanced JSON carries the rest of
+    # the launch recipe verbatim. String keys throughout — the merged map is the
+    # exact profile POSTed to the agent and persisted for the next load.
+    overrides =
+      %{
+        "ctx" => ctx,
+        "disable_thinking" => if(params["disable_thinking"] == "true", do: true),
+        "repeat_penalty" => parse_float(params["repeat_penalty"]),
+        "presence_penalty" => parse_float(params["presence_penalty"]),
+        "frequency_penalty" => parse_float(params["frequency_penalty"]),
+        "nnodes" => if(nnodes > 1, do: nnodes),
+        "tensor_parallel_size" => parse_int(params["tensor_parallel_size"], nil)
+      }
+      |> Map.reject(fn {_k, v} -> is_nil(v) end)
+
+    profile =
+      launch_json
+      |> parse_launch_json()
+      |> Map.drop(@form_profile_keys)
+      |> Map.merge(overrides)
 
     model_id = config.model["id"]
     verb = if config.mode == :configure, do: "Restarting", else: "Loading"
-    validation = validate_config(%{config | ctx: params["ctx"], port: port})
+    validation = validate_config(%{config | ctx: params["ctx"], port: port, nnodes: nnodes})
 
-    # Hard limit (A4): over-commit segfaults the engine, so refuse server-side too,
-    # not only via the disabled button.
-    if validation.fits? == false do
-      {:noreply,
-       put_flash(
-         socket,
-         :error,
-         "Won't fit VRAM: ~#{gb(validation.projected_mb)} GB projected exceeds the #{gb(validation.budget_mb)} GB budget. Reduce the context."
-       )}
-    else
-      run_load(agent, port, model_id, profile)
+    cond do
+      launch_json_error(launch_json) ->
+        {:noreply,
+         put_flash(socket, :error, "Launch profile JSON: #{launch_json_error(launch_json)}.")}
 
-      {:noreply,
-       socket
-       |> assign(config: nil)
-       |> put_flash(:info, "#{verb} #{model_id} on slot #{port}… watch the slot for status.")}
+      # Hard limit (A4): over-commit segfaults the engine, so refuse server-side
+      # too, not only via the disabled button.
+      validation.fits? == false ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Won't fit VRAM: ~#{gb(validation.projected_mb)} GB projected exceeds the #{gb(validation.budget_mb)} GB budget. Reduce the context."
+         )}
+
+      true ->
+        Agents.save_launch_profile(model_id, profile)
+        run_load(agent, port, model_id, profile, nnodes)
+
+        {:noreply,
+         socket
+         |> assign(config: nil)
+         |> update(:inventory, &with_launch_profiles/1)
+         |> put_flash(:info, "#{verb} #{model_id} on slot #{port}… watch the slot for status.")}
     end
   end
 
   def handle_event("refresh_inventory", _params, %{assigns: %{detail: %{agent: agent}}} = socket) do
     case Control.refresh_inventory(agent) do
       {:ok, models} ->
-        {:noreply, assign(socket, inventory: models, inventory_error: nil)}
+        {:noreply, assign(socket, inventory: with_launch_profiles(models), inventory_error: nil)}
 
       {:error, reason} ->
         {:noreply, assign(socket, inventory: [], inventory_error: describe(reason))}
@@ -188,12 +221,23 @@ defmodule AiroWeb.Admin.AgentLive do
   # hidden picker); empty + read-only when offline/unreachable.
   defp assign_inventory(%{assigns: %{detail: %{online: true, agent: agent}}} = socket) do
     case Control.inventory(agent) do
-      {:ok, models} -> assign(socket, inventory: models, inventory_error: nil)
-      {:error, reason} -> assign(socket, inventory: [], inventory_error: describe(reason))
+      {:ok, models} ->
+        assign(socket, inventory: with_launch_profiles(models), inventory_error: nil)
+
+      {:error, reason} ->
+        assign(socket, inventory: [], inventory_error: describe(reason))
     end
   end
 
   defp assign_inventory(socket), do: assign(socket, inventory: [], inventory_error: nil)
+
+  # Pair each inventory model with its saved launch profile (`:launch_profile`),
+  # so fit math and the config modal know e.g. that a model launches as a
+  # two-node cluster load.
+  defp with_launch_profiles(models) do
+    profiles = Agents.launch_profiles(Enum.map(models, & &1["id"]))
+    Enum.map(models, &Map.put(&1, :launch_profile, profiles[&1["id"]] || %{}))
+  end
 
   # Build the config-modal state for a model: Configure (resident → its slot +
   # current ctx, calibrated against its live VRAM) or Load (a target slot, the
@@ -204,10 +248,17 @@ defmodule AiroWeb.Admin.AgentLive do
     weights_mb = mb(model["size_bytes"])
     total_mb = gpu_val(gpu, :vram_total_mb)
     used_mb = gpu_val(gpu, :vram_used_mb)
+    saved = Agents.launch_profile(id) || %{}
 
     base =
       case Enum.find(detail.slots, &(&1.resident_model == id)) do
         %{port: port, ctx: ctx, parallel: parallel, ctx_total: ctx_total, profile: profile} ->
+          # No saved recipe for a resident model (loaded out of band, e.g. a
+          # hand-POSTed cluster launch)? Seed from the slot's reported profile,
+          # so a Restart reproduces the running launch instead of dropping it
+          # to a bare single-node load.
+          seed = if saved == %{}, do: profile || %{}, else: saved
+
           %{
             mode: :configure,
             model: model,
@@ -227,6 +278,7 @@ defmodule AiroWeb.Admin.AgentLive do
               ctx_total_current: ctx_total
             }
           }
+          |> Map.merge(launch_prefills(seed))
 
         nil ->
           %{
@@ -238,12 +290,13 @@ defmodule AiroWeb.Admin.AgentLive do
             # Prefill a modest window, not the model's full ctx_max: a cold
             # (non-resident) load has no KV calibration, so validation can't
             # catch a 262k window OOMing a 16 GB card. Big ctx is a deliberate
-            # slide up, not the default.
-            ctx: to_string(default_ctx(model["ctx_max"])),
-            disable_thinking: false,
-            repeat_penalty: "",
-            presence_penalty: "",
-            frequency_penalty: "",
+            # slide up, not the default. A saved recipe's ctx wins — it's a
+            # window that already worked.
+            ctx: to_string(saved["ctx"] || default_ctx(model["ctx_max"])),
+            disable_thinking: saved["disable_thinking"] == true,
+            repeat_penalty: penalty_prefill(saved, :repeat_penalty),
+            presence_penalty: penalty_prefill(saved, :presence_penalty),
+            frequency_penalty: penalty_prefill(saved, :frequency_penalty),
             calib: %{
               resident?: false,
               weights_mb: weights_mb,
@@ -252,16 +305,61 @@ defmodule AiroWeb.Admin.AgentLive do
               ctx_total_current: nil
             }
           }
+          |> Map.merge(launch_prefills(saved))
       end
 
     Map.put(base, :validation, validate_config(base))
   end
 
+  defp launch_prefills(profile) do
+    tp = profile["tensor_parallel_size"] || profile[:tensor_parallel_size]
+
+    %{
+      nnodes: profile["nnodes"] || profile[:nnodes] || 1,
+      tensor_parallel_size: if(tp, do: to_string(tp), else: ""),
+      launch_json: profile |> stringify_keys() |> Map.drop(@form_profile_keys) |> launch_json(),
+      launch_error: nil
+    }
+  end
+
+  # A slot-reported profile arrives string-keyed; one we saved is too. Belt and
+  # suspenders for locally-built maps.
+  defp stringify_keys(map), do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
+
+  defp launch_json(map) when map_size(map) == 0, do: ""
+  defp launch_json(map), do: Jason.encode!(map, pretty: true)
+
+  defp launch_json_error(""), do: nil
+
+  defp launch_json_error(json) do
+    case Jason.decode(json) do
+      {:ok, map} when is_map(map) -> nil
+      {:ok, _other} -> "must be a JSON object"
+      {:error, _} -> "invalid JSON"
+    end
+  end
+
+  defp parse_launch_json(""), do: %{}
+
+  defp parse_launch_json(json) do
+    case Jason.decode(json) do
+      {:ok, map} when is_map(map) -> map
+      _ -> %{}
+    end
+  end
+
   # Project the chosen context against VRAM (A4). ctx_total' = ctx × parallel.
+  # A multi-node load shards the weights — each host holds 1/n — so fit is
+  # judged against this host's share.
   defp validate_config(config) do
     ctx = parse_int(config.ctx, nil)
     ctx_total_new = ctx && ctx * (config.parallel || 1)
-    Capacity.validate(Map.put(config.calib, :ctx_total_new, ctx_total_new))
+    nnodes = max(config.nnodes || 1, 1)
+
+    config.calib
+    |> Map.update!(:weights_mb, fn mb -> mb && mb / nnodes end)
+    |> Map.put(:ctx_total_new, ctx_total_new)
+    |> Capacity.validate()
   end
 
   defp mb(bytes) when is_integer(bytes), do: bytes / 1_048_576
@@ -289,15 +387,23 @@ defmodule AiroWeb.Admin.AgentLive do
     end
   end
 
+  # A cluster load boots two ranks over the fabric (NCCL init, sharded weight
+  # load, CUDA-graph capture) — minutes, not seconds. The push still drives the
+  # UI either way; the timeout only bounds the background ack task.
+  @load_timeout 90_000
+  @cluster_load_timeout 1_800_000
+
   # Load/restart runs off the LiveView process: the agent's /load blocks until the
   # engine is ready (can take many seconds), and the slot transition (loading → up)
   # arrives by push regardless. So fire it with a generous timeout and let the push
   # drive the UI — the operator isn't blocked.
-  defp run_load(agent, port, model_id, profile) do
+  defp run_load(agent, port, model_id, profile, nnodes) do
+    timeout = if nnodes > 1, do: @cluster_load_timeout, else: @load_timeout
+
     Task.Supervisor.start_child(Airo.Usage.TaskSupervisor, fn ->
       case Control.load(agent, port, model_id,
              profile: profile,
-             req_options: [receive_timeout: 90_000]
+             req_options: [receive_timeout: timeout]
            ) do
         :accepted ->
           :ok
@@ -338,6 +444,16 @@ defmodule AiroWeb.Admin.AgentLive do
   end
 
   defp reasoning_off?(_profile), do: false
+
+  # Node span of a slot's reported launch profile, or nil for single-host.
+  defp profile_nnodes(profile) when is_map(profile) do
+    case profile["nnodes"] || profile[:nnodes] do
+      n when is_integer(n) and n > 1 -> n
+      _ -> nil
+    end
+  end
+
+  defp profile_nnodes(_profile), do: nil
 
   # A slot's reported profile arrives as JSON (string keys); a profile we just
   # built locally has atom keys. Read either.
@@ -695,6 +811,9 @@ defmodule AiroWeb.Admin.AgentLive do
           </:col>
           <:col :let={model} label="Footprint">
             <span class="tabular-nums">{footprint_gb(model.fit.footprint_mb)}</span>
+            <CompositeComponents.tag :if={launch_nnodes(model) > 1} tone="primary">
+              {launch_nnodes(model)}-node
+            </CompositeComponents.tag>
             <CompositeComponents.tag
               :if={not model.resident? and model.fit.fits? == false}
               tone="warning"
@@ -897,6 +1016,54 @@ defmodule AiroWeb.Admin.AgentLive do
           </p>
         </div>
 
+        <div>
+          <p class="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-base-content/55">
+            Launch
+          </p>
+          <div class="mt-1.5 grid grid-cols-2 gap-3">
+            <.input
+              type="select"
+              name="config[nnodes]"
+              value={@config.nnodes}
+              options={["1 — this host": 1, "2 — cluster (2 hosts)": 2]}
+              label="Nodes"
+            />
+            <.input
+              type="number"
+              name="config[tensor_parallel_size]"
+              value={@config.tensor_parallel_size}
+              label="Tensor parallel"
+              placeholder="1"
+              min="1"
+              step="1"
+            />
+          </div>
+          <p :if={@config.nnodes > 1} class="-mt-1 mb-2 text-xs text-base-content/55">
+            Spans this host and its cabled cluster worker (vLLM multi-node, one slot).
+            The host needs its cluster fabric configured and the weights already synced
+            to the worker at the same snapshot path — otherwise the agent rejects the
+            load. VRAM below is projected per host (weights ÷ nodes).
+          </p>
+          <.input
+            type="textarea"
+            name="config[launch_json]"
+            value={@config.launch_json}
+            label="Advanced launch profile (JSON)"
+            placeholder={~s({"image": "…", "container_env": {…}, "extra_argv": […]})}
+            class="min-h-32 font-mono text-xs"
+            phx-debounce="300"
+          />
+          <p :if={@config.launch_error} class="-mt-1 text-xs text-error">
+            {@config.launch_error}
+          </p>
+          <p class="-mt-1 text-xs text-base-content/55">
+            Extra profile keys passed to the agent verbatim — e.g. <span class="font-mono">image</span>, <span class="font-mono">container_env</span>, <span class="font-mono">gpu_memory_utilization</span>, <span class="font-mono">kv_cache_dtype</span>, <span class="font-mono">extra_argv</span>. Saved per model on {if @configure?,
+              do: "restart",
+              else: "load"}, so the next load starts
+            from this recipe.
+          </p>
+        </div>
+
         <div :if={@validation.projected_mb}>
           <CompositeComponents.meter
             label="VRAM (projected)"
@@ -920,7 +1087,7 @@ defmodule AiroWeb.Admin.AgentLive do
 
         <div class="flex justify-end gap-2 pt-2">
           <.button type="button" phx-click="cancel_config">Cancel</.button>
-          <.button variant="primary" disabled={@blocked?}>
+          <.button variant="primary" disabled={@blocked? or @config.launch_error != nil}>
             {if @configure?, do: "Restart with changes", else: "Load model"}
           </.button>
         </div>
@@ -939,6 +1106,9 @@ defmodule AiroWeb.Admin.AgentLive do
   defp profile_tags(assigns) do
     ~H"""
     <div class="flex flex-wrap gap-1">
+      <CompositeComponents.tag :if={profile_nnodes(@profile)} tone="primary">
+        {profile_nnodes(@profile)}-node
+      </CompositeComponents.tag>
       <CompositeComponents.tag :if={@profile["cache_type_k"]} tone="neutral">
         KV {@profile["cache_type_k"]}
       </CompositeComponents.tag>
@@ -994,19 +1164,28 @@ defmodule AiroWeb.Admin.AgentLive do
 
     inventory
     |> Enum.map(fn model ->
+      # A model whose saved recipe spans n nodes only puts 1/n of its weights on
+      # this host — judge the fit against that share.
+      share = Capacity.shard_bytes(model["size_bytes"], launch_nnodes(model))
+
       Map.merge(model, %{
-        fit: Capacity.assess(model["size_bytes"], gpu, reclaim_bytes: reclaim),
+        fit: Capacity.assess(share, gpu, reclaim_bytes: reclaim),
         resident?: MapSet.member?(resident_ids, model["id"])
       })
     end)
     |> Enum.sort_by(fn m -> {if(m.resident?, do: 0, else: 1), fit_rank(m.fit.fits?)} end)
   end
 
-  # Size of the model currently resident in the target slot (freed on a swap), or nil.
+  # Node count from a model's saved launch recipe (see `with_launch_profiles/1`).
+  defp launch_nnodes(%{launch_profile: %{"nnodes" => n}}) when is_integer(n) and n > 1, do: n
+  defp launch_nnodes(_model), do: 1
+
+  # Size of the model currently resident in the target slot (freed on a swap), or
+  # nil — this host's share of it, for a cluster resident.
   defp reclaim_bytes(slots, port, inventory) do
     with %{resident_model: id} when is_binary(id) <- Enum.find(slots, &(&1.port == port)),
-         %{"size_bytes" => size} <- Enum.find(inventory, &(&1["id"] == id)) do
-      size
+         %{"size_bytes" => size} = model <- Enum.find(inventory, &(&1["id"] == id)) do
+      Capacity.shard_bytes(size, launch_nnodes(model))
     else
       _ -> nil
     end

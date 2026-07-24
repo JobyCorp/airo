@@ -11,8 +11,10 @@ defmodule Airo.Agents do
   """
   require Logger
 
+  import Ecto.Query, only: [from: 2]
+
   alias Airo.{Config, Repo}
-  alias Airo.Config.Agent
+  alias Airo.Config.{Agent, LaunchProfile}
 
   # A managed slot speaks plain OpenAI (llama-server/vLLM are compatible). The
   # fact that it's agent-managed is carried by `Provider.agent_id`, orthogonally.
@@ -65,6 +67,34 @@ defmodule Airo.Agents do
       last_seen_at: DateTime.utc_now() |> DateTime.truncate(:second)
     }
     |> Map.reject(fn {_k, v} -> is_nil(v) end)
+  end
+
+  @doc "Saved launch profile for a model id (the map the agent's `/load` takes), or nil."
+  def launch_profile(model_name) when is_binary(model_name) do
+    case Repo.get_by(LaunchProfile, model_name: model_name) do
+      %LaunchProfile{profile: profile} -> profile
+      nil -> nil
+    end
+  end
+
+  @doc "Saved launch profiles for a set of model ids: `%{model_name => profile}`."
+  def launch_profiles(model_names) when is_list(model_names) do
+    from(lp in LaunchProfile, where: lp.model_name in ^model_names)
+    |> Repo.all()
+    |> Map.new(&{&1.model_name, &1.profile})
+  end
+
+  @doc """
+  Save (upsert) the launch profile for a model id. The UI calls this on every
+  load, so the last launch recipe is what the next load of the model starts from.
+  """
+  def save_launch_profile(model_name, profile) when is_binary(model_name) and is_map(profile) do
+    %LaunchProfile{}
+    |> LaunchProfile.changeset(%{model_name: model_name, profile: profile})
+    |> Repo.insert(
+      on_conflict: {:replace, [:profile, :updated_at]},
+      conflict_target: :model_name
+    )
   end
 
   defp upsert_slot(%Agent{} = agent, slot) do

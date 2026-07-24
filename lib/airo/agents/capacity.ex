@@ -31,6 +31,18 @@ defmodule Airo.Agents.Capacity do
   def footprint_mb(_size_bytes), do: nil
 
   @doc """
+  Per-host share of a model's `size_bytes` under `nnodes`-way multi-node tensor
+  parallelism — each rank holds 1/n of the weights, so fit is judged against one
+  host's share. `nnodes` ≤ 1 (or an unknown size) passes through unchanged.
+  """
+  @spec shard_bytes(non_neg_integer() | nil, term()) :: non_neg_integer() | nil
+  def shard_bytes(size_bytes, nnodes)
+      when is_integer(size_bytes) and is_integer(nnodes) and nnodes > 1,
+      do: div(size_bytes, nnodes)
+
+  def shard_bytes(size_bytes, _nnodes), do: size_bytes
+
+  @doc """
   Host memory headroom from a GPU telemetry map (string- or atom-keyed), or
   `:unavailable` when the host reports no usable telemetry.
   """
