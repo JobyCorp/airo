@@ -8,6 +8,7 @@ defmodule AiroWeb.Admin.AliasLive do
 
   alias Airo.Config
   alias Airo.Config.Alias
+  alias AiroWeb.Admin.RequestDefaultsForm
   alias AiroWeb.CompositeComponents
 
   @impl true
@@ -15,6 +16,7 @@ defmodule AiroWeb.Admin.AliasLive do
     {:ok,
      socket
      |> assign(page_title: "Aliases", form: nil, editing: nil, detail: nil)
+     |> assign(rd: RequestDefaultsForm.prefill(%{}))
      |> assign(capabilities: Alias.capabilities(), strategies: Alias.strategies())
      |> assign(deployment_options: deployment_options())
      |> assign(
@@ -34,12 +36,22 @@ defmodule AiroWeb.Admin.AliasLive do
     do: {:noreply, push_navigate(socket, to: alias_return_path(socket.assigns.editing))}
 
   def handle_event("validate", %{"alias" => params}, socket) do
-    changeset = Config.change_alias(socket.assigns.editing || %Alias{}, normalize(params))
-    {:noreply, assign(socket, form: to_form(changeset, action: :validate))}
+    rd = RequestDefaultsForm.refresh(params)
+    changeset = Config.change_alias(socket.assigns.editing || %Alias{}, prepare(params))
+    {:noreply, assign(socket, form: to_form(changeset, action: :validate), rd: rd)}
   end
 
   def handle_event("save", %{"alias" => params}, socket) do
-    save(socket, socket.assigns.editing, normalize(params))
+    case RequestDefaultsForm.fold(normalize(params)) do
+      {:ok, folded} ->
+        save(socket, socket.assigns.editing, folded)
+
+      {:error, message} ->
+        {:noreply,
+         socket
+         |> assign(rd: RequestDefaultsForm.refresh(params))
+         |> put_flash(:error, "Request defaults JSON: #{message}.")}
+    end
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
@@ -137,6 +149,7 @@ defmodule AiroWeb.Admin.AliasLive do
     socket
     |> assign(page_title: "New alias", detail: nil, editing: nil)
     |> assign(form: to_form(Config.change_alias(%Alias{})))
+    |> assign(rd: RequestDefaultsForm.prefill(%{}))
   end
 
   defp apply_action(socket, :edit, %{"id" => id}) do
@@ -145,6 +158,7 @@ defmodule AiroWeb.Admin.AliasLive do
     socket
     |> assign(page_title: "Edit alias", detail: nil, editing: alias_, preview: nil)
     |> assign(form: to_form(Config.change_alias(alias_)))
+    |> assign(rd: RequestDefaultsForm.prefill(alias_.default_params))
   end
 
   defp alias_return_path(%Alias{id: id}), do: ~p"/admin/aliases/#{id}"
@@ -157,6 +171,15 @@ defmodule AiroWeb.Admin.AliasLive do
     Config.list_deployments()
     |> Airo.Repo.preload(:provider)
     |> Enum.map(&{"#{&1.provider.name} · #{&1.model_name}", &1.id})
+  end
+
+  # Validate-time params: a mid-edit JSON error just means "no default_params
+  # yet" — the inline error under the editor carries the news.
+  defp prepare(params) do
+    case RequestDefaultsForm.fold(normalize(params)) do
+      {:ok, folded} -> folded
+      {:error, _message} -> normalize(params)
+    end
   end
 
   # fallback comes from the form as a comma-separated string.
@@ -220,6 +243,7 @@ defmodule AiroWeb.Admin.AliasLive do
               deployment_options={@deployment_options}
               routers={@routers}
               modes={@modes}
+              rd={@rd}
             />
           <% @detail -> %>
             <.alias_detail alias={@detail} />
@@ -238,6 +262,7 @@ defmodule AiroWeb.Admin.AliasLive do
   attr :deployment_options, :list, required: true
   attr :routers, :list, required: true
   attr :modes, :list, required: true
+  attr :rd, :map, required: true
 
   defp alias_form(assigns) do
     ~H"""
@@ -253,6 +278,14 @@ defmodule AiroWeb.Admin.AliasLive do
             label="Fallback aliases"
             value={Enum.join(@form[:fallback].value || [], ", ")}
             placeholder="comma-separated alias names"
+          />
+          <CompositeComponents.request_defaults
+            layer="alias"
+            prefix="alias"
+            values={@rd.values}
+            json={@rd.json}
+            error={@rd.error}
+            class="border-t border-base-content/10 pt-4"
           />
           <div class="flex gap-2">
             <.button variant="primary">Save</.button>

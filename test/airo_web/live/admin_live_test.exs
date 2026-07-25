@@ -360,6 +360,65 @@ defmodule AiroWeb.AdminLiveTest do
       assert {_path, _flash} = assert_redirect(view)
       assert Config.list_deployments() |> Enum.any?(&(&1.model_id == model.id))
     end
+
+    test "request defaults fold into default_params and round-trip on edit", %{conn: conn} do
+      Req.Test.stub(Airo.TestStub, fn upstream ->
+        Req.Test.json(upstream, %{"data" => [%{"id" => "qwen3.5-9b"}]})
+      end)
+
+      p = provider("vllm-defaults")
+      {:ok, view, _html} = live(conn, ~p"/admin/deployments/new")
+
+      view
+      |> form("#deployment-form",
+        deployment: %{
+          provider_id: p.id,
+          model_name: "qwen3.5-9b",
+          capabilities: ["chat"],
+          dp_temperature: "0.7",
+          dp_top_p: "0.8",
+          dp_json: ~s({"max_tokens": 4096})
+        }
+      )
+      |> render_submit()
+
+      assert_redirect(view)
+
+      deployment = Config.list_deployments() |> Enum.find(&(&1.model_name == "qwen3.5-9b"))
+
+      assert deployment.default_params == %{
+               "temperature" => 0.7,
+               "top_p" => 0.8,
+               "max_tokens" => 4096
+             }
+
+      # The edit form prefills the section from the saved map: samplers as
+      # first-class fields, the rest in the JSON editor.
+      {:ok, _view, html} = live(conn, ~p"/admin/deployments/#{deployment.id}/edit")
+      assert html =~ ~s(name="deployment[dp_temperature]")
+      assert html =~ "0.7"
+      assert html =~ "max_tokens"
+    end
+
+    test "invalid request-defaults JSON blocks save", %{conn: conn} do
+      p = provider("vllm-badjson")
+      {:ok, view, _html} = live(conn, ~p"/admin/deployments/new")
+
+      html =
+        view
+        |> form("#deployment-form",
+          deployment: %{
+            provider_id: p.id,
+            model_name: "m",
+            capabilities: ["chat"],
+            dp_json: "{nope"
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "Request defaults JSON"
+      assert Config.list_deployments() == []
+    end
   end
 
   describe "model shelf" do

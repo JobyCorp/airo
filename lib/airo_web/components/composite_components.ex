@@ -482,4 +482,120 @@ defmodule AiroWeb.CompositeComponents do
     </div>
     """
   end
+
+  @doc """
+  Request-defaults editor for one merge layer of the gateway's params chain
+  (`Airo.Gateway.Params`: provider ‹ deployment ‹ alias ‹ request).
+
+  Renders the merge-order strip with this form's layer highlighted, first-class
+  sampler fields, and an advanced JSON editor for every other key the layer's
+  `default_params` carries. Field state comes from
+  `AiroWeb.Admin.RequestDefaultsForm` (`prefill/1` / `refresh/1`); inputs are
+  named `<prefix>[dp_<key>]` so `fold/1` can rebuild the map on submit.
+
+      <.request_defaults layer="deployment" prefix="deployment"
+        values={@rd.values} json={@rd.json} error={@rd.error} />
+  """
+  attr :layer, :string, required: true, values: ~w(provider deployment alias)
+  attr :prefix, :string, required: true, doc: ~s(form param namespace, e.g. "deployment")
+  attr :values, :map, required: true, doc: "sampler key → string value"
+  attr :json, :string, default: ""
+  attr :error, :string, default: nil
+  attr :class, :any, default: nil
+  attr :rest, :global
+
+  def request_defaults(assigns) do
+    ~H"""
+    <div
+      data-component="AiroWeb.CompositeComponents.request_defaults"
+      class={["space-y-3", @class]}
+      {@rest}
+    >
+      <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p class="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-base-content/55">
+          Request defaults
+        </p>
+        <p
+          class="flex items-center gap-1.5 font-mono text-[0.65rem] leading-5 text-base-content/40"
+          title="Each layer overrides the one before it; the request body always has the final say."
+        >
+          <span :for={layer <- ~w(provider deployment alias)} class="contents">
+            <span class={[
+              layer == @layer &&
+                "rounded bg-primary/15 px-1.5 py-0.5 font-semibold text-primary",
+              layer != @layer && "text-base-content/40"
+            ]}>
+              {layer}
+            </span>
+            <span aria-hidden="true">‹</span>
+          </span>
+          <span class="italic text-base-content/55">request</span>
+        </p>
+      </div>
+
+      <p class="text-xs text-base-content/55">
+        Merged into every request at the {@layer} layer. A request that sets its own
+        value still wins; blank leaves the choice to the model.
+      </p>
+
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <.input
+          type="number"
+          name={"#{@prefix}[dp_temperature]"}
+          value={@values["temperature"]}
+          label="Temperature"
+          min="0"
+          max="2"
+          step="0.05"
+        />
+        <.input
+          type="number"
+          name={"#{@prefix}[dp_top_p]"}
+          value={@values["top_p"]}
+          label="Top-p"
+          min="0"
+          max="1"
+          step="0.05"
+        />
+        <.input
+          type="number"
+          name={"#{@prefix}[dp_presence_penalty]"}
+          value={@values["presence_penalty"]}
+          label="Presence"
+          min="-2"
+          max="2"
+          step="0.1"
+        />
+        <.input
+          type="number"
+          name={"#{@prefix}[dp_frequency_penalty]"}
+          value={@values["frequency_penalty"]}
+          label="Frequency"
+          min="-2"
+          max="2"
+          step="0.1"
+        />
+      </div>
+
+      <div>
+        <.input
+          type="textarea"
+          name={"#{@prefix}[dp_json]"}
+          value={@json}
+          label="Everything else (JSON)"
+          placeholder={~s({"max_tokens": 4096, "stop": […], "chat_template_kwargs": {…}})}
+          class="min-h-28 font-mono text-xs"
+          phx-debounce="300"
+        />
+        <p :if={@error} class="mt-1 text-xs text-error">
+          {@error} — fix it to save.
+        </p>
+        <p class="mt-1 text-xs text-base-content/55">
+          Extra keys merged verbatim into the request body — anything the engine
+          accepts. The fields above override their keys here.
+        </p>
+      </div>
+    </div>
+    """
+  end
 end

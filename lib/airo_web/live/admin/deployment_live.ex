@@ -5,6 +5,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
   alias Airo.Config
   alias Airo.Config.Deployment
   alias Airo.Health
+  alias AiroWeb.Admin.RequestDefaultsForm
   alias AiroWeb.CompositeComponents
 
   # Re-poll per-deployment health (kept in ETS by Airo.Health.Prober) so the
@@ -19,7 +20,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
     {:ok,
      socket
      |> assign(page_title: "Deployments", form: nil, editing: nil, detail: nil)
-     |> assign(disable_thinking: false)
+     |> assign(disable_thinking: false, rd: RequestDefaultsForm.prefill(%{}))
      |> assign(capabilities: Deployment.capabilities(), classes: Deployment.classes())
      |> assign(model_options: [], model_error: nil, models_provider_id: nil)
      |> assign_model_id_options()
@@ -52,18 +53,30 @@ defmodule AiroWeb.Admin.DeploymentLive do
 
   def handle_event("validate", %{"deployment" => params}, socket) do
     disable_thinking = params["disable_thinking"] == "true"
-    params = params |> clean() |> apply_thinking(socket.assigns.editing)
+    rd = RequestDefaultsForm.refresh(params)
+    params = params |> clean() |> fold_defaults() |> apply_thinking(disable_thinking)
     changeset = Config.change_deployment(socket.assigns.editing || %Deployment{}, params)
 
     {:noreply,
      socket
-     |> assign(form: to_form(changeset, action: :validate), disable_thinking: disable_thinking)
+     |> assign(form: to_form(changeset, action: :validate))
+     |> assign(disable_thinking: disable_thinking, rd: rd)
      |> assign_models(params["provider_id"])}
   end
 
   def handle_event("save", %{"deployment" => params}, socket) do
-    params = params |> clean() |> apply_thinking(socket.assigns.editing)
-    save(socket, socket.assigns.editing, params)
+    disable_thinking = params["disable_thinking"] == "true"
+
+    case params |> clean() |> RequestDefaultsForm.fold() do
+      {:ok, folded} ->
+        save(socket, socket.assigns.editing, apply_thinking(folded, disable_thinking))
+
+      {:error, message} ->
+        {:noreply,
+         socket
+         |> assign(rd: RequestDefaultsForm.refresh(params), disable_thinking: disable_thinking)
+         |> put_flash(:error, "Request defaults JSON: #{message}.")}
+    end
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
@@ -126,6 +139,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
     socket
     |> assign(page_title: "New deployment", detail: nil, editing: nil)
     |> assign(form: to_form(Config.change_deployment(%Deployment{})), disable_thinking: false)
+    |> assign(rd: RequestDefaultsForm.prefill(%{}))
     |> assign_models(nil)
   end
 
@@ -136,8 +150,16 @@ defmodule AiroWeb.Admin.DeploymentLive do
     |> assign(page_title: "Edit deployment", detail: nil, editing: deployment)
     |> assign(form: to_form(Config.change_deployment(deployment)))
     |> assign(disable_thinking: thinking_disabled?(deployment.default_params))
+    |> assign(rd: RequestDefaultsForm.prefill(without_thinking(deployment.default_params)))
     |> assign_models(deployment.provider_id)
   end
+
+  # The request-defaults section must not show the enable_thinking key — the
+  # toggle above it owns that one; put_enable_thinking(…, false) strips it.
+  defp without_thinking(default_params) when is_map(default_params),
+    do: put_enable_thinking(default_params, false)
+
+  defp without_thinking(_default_params), do: %{}
 
   defp deployment_return_path(%Deployment{id: id}), do: ~p"/admin/deployments/#{id}"
   defp deployment_return_path(_deployment), do: ~p"/admin/deployments"
@@ -228,14 +250,22 @@ defmodule AiroWeb.Admin.DeploymentLive do
 
   defp clean_value(value), do: value
 
+  # Validate-time fold: a mid-edit JSON parse error just means "no
+  # default_params yet" — the inline error under the editor carries the news.
+  defp fold_defaults(params) do
+    case RequestDefaultsForm.fold(params) do
+      {:ok, folded} -> folded
+      {:error, _message} -> params
+    end
+  end
+
   # "Disable thinking" is not a column — it's a per-request default that rides
   # `default_params.chat_template_kwargs.enable_thinking`, which the gateway
   # deep-merges into every upstream chat body (Airo.Gateway.Params). Fold the
-  # checkbox into the existing params bag, preserving any other keys; we start
-  # from the saved value so unrelated default_params survive the round-trip.
-  defp apply_thinking(params, editing) do
-    disable_thinking = params["disable_thinking"] == "true"
-    base = (editing && editing.default_params) || %{}
+  # checkbox into the map the request-defaults section just built, preserving
+  # its keys; the toggle owns exactly this one key.
+  defp apply_thinking(params, disable_thinking) do
+    base = params["default_params"] || %{}
 
     params
     |> Map.delete("disable_thinking")
@@ -306,6 +336,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
               capabilities={@capabilities}
               classes={@classes}
               disable_thinking={@disable_thinking}
+              rd={@rd}
             />
           <% @detail -> %>
             <.deployment_detail deployment={@detail} health={@health[@detail.id] || "unknown"} />
@@ -327,6 +358,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
   attr :capabilities, :list, required: true
   attr :classes, :list, required: true
   attr :disable_thinking, :boolean, default: false
+  attr :rd, :map, required: true
 
   defp deployment_form(assigns) do
     ~H"""
@@ -383,6 +415,14 @@ defmodule AiroWeb.Admin.DeploymentLive do
         <.input field={@form[:price_input]} label="Price input (per 1k)" />
         <.input field={@form[:price_output]} label="Price output (per 1k)" />
         <.input field={@form[:enabled]} type="checkbox" label="Enabled" />
+        <CompositeComponents.request_defaults
+          layer="deployment"
+          prefix="deployment"
+          values={@rd.values}
+          json={@rd.json}
+          error={@rd.error}
+          class="border-t border-base-content/10 pt-4"
+        />
         <div class="flex gap-2">
           <.button variant="primary">Save</.button>
           <.button type="button" phx-click="cancel">Cancel</.button>
@@ -488,6 +528,10 @@ defmodule AiroWeb.Admin.DeploymentLive do
             <span class="text-base-content/60">Price input/output</span>
             <br />{@deployment.price_input || "—"} / {@deployment.price_output || "—"}
           </div>
+        </div>
+        <div :if={map_size(@deployment.default_params || %{}) > 0} class="mt-4 text-sm">
+          <span class="text-base-content/60">Request defaults</span>
+          <pre class="mt-1 overflow-x-auto rounded bg-base-300/40 p-3 font-mono text-xs text-base-content/85">{Jason.encode!(@deployment.default_params, pretty: true)}</pre>
         </div>
       </.card>
     </div>

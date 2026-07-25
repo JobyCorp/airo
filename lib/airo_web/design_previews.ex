@@ -232,6 +232,26 @@ defmodule AiroWeb.DesignPreviews do
     """
   end
 
+  def request_defaults_preview(assigns) do
+    ~H"""
+    <div class="max-w-2xl">
+      <CompositeComponents.request_defaults
+        layer="deployment"
+        prefix="preview"
+        values={
+          %{
+            "temperature" => "0.7",
+            "top_p" => "0.8",
+            "presence_penalty" => "1.5",
+            "frequency_penalty" => ""
+          }
+        }
+        json={~s({\n  "max_tokens": 4096\n})}
+      />
+    </div>
+    """
+  end
+
   def empty_state_preview(assigns) do
     ~H"""
     <div class="grid gap-4 sm:grid-cols-2">

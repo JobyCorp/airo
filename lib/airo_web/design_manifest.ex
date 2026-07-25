@@ -139,6 +139,11 @@ defmodule AiroWeb.DesignManifest do
     summary: "Labeled range slider with a right-aligned value readout; a bounded form input.",
     preview: &DesignPreviews.slider_preview/1
 
+  component CompositeComponents, :request_defaults,
+    category: :composite,
+    summary: "default_params editor for one gateway merge layer: sampler fields + JSON.",
+    preview: &DesignPreviews.request_defaults_preview/1
+
   # -------------------------------------------------------------------- domain
   # Add domain composites here:
   #

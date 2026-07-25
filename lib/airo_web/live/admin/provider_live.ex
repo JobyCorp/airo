@@ -7,6 +7,7 @@ defmodule AiroWeb.Admin.ProviderLive do
   alias Airo.Health
   alias Airo.LocalModels
   alias Airo.Repo
+  alias AiroWeb.Admin.RequestDefaultsForm
   alias AiroWeb.CompositeComponents
 
   # Re-poll provider health (aggregated from its deployments' ETS health) so a
@@ -21,6 +22,7 @@ defmodule AiroWeb.Admin.ProviderLive do
     {:ok,
      socket
      |> assign(page_title: "Providers", form: nil, editing: nil, detail: nil)
+     |> assign(rd: RequestDefaultsForm.prefill(%{}))
      |> assign(adapter_types: Provider.adapter_types(), auth_kinds: Provider.auth_kinds())
      |> assign(secret_options: secret_options())
      |> assign(health: health_map(providers))
@@ -50,12 +52,22 @@ defmodule AiroWeb.Admin.ProviderLive do
     do: {:noreply, push_navigate(socket, to: provider_return_path(socket.assigns.editing))}
 
   def handle_event("validate", %{"provider" => params}, socket) do
-    changeset = Config.change_provider(socket.assigns.editing || %Provider{}, params)
-    {:noreply, assign(socket, form: to_form(changeset, action: :validate))}
+    rd = RequestDefaultsForm.refresh(params)
+    changeset = Config.change_provider(socket.assigns.editing || %Provider{}, prepare(params))
+    {:noreply, assign(socket, form: to_form(changeset, action: :validate), rd: rd)}
   end
 
   def handle_event("save", %{"provider" => params}, socket) do
-    save(socket, socket.assigns.editing, params)
+    case RequestDefaultsForm.fold(params) do
+      {:ok, folded} ->
+        save(socket, socket.assigns.editing, folded)
+
+      {:error, message} ->
+        {:noreply,
+         socket
+         |> assign(rd: RequestDefaultsForm.refresh(params))
+         |> put_flash(:error, "Request defaults JSON: #{message}.")}
+    end
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
@@ -174,6 +186,7 @@ defmodule AiroWeb.Admin.ProviderLive do
     socket
     |> assign(detail: nil, editing: nil, page_title: "New provider")
     |> assign(form: to_form(Config.change_provider(%Provider{})))
+    |> assign(rd: RequestDefaultsForm.prefill(%{}))
   end
 
   defp apply_action(socket, :edit, %{"id" => id}) do
@@ -182,6 +195,16 @@ defmodule AiroWeb.Admin.ProviderLive do
     socket
     |> assign(detail: nil, editing: provider, page_title: "Edit provider")
     |> assign(form: to_form(Config.change_provider(provider)))
+    |> assign(rd: RequestDefaultsForm.prefill(provider.default_params))
+  end
+
+  # Validate-time params: a mid-edit JSON error just means "no default_params
+  # yet" — the inline error under the editor carries the news.
+  defp prepare(params) do
+    case RequestDefaultsForm.fold(params) do
+      {:ok, folded} -> folded
+      {:error, _message} -> params
+    end
   end
 
   defp provider_return_path(%Provider{id: id}), do: ~p"/admin/providers/#{id}"
@@ -352,6 +375,7 @@ defmodule AiroWeb.Admin.ProviderLive do
               adapter_types={@adapter_types}
               auth_kinds={@auth_kinds}
               secret_options={@secret_options}
+              rd={@rd}
             />
           <% @detail -> %>
             <.provider_detail detail={@detail} />
@@ -368,6 +392,7 @@ defmodule AiroWeb.Admin.ProviderLive do
   attr :adapter_types, :list, required: true
   attr :auth_kinds, :list, required: true
   attr :secret_options, :list, required: true
+  attr :rd, :map, required: true
 
   defp provider_form(assigns) do
     ~H"""
@@ -400,6 +425,14 @@ defmodule AiroWeb.Admin.ProviderLive do
           />
         </div>
         <.input field={@form[:enabled]} type="checkbox" label="Enabled" />
+        <CompositeComponents.request_defaults
+          layer="provider"
+          prefix="provider"
+          values={@rd.values}
+          json={@rd.json}
+          error={@rd.error}
+          class="border-t border-base-content/10 pt-4"
+        />
         <div class="flex gap-2">
           <.button variant="primary">Save</.button>
           <.button type="button" phx-click="cancel">Cancel</.button>
