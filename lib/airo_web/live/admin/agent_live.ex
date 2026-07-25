@@ -29,7 +29,7 @@ defmodule AiroWeb.Admin.AgentLive do
 
   # Launch-profile keys the config modal owns as first-class fields; everything
   # else a profile carries rides in the advanced-JSON editor verbatim.
-  @form_profile_keys ~w(ctx disable_thinking repeat_penalty presence_penalty frequency_penalty nnodes tensor_parallel_size)
+  @form_profile_keys ~w(ctx disable_thinking temperature top_p repeat_penalty presence_penalty frequency_penalty nnodes tensor_parallel_size)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -100,6 +100,8 @@ defmodule AiroWeb.Admin.AgentLive do
       | ctx: params["ctx"],
         port: parse_int(params["port"], config.port),
         disable_thinking: params["disable_thinking"] == "true",
+        temperature: params["temperature"] || config.temperature,
+        top_p: params["top_p"] || config.top_p,
         repeat_penalty: params["repeat_penalty"] || config.repeat_penalty,
         presence_penalty: params["presence_penalty"] || config.presence_penalty,
         frequency_penalty: params["frequency_penalty"] || config.frequency_penalty,
@@ -131,6 +133,8 @@ defmodule AiroWeb.Admin.AgentLive do
       %{
         "ctx" => ctx,
         "disable_thinking" => if(params["disable_thinking"] == "true", do: true),
+        "temperature" => parse_float(params["temperature"]),
+        "top_p" => parse_float(params["top_p"]),
         "repeat_penalty" => parse_float(params["repeat_penalty"]),
         "presence_penalty" => parse_float(params["presence_penalty"]),
         "frequency_penalty" => parse_float(params["frequency_penalty"]),
@@ -267,6 +271,8 @@ defmodule AiroWeb.Admin.AgentLive do
             parallel: parallel || 1,
             ctx: to_string(ctx || model["ctx_max"]),
             disable_thinking: reasoning_off?(profile),
+            temperature: penalty_prefill(profile, :temperature),
+            top_p: penalty_prefill(profile, :top_p),
             repeat_penalty: penalty_prefill(profile, :repeat_penalty),
             presence_penalty: penalty_prefill(profile, :presence_penalty),
             frequency_penalty: penalty_prefill(profile, :frequency_penalty),
@@ -294,6 +300,8 @@ defmodule AiroWeb.Admin.AgentLive do
             # window that already worked.
             ctx: to_string(saved["ctx"] || default_ctx(model["ctx_max"])),
             disable_thinking: saved["disable_thinking"] == true,
+            temperature: penalty_prefill(saved, :temperature),
+            top_p: penalty_prefill(saved, :top_p),
             repeat_penalty: penalty_prefill(saved, :repeat_penalty),
             presence_penalty: penalty_prefill(saved, :presence_penalty),
             frequency_penalty: penalty_prefill(saved, :frequency_penalty),
@@ -975,9 +983,29 @@ defmodule AiroWeb.Admin.AgentLive do
 
         <div>
           <p class="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-base-content/55">
-            Sampling penalties
+            Sampling
           </p>
           <div class="mt-1.5 grid grid-cols-3 gap-3">
+            <.input
+              type="number"
+              name="config[temperature]"
+              value={@config.temperature}
+              label="Temperature"
+              placeholder="0.8"
+              min="0"
+              max="2"
+              step="0.05"
+            />
+            <.input
+              type="number"
+              name="config[top_p]"
+              value={@config.top_p}
+              label="Top-p"
+              placeholder="0.95"
+              min="0"
+              max="1"
+              step="0.05"
+            />
             <.input
               type="number"
               name="config[repeat_penalty]"
@@ -1011,8 +1039,10 @@ defmodule AiroWeb.Admin.AgentLive do
           </div>
           <p class="-mt-1 text-xs text-base-content/55">
             Engine defaults baked into the launch; a request that sends its own sampler
-            params still overrides. Blank keeps the penalty off. Example: Qwen recommends
-            presence <span class="font-mono">1.5</span> on quantized builds.
+            params still overrides. Blank keeps the engine default. Example: Qwen
+            recommends temp <span class="font-mono">0.7</span>, top-p <span class="font-mono">0.8</span>, presence
+            <span class="font-mono">1.5</span>
+            on quantized builds.
           </p>
         </div>
 
@@ -1120,6 +1150,12 @@ defmodule AiroWeb.Admin.AgentLive do
       </CompositeComponents.tag>
       <CompositeComponents.tag :if={reasoning_off?(@profile)} tone="neutral">
         no-think
+      </CompositeComponents.tag>
+      <CompositeComponents.tag :if={profile_penalty(@profile, :temperature)} tone="neutral">
+        temp {profile_penalty(@profile, :temperature)}
+      </CompositeComponents.tag>
+      <CompositeComponents.tag :if={profile_penalty(@profile, :top_p)} tone="neutral">
+        top-p {profile_penalty(@profile, :top_p)}
       </CompositeComponents.tag>
       <CompositeComponents.tag :if={profile_penalty(@profile, :repeat_penalty)} tone="neutral">
         repeat {profile_penalty(@profile, :repeat_penalty)}
