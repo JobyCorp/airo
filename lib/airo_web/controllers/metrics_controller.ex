@@ -37,6 +37,7 @@ defmodule AiroWeb.MetricsController do
       [
         host_metrics(snapshot.hosts),
         slot_metrics(snapshot.hosts),
+        cluster_metrics(snapshot.clusters),
         deployment_metrics(snapshot),
         alias_metrics(snapshot.aliases),
         usage_metrics(usage.rows)
@@ -77,8 +78,28 @@ defmodule AiroWeb.MetricsController do
         :vram_total_mb
       ),
       vram("airo_host_vram_used_mb", "GPU VRAM in use on the host.", hosts, :vram_used_mb),
-      vram("airo_host_vram_free_mb", "GPU VRAM free on the host.", hosts, :vram_free_mb)
+      vram("airo_host_vram_free_mb", "GPU VRAM free on the host.", hosts, :vram_free_mb),
+      telemetry(
+        "airo_host_gpu_util_pct",
+        "GPU utilisation reported by the host.",
+        hosts,
+        :util_pct
+      ),
+      telemetry(
+        "airo_host_power_draw_w",
+        "GPU power draw reported by the host.",
+        hosts,
+        :power_draw_w
+      )
     ]
+  end
+
+  # Utilisation and power are optional in the agent's telemetry — emit a series
+  # only where a reading exists, so a gap reads as absent rather than as zero.
+  defp telemetry(name, help, hosts, key) do
+    metric(name, :gauge, help, Enum.filter(hosts, &is_number(&1.gpu[key])), fn h ->
+      {[host_id: h.host_id], h.gpu[key]}
+    end)
   end
 
   # Hosts with telemetry disabled report no series at all rather than a zero — a
@@ -111,7 +132,26 @@ defmodule AiroWeb.MetricsController do
              slot: slot.provider,
              model: (slot.resident && slot.resident.model) || "",
              status: status
-           ], bool(current == status)}
+           ] ++ cluster_labels(slot), bool(current == status)}
+        end
+      ),
+      metric(
+        "airo_slot_tp_rank",
+        :gauge,
+        "This slot's rank within its multi-node load (0 is the head, which serves the API).",
+        Enum.filter(resident, fn {_h, s} -> s.resident.cluster end),
+        fn {host, slot} ->
+          {[host_id: host.host_id, slot: slot.provider, cluster: slot.resident.cluster.id],
+           slot.resident.cluster.tp_rank || 0}
+        end
+      ),
+      metric(
+        "airo_slot_serves_api",
+        :gauge,
+        "1 when the slot's base_url actually answers inference (peer ranks do not).",
+        slots,
+        fn {host, slot} ->
+          {[host_id: host.host_id, slot: slot.provider], bool(slot.serves_api)}
         end
       ),
       slot_gauge("airo_slot_ctx", "Context length the slot is serving.", resident, :ctx),
@@ -145,6 +185,53 @@ defmodule AiroWeb.MetricsController do
       {host, slot} ->
         {[host_id: host.host_id, slot: slot.provider, model: slot.resident.model],
          Map.fetch!(slot.resident, key)}
+    end)
+  end
+
+  # Empty for an ordinary single-host slot, so its series keep the label set they
+  # had before multi-node existed.
+  defp cluster_labels(%{resident: %{cluster: %{} = cluster}}),
+    do: [cluster: cluster.id, tp_rank: cluster.tp_rank || 0]
+
+  defp cluster_labels(_slot), do: []
+
+  ## Clusters
+
+  # A multi-node load is one logical thing spread over several hosts. Alert on
+  # `airo_cluster_serving == 0` rather than on any individual rank: losing a peer
+  # takes the whole load down even though the head's own slot still reads `up`.
+  defp cluster_metrics(clusters) do
+    [
+      cluster_gauge(
+        "airo_cluster_serving",
+        "1 when every rank of the multi-node load is present and up.",
+        clusters,
+        &bool(&1.serving)
+      ),
+      cluster_gauge(
+        "airo_cluster_complete",
+        "1 when the number of reporting ranks matches the declared tp_size.",
+        clusters,
+        &bool(&1.complete)
+      ),
+      cluster_gauge(
+        "airo_cluster_members",
+        "Ranks currently reporting for the load.",
+        clusters,
+        &length(&1.members)
+      ),
+      cluster_gauge(
+        "airo_cluster_tp_size",
+        "Ranks the load expects.",
+        Enum.filter(clusters, & &1.tp_size),
+        & &1.tp_size
+      )
+    ]
+  end
+
+  defp cluster_gauge(name, help, clusters, value_fun) do
+    metric(name, :gauge, help, clusters, fn c ->
+      {[cluster: c.id, model: c.model || ""], value_fun.(c)}
     end)
   end
 

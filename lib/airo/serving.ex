@@ -91,14 +91,69 @@ defmodule Airo.Serving do
     activity = deployment_activity()
     inventories = if opts[:inventory], do: inventories(agents), else: %{}
 
+    hosts = Enum.map(agents, &host(&1, activity, Map.get(inventories, &1.id)))
+
     %{
       generated_at: now(),
       staleness_ms: Health.staleness_ms(),
-      hosts: Enum.map(agents, &host(&1, activity, Map.get(inventories, &1.id))),
+      hosts: hosts,
+      clusters: clusters(hosts),
       external_providers: Enum.map(external, &external_provider(&1, activity)),
       aliases: Enum.map(aliases, &alias_entry/1)
     }
   end
+
+  # Multi-node loads, joined back into one logical entry. The per-host slots
+  # already carry `resident.cluster`, but a consumer asking "is this model
+  # actually being served" would otherwise have to scan every host and group by
+  # hand — and get the completeness rule wrong.
+  defp clusters(hosts) do
+    for host <- hosts,
+        slot <- host.slots,
+        cluster = slot.resident && slot.resident.cluster,
+        cluster != nil do
+      {cluster, host, slot}
+    end
+    |> Enum.group_by(fn {cluster, _host, _slot} -> cluster.id end)
+    |> Enum.map(fn {id, entries} -> cluster_entry(id, entries) end)
+    |> Enum.sort_by(& &1.id)
+  end
+
+  defp cluster_entry(id, entries) do
+    members =
+      entries
+      |> Enum.map(fn {cluster, host, slot} ->
+        %{
+          host_id: host.host_id,
+          slot: slot.provider,
+          base_url: slot.base_url,
+          tp_rank: cluster.tp_rank,
+          serves_api: slot.serves_api,
+          status: slot.resident.status
+        }
+      end)
+      |> Enum.sort_by(&(&1.tp_rank || 0))
+
+    {cluster, _host, _slot} = hd(entries)
+    {_c, _h, head_slot} = Enum.find(entries, hd(entries), fn {_c, _h, s} -> s.serves_api end)
+
+    %{
+      id: id,
+      model: head_slot.resident.model,
+      upstream_model_id: head_slot.resident.upstream_model_id,
+      tp_size: cluster.tp_size,
+      members: members,
+      # A rank that has gone silent leaves no slot behind, so membership is
+      # counted against the declared tp_size rather than trusted as complete.
+      complete: complete?(members, cluster.tp_size),
+      serving: complete?(members, cluster.tp_size) and Enum.all?(members, &(&1.status == :up))
+    }
+  end
+
+  defp complete?(members, tp_size) when is_integer(tp_size) and tp_size > 0,
+    do: length(members) >= tp_size
+
+  defp complete?(_members, _tp_size), do: true
 
   defp host(agent, activity, inventory) do
     index = inventory_index(inventory)
@@ -131,14 +186,29 @@ defmodule Airo.Serving do
   # telemetry. Surfacing that as `available: false` keeps "no reading" distinct
   # from "genuinely zero free" — a scheduler must not treat them alike.
   defp gpu(raw) do
-    case Capacity.headroom(raw) do
-      %{total_mb: total, used_mb: used, free_mb: free} ->
-        %{available: true, vram_total_mb: total, vram_used_mb: used, vram_free_mb: free}
+    base =
+      case Capacity.headroom(raw) do
+        %{total_mb: total, used_mb: used, free_mb: free} ->
+          %{available: true, vram_total_mb: total, vram_used_mb: used, vram_free_mb: free}
 
-      :unavailable ->
-        %{available: false, vram_total_mb: nil, vram_used_mb: nil, vram_free_mb: nil}
-    end
+        :unavailable ->
+          %{available: false, vram_total_mb: nil, vram_used_mb: nil, vram_free_mb: nil}
+      end
+
+    # Utilisation and power come straight from the agent's telemetry map — they
+    # aren't part of the headroom arithmetic, but they are what tells a monitor
+    # whether a resident model is actually working or merely loaded.
+    Map.merge(base, %{
+      util_pct: gpu_field(raw, :util_pct),
+      power_draw_w: gpu_field(raw, :power_draw_w),
+      power_limit_w: gpu_field(raw, :power_limit_w),
+      mem_source: gpu_field(raw, :mem_source)
+    })
   end
+
+  # GPU maps arrive string-keyed over the channel; tolerate atoms too.
+  defp gpu_field(raw, key) when is_map(raw), do: Map.get(raw, key) || Map.get(raw, to_string(key))
+  defp gpu_field(_raw, _key), do: nil
 
   defp slot(provider, agent, activity, index, sole_resident?) do
     state = SlotState.get(provider.id)
@@ -154,6 +224,9 @@ defmodule Airo.Serving do
       base_url: provider.base_url,
       adapter_type: provider.adapter_type,
       enabled: provider.enabled,
+      # Only the head rank of a multi-node load exposes the OpenAI API; a peer's
+      # base_url looks perfectly routable and answers nothing.
+      serves_api: SlotState.head?(state),
       resident: resident(state, provider, agent, index, sole_resident?),
       deployments: deployments
     }
@@ -185,11 +258,26 @@ defmodule Airo.Serving do
       parallel: state.parallel,
       engine_build: state.engine_build,
       profile: state.profile,
+      cluster: cluster(state),
       resident_since: state.resident_since,
       updated_at: monotonic_to_wall(state.updated_at),
-      capacity: capacity(size_bytes, agent.gpu, state, sole_resident?)
+      capacity: capacity(shard_bytes(size_bytes, state), agent.gpu, state, sole_resident?)
     }
   end
+
+  # `nil` for an ordinary single-host load, so a consumer can test one field to
+  # know whether a slot is part of something larger.
+  defp cluster(%{cluster_id: id}) when id in [nil, ""], do: nil
+
+  defp cluster(state) do
+    %{id: state.cluster_id, tp_rank: state.tp_rank, tp_size: state.tp_size}
+  end
+
+  # Each rank holds 1/n of the weights, so a host's footprint is its share, not
+  # the whole model — a 685B model across two hosts must not read as though each
+  # one is carrying all of it.
+  defp shard_bytes(nil, _state), do: nil
+  defp shard_bytes(size_bytes, state), do: Capacity.shard_bytes(size_bytes, state[:tp_size])
 
   # Weights floor plus the measured per-KV-token cost, so an external scheduler
   # can size a context change without reimplementing the margin arithmetic.

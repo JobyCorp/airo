@@ -614,6 +614,20 @@ defmodule AiroWeb.ApiSpec do
             description: "Upstreams Airo routes to but does not manage.",
             items: %Schema{type: :object, additionalProperties: true}
           },
+          clusters: %Schema{
+            type: :array,
+            description:
+              "Multi-node (tensor-parallel) loads, joined back into one logical " <>
+                "entry. A model too large for one host runs as several slots on " <>
+                "different hosts sharing a cluster id; only rank 0 serves the " <>
+                "API (`serves_api`), the rest hold a shard of the weights. " <>
+                "`complete` compares reporting ranks against the declared " <>
+                "`tp_size` — a rank that goes silent leaves no slot behind, so " <>
+                "absence is the failure mode, not a `down` status. Alert on " <>
+                "`serving`, since losing any rank takes the whole load down " <>
+                "while the head's own slot still reads `up`.",
+            items: %Schema{type: :object, additionalProperties: true}
+          },
           aliases: %Schema{
             type: :array,
             description:

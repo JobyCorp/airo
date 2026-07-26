@@ -49,10 +49,18 @@ defmodule Airo.Agents.Ingest do
   def host_down(host_id) do
     case Config.get_agent_by_host_id(host_id) do
       %{} = agent ->
-        agent
-        |> Repo.preload(providers: :deployments)
-        |> Map.fetch!(:providers)
-        |> Enum.each(fn provider ->
+        providers = agent |> Repo.preload(providers: :deployments) |> Map.fetch!(:providers)
+
+        # Note the clusters this host took part in *before* clearing its state —
+        # afterwards there is nothing left to say which they were.
+        clusters =
+          providers
+          |> Enum.map(&(SlotState.get(&1.id) || %{}))
+          |> Enum.map(& &1[:cluster_id])
+          |> Enum.reject(&is_nil/1)
+          |> Enum.uniq()
+
+        Enum.each(providers, fn provider ->
           Enum.each(provider.deployments, fn deployment ->
             Health.mark_deployment(deployment, provider, :down,
               source: :agent,
@@ -62,6 +70,10 @@ defmodule Airo.Agents.Ingest do
 
           SlotState.clear(provider.id)
         end)
+
+        # Losing any rank breaks the whole load, so a head on a host that is
+        # still connected has to be taken down with its missing peer.
+        Enum.each(clusters, &refresh_cluster_head/1)
 
         broadcast(host_id)
 
@@ -77,38 +89,152 @@ defmodule Airo.Agents.Ingest do
   defp apply_slot(host_id, slot, index) do
     case Config.get_provider_by_name(slot_name(host_id, slot)) do
       %{} = provider ->
-        provenance = if id = slot["resident_model"], do: Map.get(index, id)
-        model = Provenance.reconcile(host_id, provider, slot, provenance)
-        {resident_status, reason} = status_for(slot["status"], slot["reason"])
+        cluster = cluster_attrs(slot)
+        model = if peer?(cluster), do: nil, else: reconcile(host_id, provider, slot, index)
 
-        # Reload deployments — reconcile may have re-linked one's model_id.
-        %{deployments: deployments} = Repo.preload(provider, :deployments, force: true)
+        SlotState.put(provider.id, slot_attrs(slot, cluster, model))
 
-        Enum.each(deployments, fn deployment ->
-          {status, why} =
-            if model && deployment.model_id == model.id,
-              do: {resident_status, reason},
-              else: {:down, "not_resident"}
-
-          Health.mark_deployment(deployment, provider, status, source: :agent, reason: clip(why))
-        end)
-
-        SlotState.put(provider.id, %{
-          resident_model: slot["resident_model"],
-          revision: slot["revision"],
-          status: slot["status"],
-          reason: clip(slot["reason"]),
-          ctx: slot["ctx"],
-          parallel: slot["parallel"],
-          ctx_total: slot["ctx_total"],
-          engine_build: slot["engine_build"],
-          profile: slot["profile"]
-        })
+        if peer?(cluster) do
+          demote_peer(provider)
+          # This rank doesn't serve, but it decides whether the head can.
+          refresh_cluster_head(cluster.cluster_id)
+        else
+          mark_deployments(provider, model && model.id, head_status(slot, cluster))
+        end
 
         broadcast(host_id)
 
       _ ->
         :ok
+    end
+  end
+
+  defp reconcile(host_id, provider, slot, index) do
+    provenance = if id = slot["resident_model"], do: Map.get(index, id)
+    Provenance.reconcile(host_id, provider, slot, provenance)
+  end
+
+  defp slot_attrs(slot, cluster, model) do
+    %{
+      resident_model: slot["resident_model"],
+      revision: slot["revision"],
+      status: slot["status"],
+      reason: clip(slot["reason"]),
+      ctx: slot["ctx"],
+      parallel: slot["parallel"],
+      ctx_total: slot["ctx_total"],
+      engine_build: slot["engine_build"],
+      profile: slot["profile"],
+      cluster_id: cluster.cluster_id,
+      tp_rank: cluster.tp_rank,
+      tp_size: cluster.tp_size,
+      # Recorded so a peer's push can find the head's resident deployment without
+      # re-running provenance (which would re-fetch inventory over HTTP).
+      model_id: model && model.id
+    }
+  end
+
+  # The agent sends the shared load id as `deployment_id`. It is a *load* id and
+  # has nothing to do with `Airo.Config.Deployment`, so it is carried internally
+  # as `cluster_id` to keep the two from being confused.
+  defp cluster_attrs(slot) do
+    %{
+      cluster_id: presence(slot["deployment_id"] || slot["cluster_id"]),
+      tp_rank: as_int(slot["tp_rank"]),
+      tp_size: as_int(slot["tp_size"])
+    }
+  end
+
+  # Rank 0 (or an unclustered slot) is the head — the only rank serving the API.
+  defp peer?(%{tp_rank: rank}) when is_integer(rank), do: rank > 0
+  defp peer?(_cluster), do: false
+
+  ## Deployment health
+
+  # Derive health by **identity**: the deployment linked to the resident Model
+  # takes the slot's status, the rest are down.
+  defp mark_deployments(provider, resident_model_id, {resident_status, reason}) do
+    # Reload deployments — reconcile may have re-linked one's model_id.
+    %{deployments: deployments} = Repo.preload(provider, :deployments, force: true)
+
+    Enum.each(deployments, fn deployment ->
+      {status, why} =
+        if resident_model_id && deployment.model_id == resident_model_id,
+          do: {resident_status, reason},
+          else: {:down, "not_resident"}
+
+      Health.mark_deployment(deployment, provider, status, source: :agent, reason: clip(why))
+    end)
+  end
+
+  # A peer rank holds a shard of the weights and serves no API. Nothing should
+  # ever be routed at it, so any deployment bound to one (hand-created, or left
+  # behind by a slot that used to be a head) is forced down rather than left
+  # looking healthy on a port that answers nothing.
+  defp demote_peer(provider) do
+    %{deployments: deployments} = Repo.preload(provider, :deployments, force: true)
+
+    Enum.each(deployments, fn deployment ->
+      Health.mark_deployment(deployment, provider, :down, source: :agent, reason: "tp_peer")
+    end)
+  end
+
+  # A tensor-parallel cluster is exactly as healthy as its worst rank: if a peer
+  # is down the head's engine cannot serve, however healthy the head looks by
+  # itself. Fold every member's status into the head's own before marking.
+  defp head_status(slot, %{cluster_id: nil}), do: status_for(slot["status"], slot["reason"])
+
+  defp head_status(slot, cluster) do
+    members = SlotState.members(cluster.cluster_id)
+    degraded = Enum.find(members, fn {_id, record} -> degraded_rank?(record) end)
+
+    cond do
+      # A rank that has gone silent leaves no record at all, so absence — not
+      # just a `down` status — is what a lost peer looks like here.
+      incomplete?(members, cluster.tp_size) ->
+        {:down, "tp_cluster_incomplete"}
+
+      degraded ->
+        {_id, record} = degraded
+        status_for(cluster_status(record), cluster_reason(record))
+
+      true ->
+        status_for(slot["status"], slot["reason"])
+    end
+  end
+
+  defp incomplete?(members, tp_size) when is_integer(tp_size) and tp_size > 1,
+    do: length(members) < tp_size
+
+  defp incomplete?(_members, _tp_size), do: false
+
+  # An empty peer means the cluster never formed; treat it as down, not as idle.
+  defp degraded_rank?(%{tp_rank: rank} = record) when is_integer(rank) and rank > 0,
+    do: record[:status] != :up
+
+  defp degraded_rank?(_record), do: false
+
+  defp cluster_status(%{status: :loading}), do: "loading"
+  defp cluster_status(_record), do: "down"
+
+  defp cluster_reason(%{tp_rank: rank, status: status}), do: "tp_rank_#{rank}_#{status}"
+
+  # Re-derive the head's deployment health after a peer moved. The head's own
+  # push already linked its resident Model, so read that back from its slot state
+  # rather than reconciling again.
+  defp refresh_cluster_head(nil), do: :ok
+
+  defp refresh_cluster_head(cluster_id) do
+    members = SlotState.members(cluster_id)
+
+    with {provider_id, head} <- Enum.find(members, fn {_id, r} -> SlotState.head?(r) end),
+         %{} = provider <- Config.get_provider(provider_id) do
+      cluster = %{cluster_id: cluster_id, tp_rank: head[:tp_rank], tp_size: head[:tp_size]}
+      own = %{"status" => to_string(head.status), "reason" => head[:reason]}
+
+      mark_deployments(provider, head[:model_id], head_status(own, cluster))
+    else
+      _ -> :ok
     end
   end
 
@@ -146,4 +272,18 @@ defmodule Airo.Agents.Ingest do
 
   defp clip(nil), do: nil
   defp clip(reason), do: reason |> to_string() |> String.slice(0, 255)
+
+  defp presence(value) when is_binary(value) and value != "", do: value
+  defp presence(_value), do: nil
+
+  defp as_int(value) when is_integer(value), do: value
+
+  defp as_int(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, ""} -> int
+      _ -> nil
+    end
+  end
+
+  defp as_int(_value), do: nil
 end
