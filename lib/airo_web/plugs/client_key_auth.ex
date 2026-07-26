@@ -8,6 +8,11 @@ defmodule AiroWeb.Plugs.ClientKeyAuth do
   (per-alias *scope* is enforced later, once the requested alias is known). On
   failure the connection is halted with a 401 OpenAI-shaped error.
 
+  `scope:` selects the surface being guarded (`:inference` by default,
+  `:management` for the serving/usage/metrics endpoints). A key that
+  authenticates but lacks the scope is halted with a **403**, not a 401 — the
+  credential is valid, the surface is not granted to it.
+
   The stored value is a hash of a high-entropy key, so the equality lookup
   leaks nothing useful; no constant-time compare is required here.
   """
@@ -17,13 +22,19 @@ defmodule AiroWeb.Plugs.ClientKeyAuth do
   alias Airo.Config.ClientKey
   alias AiroWeb.{GatewayUsage, OpenAIError}
 
-  def init(opts), do: opts
+  def init(opts), do: Keyword.put_new(opts, :scope, :inference)
 
-  def call(conn, _opts) do
+  def call(conn, opts) do
+    scope = Keyword.get(opts, :scope, :inference)
+
     with {:ok, raw} <- bearer_token(conn),
          %ClientKey{enabled: true} = key <-
            Config.get_client_key_by_hash(ClientKey.hash_key(raw)) do
-      assign(conn, :client_key, key)
+      if ClientKey.has_scope?(key, scope) do
+        assign(conn, :client_key, key)
+      else
+        forbidden(conn, scope)
+      end
     else
       _ -> unauthorized(conn)
     end
@@ -54,6 +65,22 @@ defmodule AiroWeb.Plugs.ClientKeyAuth do
     conn
     |> put_resp_content_type("application/json")
     |> send_resp(401, Jason.encode!(body))
+    |> halt()
+  end
+
+  # Authenticated but not granted this surface. Deliberately not recorded as
+  # usage — no inference was attempted, so it isn't consumption.
+  defp forbidden(conn, scope) do
+    body =
+      OpenAIError.body(
+        "This client key is not scoped for #{scope} access.",
+        "invalid_request_error",
+        "insufficient_scope"
+      )
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(403, Jason.encode!(body))
     |> halt()
   end
 

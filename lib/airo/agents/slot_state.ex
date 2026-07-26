@@ -29,6 +29,7 @@ defmodule Airo.Agents.SlotState do
           ctx_total: pos_integer() | nil,
           engine_build: String.t() | nil,
           profile: map() | nil,
+          resident_since: DateTime.t() | nil,
           updated_at: integer()
         }
 
@@ -40,6 +41,11 @@ defmodule Airo.Agents.SlotState do
   `profile` rides only the (heartbeat) register, not slot transition events, so it
   is **preserved** when a push omits it — a status flip shouldn't blank the
   serving profile.
+
+  `resident_since` is stamped in **wall clock** (everything else here is
+  monotonic) and holds when the *current* model became resident: it survives
+  status flips and heartbeats, and only resets when the resident model actually
+  changes. External consumers use it to spot a reload they didn't initiate.
   """
   @spec put(integer(), map()) :: record()
   def put(provider_id, attrs) when is_integer(provider_id) and is_map(attrs) do
@@ -55,6 +61,7 @@ defmodule Airo.Agents.SlotState do
       ctx_total: attrs[:ctx_total],
       engine_build: attrs[:engine_build],
       profile: attrs[:profile] || prior[:profile],
+      resident_since: resident_since(prior, attrs[:resident_model]),
       updated_at: now()
     }
 
@@ -77,6 +84,16 @@ defmodule Airo.Agents.SlotState do
     :ets.delete(Store.slots_table(), provider_id)
     :ok
   end
+
+  # Keep the prior stamp while the same model stays resident; stamp afresh when
+  # the model changes. An empty slot has nothing resident, so no stamp.
+  defp resident_since(_prior, model) when model in [nil, ""], do: nil
+
+  defp resident_since(%{resident_model: same, resident_since: %DateTime{} = since}, model)
+       when same == model,
+       do: since
+
+  defp resident_since(_prior, _model), do: DateTime.utc_now() |> DateTime.truncate(:second)
 
   # The agent reports the slot's steady state (`empty|loading|up`) and terminal
   # transitions (`down|failed`). Anything unrecognized is treated as down rather

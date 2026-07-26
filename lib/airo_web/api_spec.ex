@@ -16,6 +16,7 @@ defmodule AiroWeb.ApiSpec do
     MediaType,
     OpenApi,
     Operation,
+    Parameter,
     PathItem,
     Reference,
     RequestBody,
@@ -151,7 +152,130 @@ defmodule AiroWeb.ApiSpec do
               "200" => resp("ModelList", "The callable models for this key.")
             })
         }
+      },
+      "/v1/serving" => %PathItem{
+        get:
+          management_op(
+            "getServing",
+            "Serving topology",
+            "Which host serves what: agent hosts with their GPU telemetry and " <>
+              "slots, each slot's resident model, every deployment's health and " <>
+              "routability, external providers, and alias resolution. " <>
+              "`ETag`/`If-None-Match` supported — a poller gets `304` while " <>
+              "topology is unchanged.",
+            [
+              param(
+                "inventory",
+                "Also call each host agent for the models it holds on disk, and " <>
+                  "use their sizes for per-slot capacity math. One outbound HTTP " <>
+                  "call per host, so off by default.",
+                %Schema{type: :boolean, default: false}
+              )
+            ],
+            resp("ServingSnapshot", "The current serving topology.")
+          )
+      },
+      "/v1/serving/health" => %PathItem{
+        get:
+          management_op(
+            "getServingHealth",
+            "Health transitions",
+            "Deployment health *changes*, so a consumer records flaps rather " <>
+              "than sampling current state and missing what happened between " <>
+              "polls. Each event carries `previous_status`, `duration_ms` and " <>
+              "`changed` (false for the duplicate `up` row an Airo restart " <>
+              "writes — count flaps on `changed`).",
+            [since_param(), limit_param()],
+            resp("HealthTransitions", "Health transitions, oldest first.")
+          )
+      },
+      "/v1/usage" => %PathItem{
+        get:
+          management_op(
+            "getUsage",
+            "Token and cost attribution",
+            "Usage rolled up along one axis. `next_since` is the id of the " <>
+              "newest record counted, so consecutive polls partition the record " <>
+              "stream exactly — no double-counting, no gap at the boundary.",
+            [
+              since_param(),
+              limit_param(),
+              param(
+                "group_by",
+                "Attribution axis.",
+                %Schema{
+                  type: :string,
+                  enum: ~w(deployment model alias capability client_key),
+                  default: "deployment"
+                }
+              )
+            ],
+            resp("UsageRollup", "Usage rolled up along the requested axis.")
+          )
+      },
+      "/metrics" => %PathItem{
+        get: %Operation{
+          operationId: "getMetrics",
+          summary: "Prometheus metrics",
+          description:
+            "The serving topology in Prometheus exposition format. Scrape with " <>
+              "the management client key as a bearer token. `airo_slot_status` " <>
+              "and `airo_deployment_health` use the enum idiom (one series per " <>
+              "state, one of them `1`), so alert on `status=\"down\"` being 1 " <>
+              "rather than on a series being absent.",
+          responses:
+            Map.merge(management_errors(), %{
+              "200" => %Response{
+                description: "Prometheus text exposition.",
+                content: %{
+                  "text/plain" => %MediaType{schema: %Schema{type: :string}}
+                }
+              }
+            })
+        }
       }
+    }
+  end
+
+  ## Management surface
+
+  defp management_op(operation_id, summary, description, parameters, success) do
+    %Operation{
+      operationId: operation_id,
+      summary: summary,
+      description: description,
+      parameters: parameters,
+      responses: Map.merge(management_errors(), %{"200" => success})
+    }
+  end
+
+  defp management_errors do
+    %{
+      "401" => resp("Error", "Missing or invalid client key."),
+      "403" => resp("Error", "The client key is not scoped for management access.")
+    }
+  end
+
+  defp since_param do
+    param(
+      "since",
+      "Cursor. An event/record **id** (exact — use the `next_since` from the " <>
+        "previous response) or an ISO 8601 timestamp (convenient, but drops " <>
+        "rows sharing the boundary second). Omit for everything.",
+      %Schema{type: :string}
+    )
+  end
+
+  defp limit_param,
+    do: param("limit", "Maximum rows.", %Schema{type: :integer, default: 500, maximum: 5_000})
+
+  defp param(name, description, schema) do
+    %Parameter{
+      name: String.to_atom(name),
+      in: :query,
+      required: false,
+      description: description,
+      schema: schema
     }
   end
 
@@ -448,6 +572,93 @@ defmodule AiroWeb.ApiSpec do
               type: %Schema{type: :string},
               code: %Schema{type: :string}
             }
+          }
+        }
+      }
+    }
+    |> Map.merge(management_schemas())
+  end
+
+  # The management payloads are wide and mostly self-describing; these document
+  # the fields a consumer can't guess the semantics of, and leave the rest open
+  # rather than pinning an exhaustive shape that would drift from the code.
+  defp management_schemas do
+    %{
+      "ServingSnapshot" => %Schema{
+        type: :object,
+        description:
+          "Serving topology. Note two things the payload makes explicit because " <>
+            "they are easy to get wrong: health decays to `unknown` once a " <>
+            "snapshot is older than `staleness_ms` (so read `stale`/`age_ms`, " <>
+            "not `status` alone), and health is a *preference* in Airo, not a " <>
+            "gate — `eligible` is the hard config gate, `routable` is eligible " <>
+            "**and** healthy, and an eligible-but-unhealthy deployment is still " <>
+            "tried as a last resort.",
+        properties: %{
+          generated_at: %Schema{type: :string, format: :"date-time"},
+          staleness_ms: %Schema{
+            type: :integer,
+            description: "Age at which a health snapshot decays to `unknown`."
+          },
+          hosts: %Schema{
+            type: :array,
+            description:
+              "Agent-managed hosts. Each slot holds at most one resident model; " <>
+                "`resident` is null when the slot is empty. Join a resident " <>
+                "model on `upstream_model_id` — the agent's `model` id is the " <>
+                "real artifact name and is not unique across hosts.",
+            items: %Schema{type: :object, additionalProperties: true}
+          },
+          external_providers: %Schema{
+            type: :array,
+            description: "Upstreams Airo routes to but does not manage.",
+            items: %Schema{type: :object, additionalProperties: true}
+          },
+          aliases: %Schema{
+            type: :array,
+            description:
+              "Alias resolution. `servable` tracks the hard gate (at least one " <>
+                "eligible candidate); `routable_candidates` counts the healthy ones.",
+            items: %Schema{type: :object, additionalProperties: true}
+          }
+        }
+      },
+      "HealthTransitions" => %Schema{
+        type: :object,
+        properties: %{
+          generated_at: %Schema{type: :string, format: :"date-time"},
+          events: %Schema{
+            type: :array,
+            items: %Schema{type: :object, additionalProperties: true}
+          },
+          next_since: %Schema{
+            type: :integer,
+            nullable: true,
+            description: "Cursor for the next poll."
+          },
+          has_more: %Schema{
+            type: :boolean,
+            description: "More events beyond `limit`; poll again immediately."
+          }
+        }
+      },
+      "UsageRollup" => %Schema{
+        type: :object,
+        properties: %{
+          generated_at: %Schema{type: :string, format: :"date-time"},
+          group_by: %Schema{type: :string},
+          rows: %Schema{
+            type: :array,
+            description:
+              "One row per group, with `requests`, `errors`, `timeouts`, " <>
+                "`fallbacks`, `tokens_in`, `tokens_out`, `cost`, and " <>
+                "`p50_latency_ms`/`p95_latency_ms`.",
+            items: %Schema{type: :object, additionalProperties: true}
+          },
+          next_since: %Schema{
+            type: :integer,
+            nullable: true,
+            description: "Id of the newest record counted; pass as `since` to continue exactly."
           }
         }
       }

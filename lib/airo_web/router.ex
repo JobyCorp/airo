@@ -34,6 +34,34 @@ defmodule AiroWeb.Router do
     get "/models", ModelsController, :index
   end
 
+  # Read-only management surface: serving topology, health transitions, usage
+  # attribution. Exposes host names, control URLs and upstream base URLs, so it
+  # takes a key scoped `management` rather than any valid inference key.
+  pipeline :management_api do
+    plug :accepts, ["json"]
+    plug AiroWeb.Plugs.ClientKeyAuth, scope: :management
+  end
+
+  scope "/v1", AiroWeb do
+    pipe_through :management_api
+
+    get "/serving", ServingController, :index
+    get "/serving/health", ServingController, :health
+    get "/usage", UsageController, :index
+  end
+
+  # Prometheus exposition over the same data. Text, not JSON, so it skips
+  # :accepts — scrapers send `Accept: text/plain` or nothing at all.
+  pipeline :metrics_api do
+    plug AiroWeb.Plugs.ClientKeyAuth, scope: :management
+  end
+
+  scope "/", AiroWeb do
+    pipe_through :metrics_api
+
+    get "/metrics", MetricsController, :index
+  end
+
   # Realtime WebSocket surface — client-key auth, no :accepts (it's a WS upgrade,
   # not a content-negotiated response).
   pipeline :realtime_api do

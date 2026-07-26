@@ -24,7 +24,8 @@ defmodule AiroWeb.Admin.KeyLive do
   def handle_event("mint", %{"client_key" => params}, socket) do
     attrs = %{
       "name" => params["name"],
-      "allowed_aliases" => parse_aliases(params["allowed_aliases"])
+      "allowed_aliases" => parse_aliases(params["allowed_aliases"]),
+      "scopes" => parse_scopes(params["scopes"])
     }
 
     case Config.mint_client_key(attrs) do
@@ -82,6 +83,17 @@ defmodule AiroWeb.Admin.KeyLive do
     end
   end
 
+  # A multi-select posts a list; an untouched form posts nothing. Fall back to
+  # inference-only so a key is never accidentally minted with management access.
+  defp parse_scopes(scopes) when is_list(scopes) do
+    case Enum.reject(scopes, &(&1 == "")) do
+      [] -> ["inference"]
+      list -> list
+    end
+  end
+
+  defp parse_scopes(_scopes), do: ["inference"]
+
   defp key_header_subtitle(:index), do: "Per-consumer auth, scoped to aliases."
   defp key_header_subtitle(:new), do: "Mint a client key and copy it once."
 
@@ -133,6 +145,17 @@ defmodule AiroWeb.Admin.KeyLive do
             value="*"
             placeholder="* or comma-separated alias names"
           />
+          <.input
+            field={@form[:scopes]}
+            type="select"
+            multiple
+            label="Surfaces"
+            options={[
+              {"Inference (/v1/chat/completions, …)", "inference"},
+              {"Management (/v1/serving, /v1/usage, /metrics)", "management"}
+            ]}
+            value={["inference"]}
+          />
           <div class="flex gap-2">
             <.button variant="primary">Mint key</.button>
             <.button type="button" navigate={~p"/admin/keys"}>Cancel</.button>
@@ -150,6 +173,7 @@ defmodule AiroWeb.Admin.KeyLive do
     <.table id="keys" rows={@keys}>
       <:col :let={{_id, k}} label="Name">{k.name}</:col>
       <:col :let={{_id, k}} label="Allowed aliases">{Enum.join(k.allowed_aliases, ", ")}</:col>
+      <:col :let={{_id, k}} label="Surfaces">{Enum.map_join(k.scopes, ", ", &to_string/1)}</:col>
       <:col :let={{_id, k}} label="Enabled">{k.enabled}</:col>
       <:action :let={{_id, k}}>
         <.icon_button
