@@ -144,6 +144,7 @@ defmodule Airo.Config do
 
   def list_providers, do: Repo.all(Provider)
   def get_provider!(id), do: Repo.get!(Provider, id)
+  def get_provider(id), do: Repo.get(Provider, id)
   def get_provider_by_name(name), do: Repo.get_by(Provider, name: name)
 
   ## Agents (Model 2 — host-side control planes that manage providers)

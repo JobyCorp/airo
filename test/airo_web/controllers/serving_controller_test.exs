@@ -382,6 +382,79 @@ defmodule AiroWeb.ServingControllerTest do
       assert body =~ ~s(model_name="model\\\\path")
     end
 
+    test "exposes multi-node loads as one cluster plus per-rank slots", %{conn: conn} do
+      for {host, rank} <- [{"sparky", 0}, {"sparky2", 1}] do
+        {:ok, _} = Config.create_agent(%{host_id: host, control_url: "http://#{host}:4400"})
+        slot = provider(%{agent_id: Config.get_agent_by_host_id(host).id, name: "#{host}:8081"})
+
+        SlotState.put(slot.id, %{
+          resident_model: "DeepSeek-V4-Flash:fp8",
+          status: "up",
+          cluster_id: "dep-7f3a",
+          tp_rank: rank,
+          tp_size: 2
+        })
+      end
+
+      body = conn |> management() |> get("/metrics") |> response(200)
+
+      assert body =~ ~s(airo_cluster_serving{cluster="dep-7f3a",model="DeepSeek-V4-Flash:fp8"} 1)
+      assert body =~ ~s(airo_cluster_complete{cluster="dep-7f3a",model="DeepSeek-V4-Flash:fp8"} 1)
+      assert body =~ ~s(airo_cluster_members{cluster="dep-7f3a",model="DeepSeek-V4-Flash:fp8"} 2)
+
+      # Only rank 0 answers inference, and each slot's series names its rank.
+      assert body =~ ~s(airo_slot_serves_api{host_id="sparky",slot="sparky:8081"} 1)
+      assert body =~ ~s(airo_slot_serves_api{host_id="sparky2",slot="sparky2:8081"} 0)
+
+      assert body =~
+               ~s(airo_slot_tp_rank{host_id="sparky2",slot="sparky2:8081",cluster="dep-7f3a"} 1)
+
+      assert body =~
+               ~s(model="DeepSeek-V4-Flash:fp8",status="up",cluster="dep-7f3a",tp_rank="1"} 1)
+    end
+
+    test "a cluster missing a rank reports not serving", %{conn: conn} do
+      {:ok, _} = Config.create_agent(%{host_id: "sparky", control_url: "http://sparky:4400"})
+      slot = provider(%{agent_id: Config.get_agent_by_host_id("sparky").id, name: "sparky:8081"})
+
+      SlotState.put(slot.id, %{
+        resident_model: "DeepSeek-V4-Flash:fp8",
+        status: "up",
+        cluster_id: "dep-7f3a",
+        tp_rank: 0,
+        tp_size: 2
+      })
+
+      body = conn |> management() |> get("/metrics") |> response(200)
+
+      # The head's own slot is up, but the load is not servable.
+      assert body =~
+               ~s(airo_slot_status{host_id="sparky",slot="sparky:8081",model="DeepSeek-V4-Flash:fp8",status="up",cluster="dep-7f3a",tp_rank="0"} 1)
+
+      assert body =~ ~s(airo_cluster_serving{cluster="dep-7f3a",model="DeepSeek-V4-Flash:fp8"} 0)
+      assert body =~ ~s(airo_cluster_complete{cluster="dep-7f3a",model="DeepSeek-V4-Flash:fp8"} 0)
+    end
+
+    test "emits gpu utilisation and power when the host reports them", %{conn: conn} do
+      {:ok, _} =
+        Config.create_agent(%{
+          host_id: "sparky",
+          control_url: "http://sparky:4400",
+          gpu: %{
+            "available" => true,
+            "vram_total_mb" => 124_546,
+            "vram_used_mb" => 118_415,
+            "util_pct" => 87.5,
+            "power_draw_w" => 11.87
+          }
+        })
+
+      body = conn |> management() |> get("/metrics") |> response(200)
+
+      assert body =~ ~s(airo_host_gpu_util_pct{host_id="sparky"} 87.5)
+      assert body =~ ~s(airo_host_power_draw_w{host_id="sparky"} 11.87)
+    end
+
     test "emits usage counters per deployment", %{conn: conn} do
       d = deployment(provider(), %{model_name: "counted"})
       Usage.record_usage(%{deployment_id: d.id, outcome: :success, tokens_in: 7, tokens_out: 11})
