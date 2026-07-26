@@ -52,7 +52,9 @@ defmodule Airo.Agents.Capacity do
     used = num(gpu, :vram_used_mb)
 
     if fetch(gpu, :available) == true and is_number(total) and is_number(used) do
-      %{total_mb: total, used_mb: used, free_mb: Float.round(total - used, 1)}
+      # `/ 1` coerces to float: an agent reporting whole megabytes sends integers,
+      # and `Float.round/2` raises on an integer.
+      %{total_mb: total, used_mb: used, free_mb: Float.round((total - used) / 1, 1)}
     else
       :unavailable
     end
