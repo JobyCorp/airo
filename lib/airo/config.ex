@@ -165,6 +165,29 @@ defmodule Airo.Config do
     end
   end
 
+  @doc """
+  Delete an agent whose host is gone — a renamed or retired box that will never
+  register again and would otherwise sit in the roster as permanently offline.
+
+  **Refuses while it still manages slots.** `providers.agent_id` is
+  `on_delete: :nilify_all`, so deleting an agent that owns providers doesn't
+  remove them — it strips their `agent_id` and leaves them behind looking like
+  *external* providers. They'd start being probed (the prober skips
+  agent-managed ones) and stay routable, under a `host:port` name nothing
+  manages any more. That is a silent, hard-to-spot mess, so the slots have to be
+  removed or reassigned first.
+
+  Returns `{:error, {:has_providers, count}}` rather than doing it anyway.
+  """
+  @spec delete_agent(Agent.t()) ::
+          {:ok, Agent.t()} | {:error, {:has_providers, pos_integer()} | Ecto.Changeset.t()}
+  def delete_agent(%Agent{} = agent) do
+    case Repo.preload(agent, :providers) do
+      %Agent{providers: []} -> Repo.delete(agent)
+      %Agent{providers: providers} -> {:error, {:has_providers, length(providers)}}
+    end
+  end
+
   def create_provider(attrs) do
     %Provider{} |> Provider.changeset(attrs) |> Repo.insert()
   end

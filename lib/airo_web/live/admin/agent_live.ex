@@ -203,6 +203,34 @@ defmodule AiroWeb.Admin.AgentLive do
     end
   end
 
+  # Forget a host that's gone for good (renamed, retired). The context refuses
+  # while slots are still attached, so a stale agent can never be turned into a
+  # set of unmanaged providers by accident.
+  def handle_event("delete_agent", %{"id" => id}, socket) do
+    agent = Config.get_agent!(id)
+
+    case Config.delete_agent(agent) do
+      {:ok, _agent} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Forgot agent #{agent.host_id}.")
+         |> assign_agents()
+         |> subscribe_presence()}
+
+      {:error, {:has_providers, count}} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "#{agent.host_id} still manages #{count} slot(s). Delete or reassign them first — " <>
+             "removing the agent would leave them behind as unmanaged providers."
+         )}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Could not delete #{agent.host_id}.")}
+    end
+  end
+
   def handle_event("resync", _params, %{assigns: %{detail: %{agent: agent}}} = socket) do
     AiroWeb.Endpoint.broadcast("agent:#{agent.host_id}", "resync", %{})
     {:noreply, put_flash(socket, :info, "Asked #{agent.host_id} to re-report its slots.")}
@@ -665,10 +693,31 @@ defmodule AiroWeb.Admin.AgentLive do
           label={"Open #{agent.host_id}"}
           navigate={~p"/admin/agents/#{agent.id}"}
         />
+        <.icon_button
+          icon="hero-trash"
+          label={delete_label(agent, @online[agent.host_id])}
+          variant="danger"
+          disabled={not deletable?(agent, @online[agent.host_id])}
+          phx-click="delete_agent"
+          phx-value-id={agent.id}
+          data-confirm={"Forget #{agent.host_id}? It will reappear if that host ever connects again."}
+        />
       </:action>
     </.table>
     """
   end
+
+  # A host that's connected re-registers on its next heartbeat, so deleting it
+  # is a no-op that looks like it worked; and one that still owns slots can't be
+  # deleted without stranding them (see `Config.delete_agent/1`). Say which.
+  defp deletable?(agent, online), do: not online and agent.providers == []
+
+  defp delete_label(agent, true), do: "#{agent.host_id} is online — it would re-register"
+
+  defp delete_label(%{providers: [_ | _] = providers} = agent, _offline),
+    do: "#{agent.host_id} still manages #{length(providers)} slot(s) — remove them first"
+
+  defp delete_label(agent, _offline), do: "Forget #{agent.host_id}"
 
   attr :detail, :map, required: true
   attr :config, :any, required: true
