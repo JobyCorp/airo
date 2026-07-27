@@ -4,6 +4,11 @@ defmodule Airo.RegistryTest do
   alias Airo.Adapters.{LMStudio, Ollama, OpenAICompatible, Speaches, Unsloth, VLLM}
   alias Airo.Registry
 
+  # The moduledoc examples had drifted from the map (`:vllm` was documented as
+  # OpenAICompatible, `:anthropic` as unregistered). This is the module a reader
+  # consults to answer "what handles vLLM?", so pin the docs to the behaviour.
+  doctest Airo.Registry
+
   test "fetch/1 maps OpenAI-compatible types to the shared adapter" do
     for type <- [:openai] do
       assert Registry.fetch(type) == {:ok, OpenAICompatible}

@@ -34,10 +34,19 @@ defmodule Airo.Registry do
   @doc """
   Fetch the adapter module for an `adapter_type`.
 
+  Note that an **agent-managed slot is always `:openai`** whatever engine is
+  behind it — that field names the wire protocol, not the backend. So `:vllm`
+  here means "an external vLLM someone else runs", and a vLLM slot Airo manages
+  resolves to `OpenAICompatible`. `Airo.Config.Model.engine` is what identifies
+  the engine of a managed slot.
+
       iex> Airo.Registry.fetch(:vllm)
+      {:ok, Airo.Adapters.VLLM}
+
+      iex> Airo.Registry.fetch(:openai)
       {:ok, Airo.Adapters.OpenAICompatible}
 
-      iex> Airo.Registry.fetch(:anthropic)
+      iex> Airo.Registry.fetch(:tgi)
       {:error, :no_adapter}
   """
   @spec fetch(atom()) :: {:ok, module()} | {:error, :no_adapter}

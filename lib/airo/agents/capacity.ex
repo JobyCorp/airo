@@ -108,7 +108,7 @@ defmodule Airo.Agents.Capacity do
   @type validation :: %{
           projected_mb: float() | nil,
           budget_mb: float() | nil,
-          fits?: boolean() | :cold | :unknown
+          fits?: boolean() | :cold | :uncalibratable | :unknown
         }
 
   @doc """
@@ -138,9 +138,17 @@ defmodule Airo.Agents.Capacity do
 
   Returns `fits?`:
   - `true` / `false` — calibrated projection within / over the 95% budget (resident);
-  - `:cold` — not calibratable, but the weights alone fit (KV unvalidated);
+  - `:cold` — not calibrated *yet*, but the weights alone fit. Loading the model
+    is what produces the measurement;
+  - `:uncalibratable` — the weights fit, and this engine can never be calibrated
+    this way (`calibratable?: false`). Loading it changes nothing;
   - `false` — even the weights exceed the budget (a definite block);
   - `:unknown` — no telemetry / size.
+
+  `:cold` and `:uncalibratable` carry the same *number* — the weights floor — and
+  neither blocks. They are distinct because they call for different actions, and
+  because telling an operator that a resident vLLM model "can't be validated
+  until it's loaded" is simply false.
   """
   @spec validate(map()) :: validation()
   def validate(opts) do
@@ -158,8 +166,15 @@ defmodule Airo.Agents.Capacity do
       projected = Float.round(project(weights, per_ctx, new_total), 1)
       %{projected_mb: projected, budget_mb: budget, fits?: projected <= budget}
     else
-      # Cold / uncalibratable: only the weights floor is certain.
-      fits = if weights > budget, do: false, else: :cold
+      # Only the weights floor is certain. Over budget is a definite block either
+      # way; under it, why we couldn't calibrate is what the operator needs.
+      fits =
+        cond do
+          weights > budget -> false
+          Map.get(opts, :calibratable?, true) -> :cold
+          true -> :uncalibratable
+        end
+
       %{projected_mb: Float.round(weights, 1), budget_mb: budget, fits?: fits}
     end
   end

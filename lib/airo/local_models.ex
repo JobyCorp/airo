@@ -10,7 +10,7 @@ defmodule Airo.LocalModels do
   alias Airo.Adapter.Context
   alias Airo.Config
   alias Airo.Config.{Deployment, Model, Provider}
-  alias Airo.{LocalProvider, Registry, Repo}
+  alias Airo.{Engines, LocalProvider, Registry, Repo}
 
   @req_options [receive_timeout: 30_000]
 
@@ -58,7 +58,7 @@ defmodule Airo.LocalModels do
   end
 
   def capabilities(%Provider{} = provider) do
-    case Registry.fetch(provider.adapter_type) do
+    case management_module(provider) do
       {:ok, module} ->
         Enum.filter(LocalProvider.capabilities(), &LocalProvider.supports?(module, &1))
 
@@ -197,13 +197,43 @@ defmodule Airo.LocalModels do
   defp stringify(value), do: value
 
   defp local_module(provider, capability) do
-    with {:ok, module} <- Registry.fetch(provider.adapter_type),
+    with {:ok, module} <- management_module(provider),
          true <- LocalProvider.supports?(module, capability) do
       {:ok, module}
     else
       false -> {:error, :unsupported}
       {:error, :no_adapter} = error -> error
     end
+  end
+
+  # Which module manages this provider's local models.
+  #
+  # `adapter_type` names the *wire protocol*, and every agent-managed slot is
+  # `:openai` whatever engine runs behind it — so resolving on it alone gave a
+  # managed vLLM slot none of the `/metrics` and `max_model_len` reporting an
+  # external vLLM provider gets. For managed slots, resolve on the engine
+  # instead; external providers keep resolving on `adapter_type`, which is what
+  # identifies their backend.
+  defp management_module(%Provider{agent_id: nil} = provider),
+    do: Registry.fetch(provider.adapter_type)
+
+  defp management_module(%Provider{} = provider) do
+    case provider |> provider_engine() |> Engines.local_provider() do
+      nil -> Registry.fetch(provider.adapter_type)
+      module -> {:ok, module}
+    end
+  end
+
+  # A managed slot holds one model at a time, so any linked model's engine
+  # identifies the slot. `nil` for an unsaved provider or one with nothing bound
+  # yet — the caller falls back to `adapter_type`.
+  defp provider_engine(%Provider{id: nil}), do: nil
+
+  defp provider_engine(%Provider{} = provider) do
+    provider
+    |> Repo.preload(deployments: :model)
+    |> Map.fetch!(:deployments)
+    |> Enum.find_value(fn deployment -> deployment.model && deployment.model.engine end)
   end
 
   defp context(provider) do

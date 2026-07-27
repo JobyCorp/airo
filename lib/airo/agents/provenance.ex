@@ -48,7 +48,11 @@ defmodule Airo.Agents.Provenance do
       revision: slot["revision"] || prov_get(prov, "revision"),
       family: prov_get(prov, "family"),
       quantization: prov_get(prov, "quant"),
-      size: humanize_size(prov_get(prov, "size_bytes"))
+      size: humanize_size(prov_get(prov, "size_bytes")),
+      # The engine is the only thing distinguishing a llama.cpp slot from a vLLM
+      # one — both are `adapter_type: :openai` on the wire — and it decides how
+      # capacity, sampling knobs and local management behave (S22).
+      engine: prov_get(prov, "engine")
     }
     |> reject_nil()
   end

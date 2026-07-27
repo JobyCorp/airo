@@ -4,6 +4,18 @@ defmodule Airo.Config.Model do
 
   A model is the artifact/version Airo operators evaluate and manage. A
   deployment is still the runnable copy of that model on a provider machine.
+
+  `engine` names the backend serving it (`"llama_cpp"`, `"vllm"`, …), sourced
+  from the agent's `/inventory`. It matters because the engines are **not
+  interchangeable behind the OpenAI wire**: llama.cpp's `-c` is `ctx × parallel`
+  while vLLM's `--max-model-len` is the per-request window, llama.cpp honours
+  sampling knobs at launch and vLLM honours none, and only vLLM exposes
+  `/metrics`. Every agent-managed slot is `adapter_type: :openai` whatever runs
+  behind it — that field names the *wire protocol* — so this is the only thing
+  that distinguishes them.
+
+  Null for external providers: there the provider's `adapter_type` already
+  identifies the backend.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -22,6 +34,7 @@ defmodule Airo.Config.Model do
     field :revision, :string
     field :quantization, :string
     field :size, :string
+    field :engine, :string
     field :status, Ecto.Enum, values: @statuses, default: :evaluating
     field :notes, :string
 
@@ -43,6 +56,7 @@ defmodule Airo.Config.Model do
       :revision,
       :quantization,
       :size,
+      :engine,
       :status,
       :notes
     ])

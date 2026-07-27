@@ -36,15 +36,48 @@ defmodule Airo.Agents.ProvenanceTest do
       "status" => "up"
     }
 
-  defp provenance do
-    %{
-      "id" => @resident,
-      "family" => "qwen35moe",
-      "quant" => "UD-Q4_K_XL",
-      "size_bytes" => 22_853_663_008,
-      "path" => @path,
-      "revision" => "5bc3e238"
-    }
+  defp provenance(overrides \\ %{}) do
+    Map.merge(
+      %{
+        "id" => @resident,
+        "family" => "qwen35moe",
+        "quant" => "UD-Q4_K_XL",
+        "size_bytes" => 22_853_663_008,
+        "path" => @path,
+        "revision" => "5bc3e238",
+        "engine" => "llama_cpp"
+      },
+      overrides
+    )
+  end
+
+  # S22: the engine is the only thing distinguishing a llama.cpp slot from a vLLM
+  # one — both are `adapter_type: :openai` — and it decides how capacity,
+  # sampling knobs and local management behave. It used to be dropped here.
+  test "records the engine the agent reports" do
+    provider = slot_provider(agent("jobycorp"), 8081)
+
+    model = Provenance.reconcile("jobycorp", provider, slot(), provenance())
+
+    assert model.engine == "llama_cpp"
+  end
+
+  test "records a vLLM engine just the same" do
+    provider = slot_provider(agent("sparky"), 8081)
+
+    model =
+      Provenance.reconcile("sparky", provider, slot(), provenance(%{"engine" => "vllm"}))
+
+    assert model.engine == "vllm"
+  end
+
+  test "an inventory entry with no engine leaves it null rather than guessing" do
+    provider = slot_provider(agent("jobycorp"), 8081)
+
+    model =
+      Provenance.reconcile("jobycorp", provider, slot(), Map.delete(provenance(), "engine"))
+
+    assert model.engine == nil
   end
 
   test "creates a host/slot-qualified Model with the real name as display_name" do
