@@ -25,6 +25,54 @@ defmodule AiroWeb.AgentLiveTest do
     {agent, provider}
   end
 
+  describe "forgetting an orphaned agent" do
+    test "removes a host that is offline and manages nothing", %{conn: conn} do
+      {:ok, gone} =
+        Config.create_agent(%{host_id: "renamed-away", control_url: "http://old:4400"})
+
+      {:ok, view, _html} = live(conn, ~p"/admin/agents")
+      row = ~s{[phx-click="delete_agent"][phx-value-id="#{gone.id}"]}
+      assert has_element?(view, row)
+
+      html = view |> element(row) |> render_click()
+
+      # The row is gone from the roster (the host_id still appears in the
+      # confirmation flash, so match on the row rather than the bare name).
+      refute has_element?(view, row)
+      assert html =~ "Forgot agent renamed-away"
+      assert Config.get_agent_by_host_id("renamed-away") == nil
+    end
+
+    test "won't let you strand a host's slots", %{conn: conn} do
+      # The FK is nilify_all, so deleting here would leave the slot behind as an
+      # unmanaged provider rather than removing it.
+      {agent, provider} = agent_with_slot("has-slots")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/agents")
+
+      button = element(view, ~s{[phx-click="delete_agent"][phx-value-id="#{agent.id}"]})
+      assert render(button) =~ "disabled"
+      assert render(button) =~ "still manages 1 slot"
+
+      # Disabled in the markup AND refused if the event is sent anyway.
+      render_click(view, "delete_agent", %{"id" => to_string(agent.id)})
+
+      assert Config.get_agent_by_host_id("has-slots")
+      assert Airo.Config.get_provider!(provider.id).agent_id == agent.id
+    end
+
+    test "explains the refusal rather than failing quietly", %{conn: conn} do
+      {agent, _provider} = agent_with_slot("noisy")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/agents")
+
+      html = render_click(view, "delete_agent", %{"id" => to_string(agent.id)})
+
+      assert html =~ "still manages 1 slot"
+      assert html =~ "unmanaged providers"
+    end
+  end
+
   test "a 'resync' broadcast on the agent topic doesn't crash the view", %{conn: conn} do
     {agent, _provider} = agent_with_slot()
 
