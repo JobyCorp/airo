@@ -130,4 +130,45 @@ defmodule Airo.Agents.CapacityTest do
       assert %{fits?: :unknown} = Capacity.validate(%{weights_mb: nil, total_mb: 32_607.0})
     end
   end
+
+  # S22: `:cold` promises that loading the model produces the measurement. For an
+  # engine that can never be calibrated this way, saying so is a lie — an
+  # operator reads "can't be validated until it's loaded" on a *resident* vLLM
+  # slot and waits for something that will never happen.
+  describe "validate/1 with an uncalibratable engine" do
+    defp uncalibratable(opts) do
+      Capacity.validate(
+        Map.merge(
+          %{weights_mb: 60_000.0, total_mb: 124_546.0, ctx_total_new: 1_048_576},
+          Map.put(opts, :calibratable?, false)
+        )
+      )
+    end
+
+    test "weights that fit are :uncalibratable, not :cold" do
+      assert %{fits?: :uncalibratable, projected_mb: 60_000.0} = uncalibratable(%{})
+    end
+
+    test "still :uncalibratable when the model is resident with live telemetry" do
+      # This is the case the old copy got wrong: the model IS loaded, and there
+      # is a reading — there is simply no ctx_total to divide by.
+      assert %{fits?: :uncalibratable} =
+               uncalibratable(%{resident?: true, used_mb: 118_415.0, ctx_total_current: nil})
+    end
+
+    test "weights over budget are still a hard block" do
+      # Not knowing the KV cost never softens a floor we can measure.
+      assert %{fits?: false} = uncalibratable(%{weights_mb: 130_000.0})
+    end
+
+    test "a calibratable engine is unaffected" do
+      assert %{fits?: :cold} =
+               Capacity.validate(%{
+                 weights_mb: 5_000.0,
+                 total_mb: 32_607.0,
+                 ctx_total_new: 65_536,
+                 calibratable?: true
+               })
+    end
+  end
 end

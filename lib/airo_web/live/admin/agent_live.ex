@@ -18,6 +18,7 @@ defmodule AiroWeb.Admin.AgentLive do
   alias Airo.Agents
   alias Airo.Agents.{Capacity, Control, Ingest, SlotState}
   alias Airo.Config
+  alias Airo.Engines
   alias Airo.Repo
   alias AiroWeb.CompositeComponents
   alias AiroWeb.Presence
@@ -266,6 +267,7 @@ defmodule AiroWeb.Admin.AgentLive do
           %{
             mode: :configure,
             model: model,
+            engine: model["engine"],
             port: port,
             slots: [port],
             parallel: parallel || 1,
@@ -290,6 +292,7 @@ defmodule AiroWeb.Admin.AgentLive do
           %{
             mode: :load,
             model: model,
+            engine: model["engine"],
             port: load_target_slot(detail.slots),
             slots: Enum.map(detail.slots, & &1.port),
             parallel: 1,
@@ -361,12 +364,18 @@ defmodule AiroWeb.Admin.AgentLive do
   # judged against this host's share.
   defp validate_config(config) do
     ctx = parse_int(config.ctx, nil)
-    ctx_total_new = ctx && ctx * (config.parallel || 1)
     nnodes = max(config.nnodes || 1, 1)
+
+    # Per the engine's contract, not a flat ctx × parallel: that is llama.cpp's
+    # `-c`, and vLLM's `--max-model-len` is already the per-request window. The
+    # product was only ever right for vLLM because the agent reported
+    # `parallel: nil`; it now reports `--max-num-seqs`, so this has to be explicit.
+    ctx_total_new = Engines.ctx_total(config.engine, ctx, config.parallel)
 
     config.calib
     |> Map.update!(:weights_mb, fn mb -> mb && mb / nnodes end)
     |> Map.put(:ctx_total_new, ctx_total_new)
+    |> Map.put(:calibratable?, Engines.calibratable?(config.engine))
     |> Capacity.validate()
   end
 
@@ -981,7 +990,19 @@ defmodule AiroWeb.Admin.AgentLive do
           </p>
         </div>
 
-        <div>
+        <%!-- vLLM maps no sampling knob at launch, so offering them here would
+              invite setting a value the engine discards without a word. --%>
+        <p
+          :if={not Engines.honors_sampling?(@config.engine)}
+          class="text-xs text-base-content/55"
+        >
+          <span class="font-semibold">Sampling</span>
+          isn't a launch setting on {Engines.label(@config.engine)} — it maps none of these
+          server-side. Set temperature, top-p and the penalties on the deployment's
+          request defaults instead.
+        </p>
+
+        <div :if={Engines.honors_sampling?(@config.engine)}>
           <p class="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-base-content/55">
             Sampling
           </p>
@@ -1050,7 +1071,10 @@ defmodule AiroWeb.Admin.AgentLive do
           <p class="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-base-content/55">
             Launch
           </p>
-          <div class="mt-1.5 grid grid-cols-2 gap-3">
+          <%!-- Multi-node/tensor parallelism is a vLLM capability; on a llama.cpp
+                slot these are noise the agent would drop. The advanced JSON below
+                stays available on every engine. --%>
+          <div :if={Engines.clusterable?(@config.engine)} class="mt-1.5 grid grid-cols-2 gap-3">
             <.input
               type="select"
               name="config[nnodes]"
@@ -1108,6 +1132,12 @@ defmodule AiroWeb.Admin.AgentLive do
           </p>
           <p :if={@validation.fits? == :cold} class="mt-1 text-xs text-base-content/55">
             Cold model: weights fit, but the context's KV cost can't be validated until it's loaded.
+          </p>
+          <p :if={@validation.fits? == :uncalibratable} class="mt-1 text-xs text-base-content/55">
+            Weights fit. {Engines.label(@config.engine)} sizes its KV pool from
+            <span class="font-mono">gpu-memory-utilization</span>
+            rather than growing it with the context, so there's no per-token cost to project — the
+            figure above is the weights floor, not a full estimate. Loading it won't change that.
           </p>
         </div>
 
