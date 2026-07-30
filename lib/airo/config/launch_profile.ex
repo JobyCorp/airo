@@ -9,6 +9,17 @@ defmodule Airo.Config.LaunchProfile do
   two-node DSpark run with a purpose-built image and a raft of NCCL env — is
   typed once and survives unload/reload; the agent config modal reads it to
   prefill and re-saves it on every load.
+
+  Two writers, because the modal is not the only way a model comes up:
+
+    * the config modal, on every load it initiates;
+    * `Airo.Agents.Ingest`, from what a head slot reports once it is `up` —
+      the agent's *effective* profile, defaults resolved. That covers loads
+      Airo never saw: a hand-POSTed `/load` (`airo_agent`'s
+      `deploy/payloads/*.json`), an agent-side restore after a restart.
+
+  Without the second writer a slot that came up out of band leaves nothing
+  behind, and the next load from the UI quietly falls back to a bare default.
   """
   use Ecto.Schema
   import Ecto.Changeset

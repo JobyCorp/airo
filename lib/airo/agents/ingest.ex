@@ -99,6 +99,7 @@ defmodule Airo.Agents.Ingest do
           # This rank doesn't serve, but it decides whether the head can.
           refresh_cluster_head(cluster.cluster_id)
         else
+          record_launch_profile(slot)
           mark_deployments(provider, model && model.id, head_status(slot, cluster))
         end
 
@@ -113,6 +114,25 @@ defmodule Airo.Agents.Ingest do
     provenance = if id = slot["resident_model"], do: Map.get(index, id)
     Provenance.reconcile(host_id, provider, slot, provenance)
   end
+
+  # Persist the running launch recipe (`Airo.Agents.record_live_profile/2`), so a
+  # load Airo didn't initiate still survives the slot going down.
+  #
+  # Only a **head** that reached `up` is recorded, and only from a push that
+  # carries a profile:
+  #
+  #   - a peer rank's profile is its shard of the launch, not the body that
+  #     reproduces the cluster (the head's is — posting it starts every rank);
+  #   - while `loading` the agent echoes the *requested* profile, defaults not
+  #     yet resolved, and a load that then fails is no recipe at all;
+  #   - `profile` rides only the heartbeat register, so transition pushes simply
+  #     leave the recorded recipe alone until the next beat.
+  defp record_launch_profile(%{"status" => "up", "resident_model" => model, "profile" => profile})
+       when is_binary(model) and is_map(profile) do
+    Agents.record_live_profile(model, profile)
+  end
+
+  defp record_launch_profile(_slot), do: :ok
 
   defp slot_attrs(slot, cluster, model) do
     %{

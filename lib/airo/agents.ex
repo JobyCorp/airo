@@ -97,6 +97,49 @@ defmodule Airo.Agents do
     )
   end
 
+  @doc """
+  Record the profile a slot is **actually running** as the model's launch recipe.
+
+  The config modal is not the only way a model comes up: a hand-POSTed `/load`
+  (`airo_agent`'s `deploy/payloads/*.json`), an agent-side restore after a
+  restart, or any load Airo didn't initiate leaves no recipe behind. The next
+  load out of the UI then starts from a guess — a modest context, single node,
+  no image or engine env — which for a hand-tuned launch is silently wrong.
+  Recording what the agent reports closes that: whoever launched it, the recipe
+  that worked is the one on file.
+
+  The agent sends the *effective* profile (its own defaults already resolved),
+  so what lands here round-trips back through `/load` verbatim.
+
+  Idempotent by value — the profile rides every heartbeat register, and a
+  re-write per beat per slot would be pure churn.
+  """
+  def record_live_profile(model_name, profile) when is_binary(model_name) and is_map(profile) do
+    cond do
+      model_name == "" or profile == %{} ->
+        :ok
+
+      launch_profile(model_name) == profile ->
+        :ok
+
+      true ->
+        case save_launch_profile(model_name, profile) do
+          {:ok, _} ->
+            Logger.info("recorded live launch profile for #{model_name}")
+            :ok
+
+          {:error, changeset} ->
+            Logger.warning(
+              "could not record live launch profile for #{model_name}: #{inspect(changeset.errors)}"
+            )
+
+            :ok
+        end
+    end
+  end
+
+  def record_live_profile(_model_name, _profile), do: :ok
+
   defp upsert_slot(%Agent{} = agent, slot) do
     name = "#{agent.host_id}:#{slot["port"]}"
 
