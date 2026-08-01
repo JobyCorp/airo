@@ -38,6 +38,10 @@ GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 TARBALL="${APP_NAME}-${STAMP}-${GIT_SHA}.tar.gz"
 
+# The tarball is ~600MB and lands in the repo root; without this, an interrupted
+# or failed run leaves it there (deploy-docker.sh builds into a mktemp -d instead).
+trap 'rm -f "${TARBALL}"' EXIT
+
 echo "▸ Fetching deps and building…"
 mix deps.get --only prod
 MIX_ENV=prod mix deps.compile
