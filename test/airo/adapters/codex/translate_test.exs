@@ -21,8 +21,6 @@ defmodule Airo.Adapters.Codex.TranslateTest do
 
       assert body["model"] == "gpt-5.1-codex"
       assert body["instructions"] == "be terse"
-      assert body["max_output_tokens"] == 256
-      assert body["temperature"] == 0.2
       assert body["store"] == false
 
       assert body["input"] == [
@@ -105,6 +103,24 @@ defmodule Airo.Adapters.Codex.TranslateTest do
              ]
 
       assert body["tool_choice"] == %{"type" => "function", "name" => "get_weather"}
+    end
+
+    test "drops sampling and cap params the subscription backend rejects" do
+      body =
+        Translate.request(
+          %{
+            "messages" => [],
+            "max_tokens" => 256,
+            "max_completion_tokens" => 256,
+            "temperature" => 0.2,
+            "top_p" => 0.9
+          },
+          "gpt-5.4-mini"
+        )
+
+      for key <- ["max_output_tokens", "max_tokens", "temperature", "top_p"] do
+        refute Map.has_key?(body, key), "expected #{key} to be dropped"
+      end
     end
 
     test "maps reasoning_effort to reasoning with an auto summary" do

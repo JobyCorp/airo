@@ -7,9 +7,10 @@ defmodule Airo.Adapters.Codex.Translate do
 
     - `request/2` — OpenAI `/chat/completions` body → `/responses` body
       (system/developer → `instructions`, messages and tool traffic → `input`
-      items, tools flattened, `max_tokens` → `max_output_tokens`,
-      `reasoning_effort` → `reasoning.effort`; always `store: false`, the
-      backend keeps no state for us).
+      items, tools flattened, `reasoning_effort` → `reasoning.effort`; always
+      `store: false`, the backend keeps no state for us). Sampling and cap
+      params (`max_tokens`, `temperature`, `top_p`) are dropped — the
+      subscription backend 400s on them.
     - `response/1` — a complete Responses object (the terminal
       `response.completed` payload) → OpenAI completion.
     - `stream_event/1` — one Responses SSE event → zero or more OpenAI delta
@@ -24,15 +25,17 @@ defmodule Airo.Adapters.Codex.Translate do
   def request(params, model) when is_map(params) do
     {instructions, messages} = split_system(Map.get(params, "messages", []))
 
+    # No sampling or cap params: the subscription backend accepts only what the
+    # Codex CLI itself sends and 400s the whole call on `max_output_tokens`,
+    # `temperature`, or `top_p` ("Unsupported parameter"). A client-supplied
+    # max_tokens cap therefore cannot be enforced upstream and is dropped, like
+    # every other param this backend rejects.
     %{
       "model" => model,
       "input" => Enum.flat_map(messages, &items/1),
       "store" => false
     }
     |> put_present("instructions", instructions)
-    |> put_present("max_output_tokens", params["max_tokens"] || params["max_completion_tokens"])
-    |> put_present("temperature", params["temperature"])
-    |> put_present("top_p", params["top_p"])
     |> put_present("tool_choice", tool_choice(params["tool_choice"]))
     |> put_reasoning(params["reasoning_effort"])
     |> put_tools(params["tools"])
