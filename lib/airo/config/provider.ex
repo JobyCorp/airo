@@ -17,6 +17,7 @@ defmodule Airo.Config.Provider do
     :lmstudio,
     :openai,
     :anthropic,
+    :codex,
     :speaches,
     :infinity,
     :unsloth

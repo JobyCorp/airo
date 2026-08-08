@@ -11,6 +11,7 @@ defmodule Airo.Registry do
 
   alias Airo.Adapters.{
     Anthropic,
+    Codex,
     Infinity,
     LMStudio,
     Ollama,
@@ -28,6 +29,7 @@ defmodule Airo.Registry do
     speaches: Speaches,
     unsloth: Unsloth,
     anthropic: Anthropic,
+    codex: Codex,
     infinity: Infinity
   }
 
