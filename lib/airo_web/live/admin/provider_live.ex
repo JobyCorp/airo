@@ -2,8 +2,10 @@ defmodule AiroWeb.Admin.ProviderLive do
   @moduledoc "Admin CRUD for upstream providers (DESIGN §6, §8)."
   use AiroWeb, :live_view
 
+  alias Airo.Adapters.Codex.Login
   alias Airo.Config
   alias Airo.Config.Provider
+  alias Airo.Config.Secret
   alias Airo.Health
   alias Airo.LocalModels
   alias Airo.Repo
@@ -21,7 +23,7 @@ defmodule AiroWeb.Admin.ProviderLive do
 
     {:ok,
      socket
-     |> assign(page_title: "Providers", form: nil, editing: nil, detail: nil)
+     |> assign(page_title: "Providers", form: nil, editing: nil, detail: nil, codex_login: nil)
      |> assign(rd: RequestDefaultsForm.prefill(%{}))
      |> assign(adapter_types: Provider.adapter_types(), auth_kinds: Provider.auth_kinds())
      |> assign(secret_options: secret_options())
@@ -99,6 +101,49 @@ defmodule AiroWeb.Admin.ProviderLive do
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Metadata sync failed: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("codex_start", _params, socket),
+    do: {:noreply, assign(socket, codex_login: Login.start())}
+
+  def handle_event("codex_cancel", _params, socket),
+    do: {:noreply, assign(socket, codex_login: nil)}
+
+  def handle_event(
+        "codex_complete",
+        %{"callback" => callback},
+        %{assigns: %{detail: %{provider: provider}, codex_login: %{verifier: verifier}}} = socket
+      ) do
+    with {:ok, tokens} <- Login.exchange(callback, verifier),
+         {:ok, _provider} <- persist_codex_credential(provider, tokens) do
+      {:noreply,
+       socket
+       |> assign(codex_login: nil, detail: detail(provider.id))
+       |> assign(secret_options: secret_options())
+       |> put_flash(:info, "Codex account connected.")}
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Codex sign-in failed: #{inspect(reason)}")}
+    end
+  end
+
+  # Refresh the tokens on the provider's existing OAuth secret, or mint one and
+  # attach it (flipping auth_kind, so a provider created keyless just works).
+  defp persist_codex_credential(provider, tokens) do
+    attrs = Map.take(tokens, [:value, :refresh_token, :expires_at])
+
+    case provider.credential do
+      %Secret{kind: :oauth} = secret ->
+        with {:ok, _secret} <- Config.update_secret(secret, attrs), do: {:ok, provider}
+
+      _no_oauth_secret ->
+        with {:ok, secret} <-
+               Config.create_secret(
+                 Map.merge(attrs, %{name: "#{provider.name} Codex OAuth", kind: :oauth})
+               ) do
+          Config.update_provider(provider, %{"credential_id" => secret.id, "auth_kind" => "oauth"})
+        end
     end
   end
 
@@ -180,6 +225,7 @@ defmodule AiroWeb.Admin.ProviderLive do
   defp apply_action(socket, :show, %{"id" => id}) do
     socket
     |> assign(detail: detail(id), form: nil, editing: nil, page_title: "Provider")
+    |> assign(codex_login: nil)
   end
 
   defp apply_action(socket, :new, _params) do
@@ -378,7 +424,7 @@ defmodule AiroWeb.Admin.ProviderLive do
               rd={@rd}
             />
           <% @detail -> %>
-            <.provider_detail detail={@detail} />
+            <.provider_detail detail={@detail} codex_login={@codex_login} />
           <% true -> %>
             <.provider_table providers={@streams.providers} health={@health} />
         <% end %>
@@ -493,10 +539,16 @@ defmodule AiroWeb.Admin.ProviderLive do
   end
 
   attr :detail, :map, required: true
+  attr :codex_login, :map, default: nil
 
   defp provider_detail(assigns) do
     ~H"""
     <div class="space-y-6">
+      <.codex_account
+        :if={@detail.provider.adapter_type == :codex}
+        provider={@detail.provider}
+        login={@codex_login}
+      />
       <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <.card variant="bordered">
           <:eyebrow>Provider</:eyebrow>
@@ -629,6 +681,67 @@ defmodule AiroWeb.Admin.ProviderLive do
     </div>
     """
   end
+
+  attr :provider, Provider, required: true
+  attr :login, :map, default: nil
+
+  # "Sign in with ChatGPT" for a Codex provider: the OAuth redirect goes to
+  # localhost:1455 (the Codex CLI's listener — the only redirect the client id
+  # allows), so the operator opens the link, signs in, and pastes the resulting
+  # callback URL back here.
+  defp codex_account(assigns) do
+    ~H"""
+    <.card variant="bordered">
+      <:eyebrow>ChatGPT subscription</:eyebrow>
+      <:title>Codex account</:title>
+      <div :if={codex_connected?(@provider)} class="text-sm text-base-content/70">
+        Connected via <span class="font-mono">{@provider.credential.name}</span>
+        <span :if={@provider.credential.expires_at}>
+          — access token expires {@provider.credential.expires_at}
+        </span>
+      </div>
+      <div :if={!codex_connected?(@provider)} class="text-sm text-base-content/70">
+        Not connected. Sign in with the ChatGPT account whose Codex subscription
+        should serve this provider.
+      </div>
+
+      <div :if={is_nil(@login)} class="mt-4">
+        <.button size="sm" variant="primary" phx-click="codex_start">
+          {if codex_connected?(@provider), do: "Re-connect account", else: "Sign in with ChatGPT"}
+        </.button>
+      </div>
+
+      <div :if={@login} class="mt-4 space-y-4">
+        <ol class="list-inside list-decimal space-y-1 text-sm text-base-content/70">
+          <li>Open the sign-in link and authenticate with ChatGPT.</li>
+          <li>
+            The browser lands on <span class="font-mono">localhost:1455</span>
+            — a page that won't load; that's expected.
+          </li>
+          <li>Copy the full address from the address bar and paste it below.</li>
+        </ol>
+        <.button size="sm" href={@login.url} target="_blank" rel="noopener">
+          <.icon name="hero-arrow-top-right-on-square" class="size-4" /> Open sign-in page
+        </.button>
+        <.form for={%{}} phx-submit="codex_complete" class="space-y-4">
+          <.input
+            name="callback"
+            value=""
+            label="Pasted callback URL (or code)"
+            placeholder="http://localhost:1455/auth/callback?code=…"
+          />
+          <div class="flex gap-2">
+            <.button size="sm" variant="primary">Complete sign-in</.button>
+            <.button size="sm" type="button" phx-click="codex_cancel">Cancel</.button>
+          </div>
+        </.form>
+      </div>
+    </.card>
+    """
+  end
+
+  defp codex_connected?(%Provider{auth_kind: :oauth, credential: %Secret{kind: :oauth}}), do: true
+  defp codex_connected?(_provider), do: false
 
   defp join_values([]), do: "—"
   defp join_values(nil), do: "—"
