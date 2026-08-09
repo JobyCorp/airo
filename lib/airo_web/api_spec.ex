@@ -547,6 +547,15 @@ defmodule AiroWeb.ApiSpec do
                     ]
                   },
                   description: "Which endpoints this id serves."
+                },
+                context_length: %Schema{
+                  type: :integer,
+                  nullable: true,
+                  description:
+                    "Smallest known context window among the enabled deployments " <>
+                      "serving this id (aliases: their own candidates, fallbacks " <>
+                      "excluded). Null when no serving copy declares one. Size " <>
+                      "prompts and compaction against this."
                 }
               }
             }
