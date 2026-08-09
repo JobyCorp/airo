@@ -55,7 +55,10 @@ defmodule AiroWeb.ChatController do
     case Gateway.run_stream(plan, conn, &sse_delta/2, &committed?/1) do
       {:ok, conn, info} ->
         latency = System.monotonic_time(:millisecond) - started
-        GatewayUsage.record(conn, plan, info, latency_ms: latency)
+        GatewayUsage.record(conn, plan, info,
+          latency_ms: latency,
+          response: stream_response(conn)
+        )
 
         meta =
           Gateway.transparency(info.served,
@@ -91,9 +94,45 @@ defmodule AiroWeb.ChatController do
   # Reducer: lazily open the chunked response on the first delta, then write it
   # as an SSE `data:` line. Deferring `send_chunked` keeps pre-byte failover open.
   defp sse_delta(chunk, conn) do
-    conn = ensure_chunked(conn)
+    conn = conn |> ensure_chunked() |> note_stream_stats(chunk)
     {:ok, conn} = chunk(conn, "data: " <> Jason.encode!(chunk) <> "\n\n")
     conn
+  end
+
+  # A stream leaves no response body to lift usage from afterwards, so lift it
+  # in flight: merge each chunk's `usage` (an upstream may split prompt and
+  # completion counts across chunks) and keep the last finish_reason seen.
+  defp note_stream_stats(conn, chunk) do
+    usage = Map.merge(conn.private[:airo_stream_usage] || %{}, chunk["usage"] || %{})
+    finish = stream_finish(chunk) || conn.private[:airo_stream_finish]
+
+    conn
+    |> put_private(:airo_stream_usage, usage)
+    |> put_private(:airo_stream_finish, finish)
+  end
+
+  defp stream_finish(%{"choices" => [%{"finish_reason" => reason} | _]}) when is_binary(reason),
+    do: reason
+
+  defp stream_finish(_chunk), do: nil
+
+  # Reassemble the pieces into just enough OpenAI response shape for
+  # `Airo.Usage.build_attrs/1` (usage + finish_reason). Nil when the stream
+  # carried neither.
+  defp stream_response(conn) do
+    usage = conn.private[:airo_stream_usage]
+    finish = conn.private[:airo_stream_finish]
+
+    cond do
+      is_map(usage) and map_size(usage) > 0 ->
+        %{"usage" => usage, "choices" => [%{"finish_reason" => finish}]}
+
+      is_binary(finish) ->
+        %{"choices" => [%{"finish_reason" => finish}]}
+
+      true ->
+        nil
+    end
   end
 
   defp ensure_chunked(%Plug.Conn{state: :chunked} = conn), do: conn

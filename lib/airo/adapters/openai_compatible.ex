@@ -29,6 +29,9 @@ defmodule Airo.Adapters.OpenAICompatible do
     params
     |> put_model(ctx.deployment)
     |> Map.put("stream", true)
+    # Usage attribution: without this the upstream's stream carries no token
+    # counts at all. A client's own stream_options wins.
+    |> Map.put_new("stream_options", %{"include_usage" => true})
     |> then(&Transport.stream(ctx, "/chat/completions", &1, acc, reducer))
   end
 
