@@ -260,6 +260,75 @@ defmodule AiroWeb.ChatControllerTest do
                :binary.match(body, "\"content\":\"Yes\"") |> elem(0)
     end
 
+    # The trailing usage-only chunk an OpenAI-compatible upstream emits when
+    # stream_options.include_usage is set.
+    @sse_usage """
+    data: {"choices":[{"index":0,"delta":{"role":"assistant"}}]}
+
+    data: {"choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+    data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+    data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":34,"total_tokens":46}}
+
+    data: [DONE]
+
+    """
+
+    test "records stream token usage, having asked the upstream for it", %{conn: conn} do
+      test_pid = self()
+
+      Req.Test.stub(Airo.TestStub, fn upstream ->
+        {:ok, raw, upstream} = Plug.Conn.read_body(upstream)
+        send(test_pid, {:upstream_body, Jason.decode!(raw)})
+
+        upstream
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(200, @sse_usage)
+      end)
+
+      conn =
+        conn
+        |> authed(mint())
+        |> put_req_header("x-gateway-trace-id", "gt_stream_usage")
+        |> post(~p"/v1/chat/completions", body(%{"stream" => true}))
+
+      assert conn.status == 200
+
+      # The gateway asked the upstream to attach usage to the stream…
+      assert_received {:upstream_body, sent}
+      assert sent["stream_options"] == %{"include_usage" => true}
+
+      # …and lifted it off the chunks into the usage record.
+      assert %UsageRecord{tokens_in: 12, tokens_out: 34, finish_reason: "stop"} =
+               Repo.get_by(UsageRecord, trace_id: "gt_stream_usage")
+    end
+
+    test "a client's own stream_options is passed through untouched", %{conn: conn} do
+      test_pid = self()
+
+      Req.Test.stub(Airo.TestStub, fn upstream ->
+        {:ok, raw, upstream} = Plug.Conn.read_body(upstream)
+        send(test_pid, {:upstream_body, Jason.decode!(raw)})
+
+        upstream
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(200, @sse)
+      end)
+
+      conn =
+        conn
+        |> authed(mint())
+        |> post(
+          ~p"/v1/chat/completions",
+          body(%{"stream" => true, "stream_options" => %{"include_usage" => false}})
+        )
+
+      assert conn.status == 200
+      assert_received {:upstream_body, sent}
+      assert sent["stream_options"] == %{"include_usage" => false}
+    end
+
     test "streams SSE deltas, a transparency trailer, and [DONE]", %{conn: conn} do
       Req.Test.stub(Airo.TestStub, fn upstream ->
         upstream
