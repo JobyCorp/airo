@@ -100,7 +100,7 @@ defmodule Airo.Agents.Ingest do
           refresh_cluster_head(cluster.cluster_id)
         else
           record_launch_profile(slot)
-          mark_deployments(provider, model && model.id, head_status(slot, cluster))
+          mark_deployments(provider, model && model.id, head_status(slot, cluster), slot_context(slot))
         end
 
         broadcast(host_id)
@@ -173,19 +173,53 @@ defmodule Airo.Agents.Ingest do
 
   # Derive health by **identity**: the deployment linked to the resident Model
   # takes the slot's status, the rest are down.
-  defp mark_deployments(provider, resident_model_id, {resident_status, reason}) do
+  defp mark_deployments(provider, resident_model_id, {resident_status, reason}, ctx) do
     # Reload deployments — reconcile may have re-linked one's model_id.
     %{deployments: deployments} = Repo.preload(provider, :deployments, force: true)
 
     Enum.each(deployments, fn deployment ->
-      {status, why} =
-        if resident_model_id && deployment.model_id == resident_model_id,
-          do: {resident_status, reason},
-          else: {:down, "not_resident"}
+      resident? = resident_model_id && deployment.model_id == resident_model_id
 
+      {status, why} =
+        if resident?, do: {resident_status, reason}, else: {:down, "not_resident"}
+
+      if resident?, do: sync_context_window(deployment, ctx)
       Health.mark_deployment(deployment, provider, status, source: :agent, reason: clip(why))
     end)
   end
+
+  # The engine's own report is the authority on a slot's serving context — keep
+  # the resident deployment's `context_window` (what `/v1/models` publishes as
+  # `context_length`) in step with what is actually loaded, load after load.
+  defp sync_context_window(%{context_window: ctx}, ctx), do: :ok
+
+  defp sync_context_window(deployment, ctx) when is_integer(ctx) and ctx > 0 do
+    case Config.update_deployment(deployment, %{context_window: ctx}) do
+      {:ok, _} ->
+        :ok
+
+      {:error, changeset} ->
+        Logger.warning(
+          "slot ctx sync failed for deployment #{deployment.id}: #{inspect(changeset.errors)}"
+        )
+    end
+  end
+
+  defp sync_context_window(_deployment, _ctx), do: :ok
+
+  # Per-request serving context out of a slot push: the agent's `ctx` is already
+  # per sequence; a push carrying only the engine total is divided across the
+  # `parallel` sequences that share it.
+  defp slot_context(slot),
+    do: per_request_ctx(as_int(slot["ctx"]), as_int(slot["ctx_total"]), as_int(slot["parallel"]))
+
+  defp per_request_ctx(ctx, _total, _parallel) when is_integer(ctx), do: ctx
+
+  defp per_request_ctx(_ctx, total, parallel)
+       when is_integer(total) and is_integer(parallel) and parallel > 1,
+       do: div(total, parallel)
+
+  defp per_request_ctx(_ctx, total, _parallel), do: total
 
   # A peer rank holds a shard of the weights and serves no API. Nothing should
   # ever be routed at it, so any deployment bound to one (hand-created, or left
@@ -251,8 +285,9 @@ defmodule Airo.Agents.Ingest do
          %{} = provider <- Config.get_provider(provider_id) do
       cluster = %{cluster_id: cluster_id, tp_rank: head[:tp_rank], tp_size: head[:tp_size]}
       own = %{"status" => to_string(head.status), "reason" => head[:reason]}
+      ctx = per_request_ctx(head[:ctx], head[:ctx_total], head[:parallel])
 
-      mark_deployments(provider, head[:model_id], head_status(own, cluster))
+      mark_deployments(provider, head[:model_id], head_status(own, cluster), ctx)
     else
       _ -> :ok
     end

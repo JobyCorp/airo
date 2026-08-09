@@ -107,11 +107,14 @@ defmodule Airo.Agents.Provenance do
     base = basename(path)
     %{deployments: deployments} = Repo.preload(provider, :deployments)
 
+    # `!= nil` (not `&&`): a nil path/base short-circuits `&&` to nil, and nil
+    # on the left of `or` raises BadBooleanError for the next non-matching
+    # deployment checked.
     matches? = fn d ->
       d.model_id == model.id or
         d.model_name == resident_id or
-        (path && d.model_name == path) or
-        (base && basename(d.model_name) == base)
+        (path != nil and d.model_name == path) or
+        (base != nil and basename(d.model_name) == base)
     end
 
     case Enum.find(deployments, matches?) do
