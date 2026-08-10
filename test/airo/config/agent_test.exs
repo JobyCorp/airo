@@ -27,6 +27,17 @@ defmodule Airo.Config.AgentTest do
     provider
   end
 
+  defp deployment(provider) do
+    {:ok, deployment} =
+      Config.create_deployment(%{
+        provider_id: provider.id,
+        model_name: "qwen3-30b",
+        capabilities: [:chat]
+      })
+
+    deployment
+  end
+
   describe "delete_agent/1" do
     test "removes an agent that manages nothing" do
       agent = agent()
@@ -89,6 +100,56 @@ defmodule Airo.Config.AgentTest do
 
       assert fresh.host_id == "returning"
       refute fresh.id == agent.id
+    end
+  end
+
+  describe "delete_agent/2 with cascade_empty_slots" do
+    test "takes the empty slots with the agent" do
+      agent = agent()
+      provider = slot(agent)
+
+      assert {:ok, _} = Config.delete_agent(agent, cascade_empty_slots: true)
+
+      assert Config.get_agent_by_host_id("gone-host") == nil
+      # Removed outright, not nilified into an unmanaged provider — which is the
+      # only thing the arity-1 refusal was ever protecting against.
+      assert_raise Ecto.NoResultsError, fn -> Config.get_provider!(provider.id) end
+    end
+
+    test "still refuses a slot a deployment routes to" do
+      agent = agent()
+      bound = slot(agent, 8081)
+      deployment(bound)
+
+      assert {:error, {:has_providers, 1}} = Config.delete_agent(agent, cascade_empty_slots: true)
+      assert Config.get_agent_by_host_id("gone-host")
+      assert Config.get_provider!(bound.id).agent_id == agent.id
+    end
+
+    test "counts only the slots that are actually in the way" do
+      agent = agent()
+      slot(agent, 8081)
+      slot(agent, 8082)
+      deployment(slot(agent, 8083))
+
+      assert {:error, {:has_providers, 1}} = Config.delete_agent(agent, cascade_empty_slots: true)
+    end
+
+    test "a bound slot keeps the empty ones too — the delete is all or nothing" do
+      agent = agent()
+      empty = slot(agent, 8081)
+      deployment(slot(agent, 8082))
+
+      assert {:error, {:has_providers, 1}} = Config.delete_agent(agent, cascade_empty_slots: true)
+      assert Config.get_provider!(empty.id)
+    end
+
+    test "the default is still the strict refusal" do
+      agent = agent()
+      provider = slot(agent)
+
+      assert {:error, {:has_providers, 1}} = Config.delete_agent(agent)
+      assert Config.get_provider!(provider.id)
     end
   end
 end
