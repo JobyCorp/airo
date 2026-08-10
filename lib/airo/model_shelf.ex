@@ -15,6 +15,7 @@ defmodule Airo.ModelShelf do
   alias Airo.Health.HealthEvent
   alias Airo.LocalModels
   alias Airo.Repo
+  alias Airo.Usage
   alias Airo.Usage.UsageRecord
 
   @recent_limit 25
@@ -28,7 +29,7 @@ defmodule Airo.ModelShelf do
 
   def get_detail!(id) do
     model = Config.get_model_with_deployments!(id)
-    records = usage_records(deployments: model.deployments, model_id: model.id)
+    scope = [deployments: model.deployments, model_id: model.id]
     deployment_summaries = deployment_summaries(model.deployments)
 
     %{
@@ -36,7 +37,7 @@ defmodule Airo.ModelShelf do
       summary: summary(model, resident_identities()),
       deployment_summaries: deployment_summaries,
       leading_deployment: leading_deployment(deployment_summaries),
-      version_summaries: version_summaries(records),
+      version_summaries: version_summaries(scope),
       aliases: aliases_for_model(model.id),
       health_events: health_events(model.deployments),
       recent_records: recent_records(model.deployments)
@@ -45,8 +46,7 @@ defmodule Airo.ModelShelf do
 
   defp summary(%Model{} = model, resident) do
     deployments = model.deployments || []
-    records = usage_records(deployments: deployments, model_id: model.id)
-    metrics = metrics(records)
+    metrics = metrics(usage_metrics(deployments: deployments, model_id: model.id))
 
     %{
       model: model,
@@ -109,8 +109,7 @@ defmodule Airo.ModelShelf do
   defp deployment_summaries(deployments) do
     deployments
     |> Enum.map(fn deployment ->
-      records = usage_records(deployments: [deployment])
-      metrics = metrics(records)
+      metrics = metrics(usage_metrics(deployments: [deployment]))
       health = Health.status(deployment.id)
       score = guidance_score(deployment, health, metrics)
 
@@ -140,23 +139,15 @@ defmodule Airo.ModelShelf do
       List.first(deployment_summaries)
   end
 
-  defp usage_records(opts) do
-    ids = deployment_ids(Keyword.fetch!(opts, :deployments))
-    model_id = Keyword.get(opts, :model_id)
-
-    cond do
-      ids == [] and is_nil(model_id) ->
-        []
-
-      is_nil(model_id) ->
-        Repo.all(from r in UsageRecord, where: r.deployment_id in ^ids)
-
-      ids == [] ->
-        Repo.all(from r in UsageRecord, where: r.model_id == ^model_id)
-
-      true ->
-        Repo.all(from r in UsageRecord, where: r.model_id == ^model_id or r.deployment_id in ^ids)
-    end
+  # Counts, not rows. This used to `Repo.all` every usage record the model had
+  # ever produced — for each of the ~10 models, on every dashboard render and
+  # every 10s refresh. One model alone was 35k rows in prod, and the cost grew
+  # with the table forever. `Airo.Usage` does the same arithmetic in SQL and
+  # returns one row.
+  defp usage_metrics(opts) do
+    opts
+    |> Keyword.get(:model_id)
+    |> Usage.model_metrics(deployment_ids(Keyword.fetch!(opts, :deployments)))
   end
 
   defp recent_records(deployments) do
@@ -199,11 +190,9 @@ defmodule Airo.ModelShelf do
     end
   end
 
-  defp metrics(records) do
-    total = length(records)
-    errors = Enum.count(records, &(&1.outcome == :error))
-    fallbacks = Enum.count(records, & &1.fallback_used)
-
+  # Presentation shape over the raw counts `Airo.Usage` hands back: the ratios
+  # feed `guidance_score/3`, the percent strings feed the tables.
+  defp metrics(%{requests: total, errors: errors, fallbacks: fallbacks} = agg) do
     %{
       requests: total,
       errors: errors,
@@ -212,39 +201,32 @@ defmodule Airo.ModelShelf do
       fallback_ratio: ratio(fallbacks, total),
       error_rate: percent(errors, total),
       fallback_rate: percent(fallbacks, total),
-      p50_latency_ms: percentile_latency(records, 0.50),
-      p95_latency_ms: percentile_latency(records, 0.95),
-      cost: sum_cost(records)
+      p50_latency_ms: agg.p50_latency_ms,
+      p95_latency_ms: agg.p95_latency_ms,
+      cost: agg.cost
     }
   end
 
-  defp version_summaries(records) do
-    records
-    |> Enum.group_by(&version_key/1)
-    |> Enum.map(fn {{version, revision}, grouped} ->
-      metrics = metrics(grouped)
-      dates = Enum.map(grouped, & &1.inserted_at)
-
+  defp version_summaries(opts) do
+    opts
+    |> Keyword.get(:model_id)
+    |> Usage.model_version_breakdown(deployment_ids(Keyword.fetch!(opts, :deployments)))
+    |> Enum.map(fn row ->
       %{
-        version: version || "Unversioned",
-        revision: revision,
-        first_seen: min_datetime(dates),
-        last_seen: max_datetime(dates),
-        requests: metrics.requests,
-        error_rate: metrics.error_rate,
-        fallback_rate: metrics.fallback_rate,
-        p50_latency_ms: metrics.p50_latency_ms,
-        p95_latency_ms: metrics.p95_latency_ms,
-        cost: metrics.cost
+        version: row.version || "Unversioned",
+        revision: row.revision,
+        first_seen: row.first_seen,
+        last_seen: row.last_seen,
+        requests: row.requests,
+        error_rate: percent(row.errors, row.requests),
+        fallback_rate: percent(row.fallbacks, row.requests),
+        p50_latency_ms: row.p50_latency_ms,
+        p95_latency_ms: row.p95_latency_ms,
+        cost: row.cost
       }
     end)
     |> Enum.sort_by(& &1.last_seen, {:desc, NaiveDateTime})
   end
-
-  defp version_key(record), do: {record.model_version, record.model_revision}
-
-  defp min_datetime(dates), do: Enum.min_by(dates, &NaiveDateTime.to_erl/1)
-  defp max_datetime(dates), do: Enum.max_by(dates, &NaiveDateTime.to_erl/1)
 
   defp capabilities(deployments) do
     deployments
@@ -336,27 +318,4 @@ defmodule Airo.ModelShelf do
        do: "p95 latency is high."
 
   defp guidance_reason(_deployment, _health, _metrics), do: "Healthy with usable latency."
-
-  defp percentile_latency(records, percentile) do
-    latencies =
-      records
-      |> Enum.map(& &1.latency_ms)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.sort()
-
-    case latencies do
-      [] ->
-        nil
-
-      list ->
-        index = ceil(length(list) * percentile) - 1
-        Enum.at(list, max(index, 0))
-    end
-  end
-
-  defp sum_cost(records) do
-    Enum.reduce(records, Decimal.new(0), fn record, acc ->
-      Decimal.add(acc, record.cost || Decimal.new(0))
-    end)
-  end
 end
