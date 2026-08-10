@@ -8,7 +8,13 @@ defmodule AiroWeb.Admin.ModelLive do
   alias Airo.ModelShelf
   alias AiroWeb.CompositeComponents
 
-  @default_filters %{"q" => "", "capability" => "", "class" => "", "health" => "", "sort" => "name"}
+  @default_filters %{
+    "q" => "",
+    "capability" => "",
+    "class" => "",
+    "health" => "",
+    "sort" => "name"
+  }
 
   @impl true
   def mount(_params, _session, socket) do
@@ -192,7 +198,9 @@ defmodule AiroWeb.Admin.ModelLive do
     needle = String.downcase(q)
 
     [model.display_name, model.upstream_model_id, model.family]
-    |> Enum.any?(fn field -> field && String.contains?(String.downcase(to_string(field)), needle) end)
+    |> Enum.any?(fn field ->
+      field && String.contains?(String.downcase(to_string(field)), needle)
+    end)
   end
 
   defp member_or_blank?(_values, ""), do: true
@@ -342,7 +350,7 @@ defmodule AiroWeb.Admin.ModelLive do
         of {@total} {if @total == 1, do: "model", else: "models"}.
       </p>
 
-      <div class="space-y-3">
+      <div id="models" class="space-y-3">
         <div
           :if={@models == []}
           class="rounded-box border border-dashed border-base-content/15 bg-base-100/45 px-4 py-10 text-center text-sm text-base-content/60"
@@ -463,7 +471,10 @@ defmodule AiroWeb.Admin.ModelLive do
             <CompositeComponents.tag :if={orphaned?(@summary)} tone="warning">
               orphaned
             </CompositeComponents.tag>
-            <CompositeComponents.tag :if={@summary.resident? and @summary.deployment_count == 0} tone="success">
+            <CompositeComponents.tag
+              :if={@summary.resident? and @summary.deployment_count == 0}
+              tone="success"
+            >
               serving in slot
             </CompositeComponents.tag>
           </div>
@@ -477,7 +488,10 @@ defmodule AiroWeb.Admin.ModelLive do
             <span :for={class <- @summary.classes} class={chip_class("neutral")}>
               {class}
             </span>
-            <span :if={@summary.capabilities == [] and @summary.classes == []} class="text-xs text-base-content/40">
+            <span
+              :if={@summary.capabilities == [] and @summary.classes == []}
+              class="text-xs text-base-content/40"
+            >
               no capabilities
             </span>
           </div>
@@ -493,7 +507,9 @@ defmodule AiroWeb.Admin.ModelLive do
             </span>
           </.shelf_stat>
           <.shelf_stat label="Requests">
-            <span class="font-mono text-base text-base-content tabular-nums">{@summary.requests}</span>
+            <span class="font-mono text-base text-base-content tabular-nums">
+              {@summary.requests}
+            </span>
           </.shelf_stat>
           <.shelf_stat label="p95">
             <span class={["font-mono text-base tabular-nums", latency_tone(@summary.p95_latency_ms)]}>
@@ -1011,7 +1027,8 @@ defmodule AiroWeb.Admin.ModelLive do
   defp spine_class(_health), do: "border-l-base-content/25"
 
   defp chip_class("primary"),
-    do: "rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[0.7rem] font-medium text-primary"
+    do:
+      "rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[0.7rem] font-medium text-primary"
 
   defp chip_class(_neutral),
     do:

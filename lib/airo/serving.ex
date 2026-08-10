@@ -673,22 +673,42 @@ defmodule Airo.Serving do
   # the prober's GET /models answers while a slot is still warming, so this is
   # the readiness signal and the probe is only liveness.
   defp deployment_activity do
-    # Newest success and newest failure per deployment. Returns ~2 rows per
-    # deployment, but only plans that way with
-    # `usage_records_deployment_outcome_inserted_at_index` behind it — without
-    # that index this seq-scans the whole table and sorts every matching row.
-    from(u in UsageRecord,
-      where: not is_nil(u.deployment_id) and u.outcome in [:success, :error, :timeout],
-      distinct: [u.deployment_id, u.outcome],
-      order_by: [asc: u.deployment_id, asc: u.outcome, desc: u.inserted_at],
-      select: %{
-        deployment_id: u.deployment_id,
-        outcome: u.outcome,
-        at: u.inserted_at,
-        error_code: u.error_code
+    # Newest success and newest failure per deployment.
+    #
+    # Deliberately *not* `DISTINCT ON` over the whole table. That has to sort
+    # every row that has a deployment before it can take the first of each
+    # group — on prod, a seq scan of 85k rows and a 3.5 MB sort of 51k of them
+    # to return 10, at 81ms, growing with the retention window. Deployments are
+    # a handful, so seek straight to the newest row for each
+    # (deployment, outcome) pair instead: each is one backward index scan on
+    # `usage_records_deployment_outcome_inserted_at_index`, and the cost stops
+    # tracking the table's size (0.26ms on the same data).
+    #
+    # Raw SQL because the lateral-over-a-values-list is the whole point here and
+    # Ecto can't express it without more ceremony than it saves.
+    {:ok, %{rows: rows}} =
+      Repo.query("""
+      SELECT d.id, o.outcome, x.inserted_at, x.error_code
+      FROM deployments d
+      CROSS JOIN unnest(ARRAY['success','error','timeout']) AS o(outcome)
+      JOIN LATERAL (
+        SELECT u.inserted_at, u.error_code
+        FROM usage_records u
+        WHERE u.deployment_id = d.id AND u.outcome = o.outcome
+        ORDER BY u.inserted_at DESC
+        LIMIT 1
+      ) x ON TRUE
+      """)
+
+    rows
+    |> Enum.map(fn [deployment_id, outcome, at, error_code] ->
+      %{
+        deployment_id: deployment_id,
+        outcome: String.to_existing_atom(outcome),
+        at: at,
+        error_code: error_code
       }
-    )
-    |> Repo.all()
+    end)
     |> Enum.reduce(%{}, fn row, acc ->
       entry = Map.get(acc, row.deployment_id, %{})
 
