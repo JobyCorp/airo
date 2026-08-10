@@ -673,6 +673,10 @@ defmodule Airo.Serving do
   # the prober's GET /models answers while a slot is still warming, so this is
   # the readiness signal and the probe is only liveness.
   defp deployment_activity do
+    # Newest success and newest failure per deployment. Returns ~2 rows per
+    # deployment, but only plans that way with
+    # `usage_records_deployment_outcome_inserted_at_index` behind it — without
+    # that index this seq-scans the whole table and sorts every matching row.
     from(u in UsageRecord,
       where: not is_nil(u.deployment_id) and u.outcome in [:success, :error, :timeout],
       distinct: [u.deployment_id, u.outcome],

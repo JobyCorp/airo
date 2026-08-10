@@ -95,15 +95,24 @@ defmodule Airo.Logs do
     |> Repo.all()
   end
 
-  @doc "Counts for the filtered set (for the stat strip)."
-  def summary(filters \\ %{}) do
-    events = filters |> query() |> Repo.all()
+  @doc """
+  Counts for the filtered set (for the stat strip).
 
-    %{
-      total: length(events),
-      warnings: Enum.count(events, &(&1.level == :warning)),
-      errors: Enum.count(events, &(&1.level == :error))
-    }
+  Counted in SQL. The list beside it is capped at 100 rows, but this used to
+  load every matching event just to take `length/1` and two `Enum.count/2` —
+  unbounded on a table that grows with traffic.
+  """
+  def summary(filters \\ %{}) do
+    filters
+    |> query()
+    |> exclude(:preload)
+    |> exclude(:order_by)
+    |> select([e], %{
+      total: count(e.id),
+      warnings: filter(count(e.id), e.level == :warning),
+      errors: filter(count(e.id), e.level == :error)
+    })
+    |> Repo.one()
   end
 
   def kind_options, do: LogEvent.kinds()

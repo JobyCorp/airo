@@ -13,6 +13,20 @@ defmodule Airo.Usage do
 
   @task_supervisor Airo.Usage.TaskSupervisor
 
+  # A bucket Postgres returned no rows for. Absent ≠ zero for the percentiles:
+  # "no calls in this five minutes" is not "0 ms", so they stay nil.
+  @empty_bucket %{
+    requests: 0,
+    errors: 0,
+    fallbacks: 0,
+    p50_latency_ms: nil,
+    p95_latency_ms: nil
+  }
+
+  # What `aggregate/1` would return for a scope that can't match anything —
+  # returned without a round trip rather than running a query we know is empty.
+  @no_usage Map.merge(@empty_bucket, %{cost: Decimal.new(0)})
+
   @doc "List recent usage records, newest first."
   def list_usage_records(limit \\ 100) do
     list_usage_records(%{}, limit)
@@ -27,22 +41,115 @@ defmodule Airo.Usage do
     |> Repo.all()
   end
 
+  @doc """
+  Fold a `UsageRecord` query into the counts every dashboard wants — in SQL.
+
+  This exists because the callers used to `Repo.all` the matching rows and
+  reduce them in Elixir. `usage_records` grows one row per gateway call, so
+  that meant materializing the whole window (85k rows / 44 MB in prod) to
+  produce six numbers, and it got linearly worse forever. Postgres computes
+  the same six with `count(*) FILTER` and an ordered-set aggregate and hands
+  back a single row, so cost tracks the *answer* rather than the table.
+
+  `percentile_disc`, not `percentile_cont`: it returns an actually-observed
+  latency, which is what the old `Enum.at(sorted, ceil(n * p) - 1)` picked.
+  Interpolating instead would silently move every published p50/p95.
+
+  Takes any queryable so callers can scope it however they like (a filter
+  set here, one model's records in `Airo.ModelShelf`).
+  """
+  @spec aggregate(Ecto.Queryable.t()) :: %{
+          requests: non_neg_integer(),
+          errors: non_neg_integer(),
+          fallbacks: non_neg_integer(),
+          cost: Decimal.t(),
+          p50_latency_ms: integer() | nil,
+          p95_latency_ms: integer() | nil
+        }
+  def aggregate(queryable) do
+    queryable
+    |> exclude(:preload)
+    |> exclude(:order_by)
+    |> exclude(:select)
+    |> select([r], %{
+      requests: count(r.id),
+      errors: filter(count(r.id), r.outcome == :error),
+      fallbacks: filter(count(r.id), r.fallback_used == true),
+      cost: type(coalesce(sum(r.cost), 0), :decimal),
+      p50_latency_ms: fragment("percentile_disc(0.5) WITHIN GROUP (ORDER BY ?)", r.latency_ms),
+      p95_latency_ms: fragment("percentile_disc(0.95) WITHIN GROUP (ORDER BY ?)", r.latency_ms)
+    })
+    |> Repo.one()
+  end
+
+  @doc """
+  Traffic attributed to one model: rows stamped with the model itself, plus
+  rows written against any of its deployments. A row can carry both, and a
+  deployment's rows count for its model even when the snapshot didn't record
+  `model_id` — so the two are OR'd, matching what the shelf has always shown.
+
+  Returns `aggregate/1`'s shape. `Airo.ModelShelf` calls this once per model
+  instead of loading that model's entire usage history into structs.
+  """
+  @spec model_metrics(integer() | nil, [integer()]) :: map()
+  def model_metrics(model_id, deployment_ids) do
+    case model_scope(model_id, deployment_ids) do
+      nil -> @no_usage
+      scope -> aggregate(scope)
+    end
+  end
+
+  @doc """
+  The same traffic, split by the model version/revision it was served from —
+  one row per version with its counts, latency percentiles and first/last
+  sighting. Feeds the "version performance" table on the model detail page.
+  """
+  @spec model_version_breakdown(integer() | nil, [integer()]) :: [map()]
+  def model_version_breakdown(model_id, deployment_ids) do
+    case model_scope(model_id, deployment_ids) do
+      nil ->
+        []
+
+      scope ->
+        scope
+        |> group_by([r], [r.model_version, r.model_revision])
+        |> select([r], %{
+          version: r.model_version,
+          revision: r.model_revision,
+          first_seen: min(r.inserted_at),
+          last_seen: max(r.inserted_at),
+          requests: count(r.id),
+          errors: filter(count(r.id), r.outcome == :error),
+          fallbacks: filter(count(r.id), r.fallback_used == true),
+          cost: type(coalesce(sum(r.cost), 0), :decimal),
+          p50_latency_ms:
+            fragment("percentile_disc(0.5) WITHIN GROUP (ORDER BY ?)", r.latency_ms),
+          p95_latency_ms:
+            fragment("percentile_disc(0.95) WITHIN GROUP (ORDER BY ?)", r.latency_ms)
+        })
+        |> Repo.all()
+    end
+  end
+
+  defp model_scope(nil, []), do: nil
+  defp model_scope(nil, ids), do: where(UsageRecord, [r], r.deployment_id in ^ids)
+  defp model_scope(model_id, []), do: where(UsageRecord, [r], r.model_id == ^model_id)
+
+  defp model_scope(model_id, ids),
+    do: where(UsageRecord, [r], r.model_id == ^model_id or r.deployment_id in ^ids)
+
   @doc "Summarize usage records matching UI filter params."
   def usage_summary(filters \\ %{}) do
-    records = filters |> usage_query() |> Repo.all()
-
-    total = length(records)
-    errors = Enum.count(records, &(&1.outcome == :error))
-    fallbacks = Enum.count(records, & &1.fallback_used)
+    agg = filters |> usage_scope() |> aggregate()
 
     %{
-      total: total,
-      errors: errors,
-      error_rate: percent(errors, total),
-      fallback_count: fallbacks,
-      total_cost: sum_cost(records),
-      p50_latency_ms: percentile_latency(records, 0.50),
-      p95_latency_ms: percentile_latency(records, 0.95)
+      total: agg.requests,
+      errors: agg.errors,
+      error_rate: percent(agg.errors, agg.requests),
+      fallback_count: agg.fallbacks,
+      total_cost: agg.cost,
+      p50_latency_ms: agg.p50_latency_ms,
+      p95_latency_ms: agg.p95_latency_ms
     }
   end
 
@@ -60,26 +167,50 @@ defmodule Airo.Usage do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
     starts_at = NaiveDateTime.add(now, -window_seconds, :second)
 
-    records =
-      filters
-      |> Map.put("range", range)
-      |> usage_query()
-      |> Repo.all()
-
+    # Bucket in SQL, against the *same* `starts_at` the labels are built from.
+    # The old code filtered with `filter_time_range/2` (which took its own
+    # `utc_now`) and then bucketed against this one, so rows landing in the
+    # microseconds between the two reads fell outside every bucket and were
+    # dropped. Filtering on `starts_at` directly removes that skew, and
+    # `LEAST(..., bucket_count - 1)` folds the final boundary row into the last
+    # bucket exactly like the old `min(div(diff, bucket_seconds), n - 1)`.
     grouped =
-      records
-      |> Enum.group_by(&bucket_index(&1, starts_at, bucket_seconds, bucket_count))
-      |> Map.drop([nil])
+      filters
+      |> Map.delete("range")
+      |> usage_scope()
+      |> where([r], r.inserted_at >= ^starts_at)
+      |> select([r], %{
+        bucket:
+          selected_as(
+            type(
+              fragment(
+                "LEAST(FLOOR(EXTRACT(EPOCH FROM (? - ?)) / ?), ?)",
+                r.inserted_at,
+                type(^starts_at, :naive_datetime),
+                ^bucket_seconds,
+                ^(bucket_count - 1)
+              ),
+              :integer
+            ),
+            :bucket
+          ),
+        requests: count(r.id),
+        errors: filter(count(r.id), r.outcome == :error),
+        fallbacks: filter(count(r.id), r.fallback_used == true),
+        p50_latency_ms: fragment("percentile_disc(0.5) WITHIN GROUP (ORDER BY ?)", r.latency_ms),
+        p95_latency_ms: fragment("percentile_disc(0.95) WITHIN GROUP (ORDER BY ?)", r.latency_ms)
+      })
+      |> group_by([_r], selected_as(:bucket))
+      |> Repo.all()
+      |> Map.new(&{&1.bucket, &1})
 
     buckets =
       Enum.map(0..(bucket_count - 1), fn index ->
         bucket_start = NaiveDateTime.add(starts_at, index * bucket_seconds, :second)
-        bucket_records = Map.get(grouped, index, [])
 
         %{
           label: bucket_label(bucket_start, range),
-          records: bucket_records,
-          metrics: bucket_metrics(bucket_records)
+          metrics: Map.get(grouped, index, @empty_bucket)
         }
       end)
 
@@ -106,17 +237,28 @@ defmodule Airo.Usage do
   def capability_options, do: UsageRecord.capabilities()
   def outcome_options, do: UsageRecord.outcomes()
 
-  defp usage_query(filters) do
+  # Filters only. Aggregates run against this — no `client_key` join and no
+  # preloads, so counting doesn't drag associations back with it. The
+  # `deployment` join stays because `filter_model/2` searches `d.model_name`
+  # through it, and it's a 10-row table.
+  defp usage_scope(filters) do
     UsageRecord
     |> join(:left, [r], d in assoc(r, :deployment))
-    |> join(:left, [r, d], k in assoc(r, :client_key))
-    |> preload([r, d, k], deployment: d, client_key: k)
     |> filter_outcome(filters["outcome"])
     |> filter_capability(filters["capability"])
     |> filter_client(filters["client_key_id"])
     |> filter_model(filters["model"])
     |> filter_trace(filters["trace_id"])
     |> filter_time_range(filters["range"])
+  end
+
+  # The scope plus what listing actual rows needs. Only `list_usage_records/2`
+  # uses this, and it is always `limit`ed.
+  defp usage_query(filters) do
+    filters
+    |> usage_scope()
+    |> join(:left, [r, _d], k in assoc(r, :client_key))
+    |> preload([r, d, k], deployment: d, client_key: k)
   end
 
   @doc "Persist a single usage record synchronously."
@@ -267,56 +409,13 @@ defmodule Airo.Usage do
   defp bucket_config("7d"), do: {604_800, 86_400, 7}
   defp bucket_config(_range), do: {86_400, 3_600, 24}
 
-  defp bucket_index(%{inserted_at: inserted_at}, starts_at, bucket_seconds, bucket_count) do
-    diff = NaiveDateTime.diff(inserted_at, starts_at, :second)
-
-    cond do
-      diff < 0 -> nil
-      diff > bucket_seconds * bucket_count -> nil
-      true -> min(div(diff, bucket_seconds), bucket_count - 1)
-    end
-  end
-
   defp bucket_label(datetime, "7d"), do: Calendar.strftime(datetime, "%m/%d")
   defp bucket_label(datetime, _range), do: Calendar.strftime(datetime, "%H:%M")
-
-  defp bucket_metrics(records) do
-    %{
-      requests: length(records),
-      errors: Enum.count(records, &(&1.outcome == :error)),
-      fallbacks: Enum.count(records, & &1.fallback_used),
-      p50_latency_ms: percentile_latency(records, 0.50),
-      p95_latency_ms: percentile_latency(records, 0.95)
-    }
-  end
 
   defp percent(_part, 0), do: "0.0%"
 
   defp percent(part, total) do
     :erlang.float_to_binary(part / total * 100, decimals: 1) <> "%"
-  end
-
-  defp sum_cost(records) do
-    Enum.reduce(records, Decimal.new(0), fn record, acc ->
-      Decimal.add(acc, record.cost || Decimal.new(0))
-    end)
-  end
-
-  defp percentile_latency(records, percentile) do
-    latencies =
-      records
-      |> Enum.map(& &1.latency_ms)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.sort()
-
-    case latencies do
-      [] ->
-        nil
-
-      list ->
-        index = ceil(length(list) * percentile) - 1
-        Enum.at(list, max(index, 0))
-    end
   end
 
   defp tokens(%{"usage" => usage}) when is_map(usage),

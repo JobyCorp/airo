@@ -171,6 +171,102 @@ defmodule Airo.UsageTest do
       assert Enum.sum(series.fallbacks) == 1
       assert 30 in series.p95_latency_ms
     end
+
+    test "a bucket with no calls reports zero requests and no latency" do
+      # Absent is not zero for a percentile: "nothing was served in this five
+      # minutes" must not render as "0 ms". Only the counts fill with 0.
+      series = Usage.performance_series(%{"range" => "1h"})
+
+      assert length(series.categories) == 12
+      assert series.requests == List.duplicate(0, 12)
+      assert series.errors == List.duplicate(0, 12)
+      assert series.p50_latency_ms == List.duplicate(nil, 12)
+      assert series.p95_latency_ms == List.duplicate(nil, 12)
+    end
+
+    test "rows land in the bucket their age puts them in" do
+      # The aggregation moved into SQL; this pins that the bucket maths didn't
+      # move with it. 1h => twelve 5-minute buckets, newest last.
+      now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+      for {minutes_ago, latency} <- [{2, 11}, {32, 22}] do
+        {:ok, record} =
+          Usage.record_usage(%{
+            trace_id: "gt_bucket_#{minutes_ago}",
+            capability: :chat,
+            outcome: :success,
+            latency_ms: latency
+          })
+
+        Airo.Repo.update_all(
+          from(r in Airo.Usage.UsageRecord, where: r.id == ^record.id),
+          set: [inserted_at: NaiveDateTime.add(now, -minutes_ago * 60, :second)]
+        )
+      end
+
+      series = Usage.performance_series(%{"range" => "1h"})
+
+      # ~2 min old => last bucket; ~32 min old => middle of the window.
+      assert List.last(series.requests) == 1
+      assert List.last(series.p95_latency_ms) == 11
+      assert Enum.sum(series.requests) == 2
+      assert 22 in series.p95_latency_ms
+    end
+  end
+
+  describe "usage_summary/1" do
+    test "counts outcomes and picks an observed latency for each percentile" do
+      # percentile_disc, not _cont: p50/p95 must be a latency that actually
+      # happened, matching what the pre-SQL implementation reported.
+      for {outcome, latency} <- [{:success, 10}, {:success, 20}, {:error, 30}, {:success, 40}] do
+        {:ok, _} =
+          Usage.record_usage(%{
+            trace_id: "gt_pct_#{outcome}_#{latency}",
+            capability: :chat,
+            outcome: outcome,
+            latency_ms: latency
+          })
+      end
+
+      summary = Usage.usage_summary(%{"range" => "24h"})
+
+      assert summary.total == 4
+      assert summary.errors == 1
+      assert summary.error_rate == "25.0%"
+      assert summary.p50_latency_ms in [10, 20, 30, 40]
+      assert summary.p95_latency_ms == 40
+    end
+
+    test "an empty window reports zeroes rather than dividing by zero" do
+      summary = Usage.usage_summary(%{"range" => "1h"})
+
+      assert summary.total == 0
+      assert summary.errors == 0
+      assert summary.error_rate == "0.0%"
+      assert summary.p50_latency_ms == nil
+      assert Decimal.equal?(summary.total_cost, Decimal.new(0))
+    end
+
+    test "records with no latency don't drag the percentiles down" do
+      # nil latency was rejected before aggregating; the ordered-set aggregate
+      # ignores NULLs, which is the same thing — assert it, don't assume it.
+      {:ok, _} =
+        Usage.record_usage(%{trace_id: "gt_nil_lat", capability: :chat, outcome: :success})
+
+      {:ok, _} =
+        Usage.record_usage(%{
+          trace_id: "gt_real_lat",
+          capability: :chat,
+          outcome: :success,
+          latency_ms: 500
+        })
+
+      summary = Usage.usage_summary(%{"range" => "24h"})
+
+      assert summary.total == 2
+      assert summary.p50_latency_ms == 500
+      assert summary.p95_latency_ms == 500
+    end
   end
 
   defp eventually(fun, retries \\ 50) do
