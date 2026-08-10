@@ -203,31 +203,23 @@ defmodule AiroWeb.Admin.AgentLive do
     end
   end
 
-  # Forget a host that's gone for good (renamed, retired). The context refuses
-  # while slots are still attached, so a stale agent can never be turned into a
-  # set of unmanaged providers by accident.
+  # Forget a host that's gone for good (renamed, retired). Slots that carry
+  # deployments still block — the context refuses, so a stale agent can never be
+  # turned into a set of unmanaged providers by accident — but empty ones ride
+  # along, since making the operator delete those by hand first only moves the
+  # same click to another page.
   def handle_event("delete_agent", %{"id" => id}, socket) do
     agent = Config.get_agent!(id)
 
-    case Config.delete_agent(agent) do
-      {:ok, _agent} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Forgot agent #{agent.host_id}.")
-         |> assign_agents()
-         |> subscribe_presence()}
-
-      {:error, {:has_providers, count}} ->
-        {:noreply,
-         put_flash(
-           socket,
-           :error,
-           "#{agent.host_id} still manages #{count} slot(s). Delete or reassign them first — " <>
-             "removing the agent would leave them behind as unmanaged providers."
-         )}
-
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Could not delete #{agent.host_id}.")}
+    if online?(agent.host_id) do
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         "#{agent.host_id} is connected — it would re-register on its next heartbeat."
+       )}
+    else
+      {:noreply, deleted(socket, agent, Config.delete_agent(agent, cascade_empty_slots: true))}
     end
   end
 
@@ -235,6 +227,26 @@ defmodule AiroWeb.Admin.AgentLive do
     AiroWeb.Endpoint.broadcast("agent:#{agent.host_id}", "resync", %{})
     {:noreply, put_flash(socket, :info, "Asked #{agent.host_id} to re-report its slots.")}
   end
+
+  defp deleted(socket, agent, {:ok, _agent}) do
+    socket
+    |> put_flash(:info, "Forgot agent #{agent.host_id}.")
+    |> assign_agents()
+    |> subscribe_presence()
+  end
+
+  defp deleted(socket, agent, {:error, {:has_providers, count}}) do
+    put_flash(
+      socket,
+      :error,
+      "#{agent.host_id} has #{count} slot(s) with deployments bound to them. Repoint or " <>
+        "delete those deployments first — removing the agent would leave the slots behind " <>
+        "as unmanaged providers."
+    )
+  end
+
+  defp deleted(socket, agent, {:error, _changeset}),
+    do: put_flash(socket, :error, "Could not delete #{agent.host_id}.")
 
   defp apply_action(socket, :index, _params) do
     socket
@@ -693,31 +705,69 @@ defmodule AiroWeb.Admin.AgentLive do
           label={"Open #{agent.host_id}"}
           navigate={~p"/admin/agents/#{agent.id}"}
         />
-        <.icon_button
-          icon="hero-trash"
-          label={delete_label(agent, @online[agent.host_id])}
-          variant="danger"
-          disabled={not deletable?(agent, @online[agent.host_id])}
-          phx-click="delete_agent"
-          phx-value-id={agent.id}
-          data-confirm={"Forget #{agent.host_id}? It will reappear if that host ever connects again."}
-        />
+        <.delete_agent_button agent={agent} online={@online[agent.host_id]} />
       </:action>
     </.table>
     """
   end
 
-  # A host that's connected re-registers on its next heartbeat, so deleting it
-  # is a no-op that looks like it worked; and one that still owns slots can't be
-  # deleted without stranding them (see `Config.delete_agent/1`). Say which.
-  defp deletable?(agent, online), do: not online and agent.providers == []
+  attr :agent, :map, required: true
+  attr :online, :boolean, required: true
 
-  defp delete_label(agent, true), do: "#{agent.host_id} is online — it would re-register"
+  defp delete_agent_button(assigns) do
+    assigns = assign(assigns, mode: delete_mode(assigns.agent, assigns.online))
 
-  defp delete_label(%{providers: [_ | _] = providers} = agent, _offline),
-    do: "#{agent.host_id} still manages #{length(providers)} slot(s) — remove them first"
+    ~H"""
+    <.icon_button
+      icon="hero-trash"
+      label={delete_label(@mode, @agent)}
+      variant="danger"
+      disabled={@mode in [:online, :bound]}
+      phx-click="delete_agent"
+      phx-value-id={@agent.id}
+      data-confirm={delete_confirm(@mode, @agent)}
+    />
+    """
+  end
 
-  defp delete_label(agent, _offline), do: "Forget #{agent.host_id}"
+  # Why the trash is (or isn't) live for this row:
+  #
+  #   :online  — connected, so deleting is a no-op that looks like it worked; it
+  #              re-registers on the next heartbeat.
+  #   :bound   — owns a slot a deployment routes to; taking the agent would
+  #              strand it as an unmanaged provider (see `Config.delete_agent/2`).
+  #   :cascade — owns only empty slots, which bind nothing; they go with it.
+  #   :ready   — owns nothing.
+  defp delete_mode(_agent, true), do: :online
+
+  defp delete_mode(agent, _offline) do
+    cond do
+      agent.providers == [] -> :ready
+      Enum.any?(agent.providers, &(&1.deployments != [])) -> :bound
+      true -> :cascade
+    end
+  end
+
+  defp delete_label(:online, agent), do: "#{agent.host_id} is online — it would re-register"
+
+  defp delete_label(:bound, agent),
+    do:
+      "#{agent.host_id} has #{bound_count(agent)} slot(s) with deployments — repoint those first"
+
+  defp delete_label(:cascade, agent),
+    do: "Forget #{agent.host_id} and its #{length(agent.providers)} empty slot(s)"
+
+  defp delete_label(:ready, agent), do: "Forget #{agent.host_id}"
+
+  defp delete_confirm(:cascade, agent) do
+    "Forget #{agent.host_id} and remove its #{length(agent.providers)} empty slot(s)? " <>
+      "No deployment routes to them. Both reappear if that host ever connects again."
+  end
+
+  defp delete_confirm(_mode, agent),
+    do: "Forget #{agent.host_id}? It will reappear if that host ever connects again."
+
+  defp bound_count(agent), do: Enum.count(agent.providers, &(&1.deployments != []))
 
   attr :detail, :map, required: true
   attr :config, :any, required: true

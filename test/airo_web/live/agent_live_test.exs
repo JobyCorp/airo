@@ -43,33 +43,48 @@ defmodule AiroWeb.AgentLiveTest do
       assert Config.get_agent_by_host_id("renamed-away") == nil
     end
 
-    test "won't let you strand a host's slots", %{conn: conn} do
-      # The FK is nilify_all, so deleting here would leave the slot behind as an
-      # unmanaged provider rather than removing it.
-      {agent, provider} = agent_with_slot("has-slots")
+    test "an empty slot doesn't block it — it goes too", %{conn: conn} do
+      # Nothing routes to a slot with no deployments, so making the operator go
+      # delete it by hand on /admin/providers first was a dead end, not a guard.
+      {agent, provider} = agent_with_slot("has-empty-slot")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/agents")
+
+      button = element(view, ~s{[phx-click="delete_agent"][phx-value-id="#{agent.id}"]})
+      refute render(button) =~ "disabled"
+      assert render(button) =~ "and its 1 empty slot"
+
+      html = render_click(view, "delete_agent", %{"id" => to_string(agent.id)})
+
+      assert html =~ "Forgot agent has-empty-slot"
+      assert Config.get_agent_by_host_id("has-empty-slot") == nil
+      # Removed, not left behind with a null agent_id (the FK is nilify_all).
+      assert_raise Ecto.NoResultsError, fn -> Config.get_provider!(provider.id) end
+    end
+
+    test "won't let you strand a slot a deployment routes to", %{conn: conn} do
+      {agent, provider} = agent_with_slot("has-bound-slot")
+
+      {:ok, _} =
+        Config.create_deployment(%{
+          provider_id: provider.id,
+          model_name: "qwen3-30b",
+          capabilities: [:chat]
+        })
 
       {:ok, view, _html} = live(conn, ~p"/admin/agents")
 
       button = element(view, ~s{[phx-click="delete_agent"][phx-value-id="#{agent.id}"]})
       assert render(button) =~ "disabled"
-      assert render(button) =~ "still manages 1 slot"
+      assert render(button) =~ "1 slot(s) with deployments"
 
       # Disabled in the markup AND refused if the event is sent anyway.
-      render_click(view, "delete_agent", %{"id" => to_string(agent.id)})
-
-      assert Config.get_agent_by_host_id("has-slots")
-      assert Airo.Config.get_provider!(provider.id).agent_id == agent.id
-    end
-
-    test "explains the refusal rather than failing quietly", %{conn: conn} do
-      {agent, _provider} = agent_with_slot("noisy")
-
-      {:ok, view, _html} = live(conn, ~p"/admin/agents")
-
       html = render_click(view, "delete_agent", %{"id" => to_string(agent.id)})
 
-      assert html =~ "still manages 1 slot"
+      assert html =~ "1 slot(s) with deployments"
       assert html =~ "unmanaged providers"
+      assert Config.get_agent_by_host_id("has-bound-slot")
+      assert Config.get_provider!(provider.id).agent_id == agent.id
     end
   end
 

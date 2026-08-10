@@ -178,14 +178,36 @@ defmodule Airo.Config do
   removed or reassigned first.
 
   Returns `{:error, {:has_providers, count}}` rather than doing it anyway.
+
+  ## Cascading the empty slots
+
+  That refusal is about *orphans*, and an empty slot can't become one: with no
+  deployments pointing at it, nothing routes to it and removing it strands
+  nothing. Requiring the operator to go delete it by hand on `/admin/providers`
+  first is ceremony, so `cascade_empty_slots: true` takes those slots out with
+  the agent, in one transaction. Slots that *do* carry deployments still block —
+  and the reported count is then how many of those are in the way, not the total.
   """
-  @spec delete_agent(Agent.t()) ::
+  @spec delete_agent(Agent.t(), keyword()) ::
           {:ok, Agent.t()} | {:error, {:has_providers, pos_integer()} | Ecto.Changeset.t()}
-  def delete_agent(%Agent{} = agent) do
-    case Repo.preload(agent, :providers) do
-      %Agent{providers: []} -> Repo.delete(agent)
-      %Agent{providers: providers} -> {:error, {:has_providers, length(providers)}}
+  def delete_agent(%Agent{} = agent, opts \\ []) do
+    %Agent{providers: providers} = agent = Repo.preload(agent, providers: :deployments)
+    {empty, bound} = Enum.split_with(providers, &(&1.deployments == []))
+    cascade? = Keyword.get(opts, :cascade_empty_slots, false)
+
+    cond do
+      providers == [] -> Repo.delete(agent)
+      not cascade? -> {:error, {:has_providers, length(providers)}}
+      bound != [] -> {:error, {:has_providers, length(bound)}}
+      true -> delete_with_slots(agent, empty)
     end
+  end
+
+  defp delete_with_slots(agent, slots) do
+    Repo.transaction(fn ->
+      Enum.each(slots, &Repo.delete!/1)
+      Repo.delete!(agent)
+    end)
   end
 
   def create_provider(attrs) do
