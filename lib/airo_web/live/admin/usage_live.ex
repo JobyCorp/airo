@@ -63,7 +63,7 @@ defmodule AiroWeb.Admin.UsageLive do
             <.button id="usage-toggle-routing" size="sm" variant="ghost" phx-click="toggle_routing">
               {if @show_routing, do: "Hide routing", else: "Show routing"}
             </.button>
-            <.button variant="ghost" id="usage-header-reset" size="sm" phx-click="reset">
+            <.button id="usage-header-reset" size="sm" phx-click="reset">
               Reset filters
             </.button>
           </:actions>
@@ -182,7 +182,6 @@ defmodule AiroWeb.Admin.UsageLive do
               </dl>
               <.button
                 :if={r.trace_id}
-                variant="ghost"
                 size="sm"
                 phx-click="trace"
                 phx-value-id={r.trace_id}

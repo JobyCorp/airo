@@ -291,7 +291,7 @@ defmodule AiroWeb.Admin.RoutingLive do
                   placeholder="e.g. refactor the auth module across three files"
                 />
               </div>
-              <.button variant="ghost" type="submit" name="intent" value="test">Test</.button>
+              <.button type="submit" name="intent" value="test">Test</.button>
               <.button type="submit" name="intent" value="save" variant="primary">Save</.button>
             </div>
 

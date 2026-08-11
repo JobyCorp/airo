@@ -273,7 +273,7 @@ defmodule AiroWeb.Admin.ModelLive do
             </.button>
           </:actions>
           <:actions :if={@live_action in [:new, :edit]}>
-            <.button variant="ghost" size="sm" navigate={model_return_path(@editing)}>Back</.button>
+            <.button size="sm" navigate={model_return_path(@editing)}>Back</.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -327,7 +327,7 @@ defmodule AiroWeb.Admin.ModelLive do
         <.input field={@form[:notes]} type="textarea" label="Notes" class="md:col-span-2" />
         <div class="flex gap-2 md:col-span-2">
           <.button variant="primary">Save</.button>
-          <.button variant="ghost" type="button" phx-click="cancel">Cancel</.button>
+          <.button type="button" phx-click="cancel">Cancel</.button>
         </div>
       </.form>
     </.card>
@@ -356,7 +356,7 @@ defmodule AiroWeb.Admin.ModelLive do
           class="rounded-box border border-dashed border-base-content/15 bg-base-100/45 px-4 py-10 text-center text-sm text-base-content/60"
         >
           <p>No models match these filters.</p>
-          <.button variant="ghost" size="sm" phx-click="reset_filters" class="mt-3">
+          <.button size="sm" phx-click="reset_filters" class="mt-3">
             Clear filters
           </.button>
         </div>
@@ -431,7 +431,6 @@ defmodule AiroWeb.Admin.ModelLive do
         />
       </div>
       <.button
-        variant="ghost"
         type="button"
         size="sm"
         phx-click="toggle_dir"
@@ -829,7 +828,6 @@ defmodule AiroWeb.Admin.ModelLive do
 
             <div :if={:inspect_model in row.local_capabilities} class="mt-4 flex justify-end">
               <.button
-                variant="ghost"
                 size="sm"
                 phx-click="sync_deployment"
                 phx-value-id={row.deployment.id}

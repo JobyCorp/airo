@@ -320,7 +320,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
             </.button>
           </:actions>
           <:actions :if={@live_action in [:new, :edit]}>
-            <.button variant="ghost" size="sm" navigate={deployment_return_path(@editing)}>
+            <.button size="sm" navigate={deployment_return_path(@editing)}>
               Back
             </.button>
           </:actions>
@@ -427,7 +427,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
         />
         <div class="flex gap-2">
           <.button variant="primary">Save</.button>
-          <.button variant="ghost" type="button" phx-click="cancel">Cancel</.button>
+          <.button type="button" phx-click="cancel">Cancel</.button>
         </div>
       </.form>
     </.card>
