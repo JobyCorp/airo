@@ -75,7 +75,7 @@ defmodule AiroWeb do
 
       # Airo-only wrappers, filling what the kit doesn't ship. Deliberately not
       # named after kit components, so nothing shadows.
-      import AiroWeb.CoreComponents, only: [checkbox_group: 1, disclosure_table: 1]
+      import AiroWeb.CoreComponents, only: [checkbox_group: 1, data_table: 1, disclosure_table: 1]
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS

@@ -158,12 +158,15 @@ defmodule AiroWeb.Admin.RoutingLive do
 
     ~H"""
     <Layouts.app flash={@flash} active_nav="routing">
-      <div class="mx-auto max-w-4xl space-y-6 px-6 py-8">
+      <div class="mx-auto max-w-7xl space-y-6 px-6 py-8">
         <CompositeComponents.page_header subtitle="The system classifier — how Airo grades prompts for tier routing. Routed aliases inherit this; they only toggle routing on/off and shadow/enforce.">
           <:crumb>Routing</:crumb>
         </CompositeComponents.page_header>
 
-        <.form for={%{}} id="routing-form" phx-submit="submit" class="space-y-6">
+        <%!-- Page frame matches every other admin page so the chrome lines up;
+             the form is capped to a readable measure. A select stretched to
+             1100px is a worse control than a narrow page. --%>
+        <.form for={%{}} id="routing-form" phx-submit="submit" class="max-w-4xl space-y-6">
           <.card variant="bordered">
             <:eyebrow>Engine</:eyebrow>
             <:title>Classifier model</:title>

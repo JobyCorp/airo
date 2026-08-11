@@ -495,7 +495,7 @@ defmodule AiroWeb.Admin.ProviderLive do
 
   defp provider_table(assigns) do
     ~H"""
-    <.table
+    <.data_table
       id="providers"
       rows={@providers}
       row_click={fn {_id, p} -> JS.navigate(~p"/admin/providers/#{p.id}") end}
@@ -536,6 +536,7 @@ defmodule AiroWeb.Admin.ProviderLive do
           shape="square"
           size="sm"
           variant="danger"
+          class="btn-soft"
           title={"Delete #{p.name}"}
           aria-label={"Delete #{p.name}"}
           phx-click="delete"
@@ -545,7 +546,7 @@ defmodule AiroWeb.Admin.ProviderLive do
           <.icon name="hero-trash" class="size-4" />
         </.button>
       </:action>
-    </.table>
+    </.data_table>
     """
   end
 
@@ -630,7 +631,7 @@ defmodule AiroWeb.Admin.ProviderLive do
 
       <.card variant="bordered">
         <:title>Deployments</:title>
-        <.table
+        <.data_table
           id="provider-deployments"
           rows={@detail.provider.deployments}
           row_click={
@@ -679,12 +680,12 @@ defmodule AiroWeb.Admin.ProviderLive do
               <.icon name="hero-arrow-top-right-on-square" class="size-4" />
             </.button>
           </:action>
-        </.table>
+        </.data_table>
       </.card>
 
       <.card variant="bordered">
         <:title>Local catalog</:title>
-        <.table id="provider-catalog" rows={@detail.catalog}>
+        <.data_table id="provider-catalog" rows={@detail.catalog}>
           <:col :let={model} label="Model">{catalog_value(model, :id)}</:col>
           <:col :let={model} label="Type">{catalog_value(model, :type)}</:col>
           <:col :let={model} label="Family">{catalog_value(model, :family)}</:col>
@@ -697,7 +698,7 @@ defmodule AiroWeb.Admin.ProviderLive do
           <:col :let={model} label="Running">
             {if running?(@detail.running, model), do: "yes", else: "no"}
           </:col>
-        </.table>
+        </.data_table>
       </.card>
     </div>
     """

@@ -163,6 +163,12 @@ defmodule AiroWeb.CompositeComponents do
 
   This intentionally replaces larger page-title headers inside the admin shell
   so each page has one consistent control band below the primary navigation.
+
+  The band bleeds through the page container's gutter (`-mx-6`) and re-adds it
+  as its own padding (`px-6`). That is what makes it read as a band: the tint
+  runs the full width of the page while the breadcrumb still starts on the same
+  vertical line as the content beneath it. Padding alone would indent the text
+  off that line; bleeding alone would leave the text welded to the tint's edge.
   """
   attr :subtitle, :string, default: nil
   attr :class, :any, default: nil
@@ -181,7 +187,7 @@ defmodule AiroWeb.CompositeComponents do
     <header
       data-component="AiroWeb.CompositeComponents.page_header"
       class={[
-        "flex flex-col gap-3 border-y border-base-content/10 bg-base-200/25 py-3 sm:flex-row sm:items-center sm:justify-between",
+        "-mx-6 flex flex-col gap-3 border-y border-base-content/10 bg-base-200/25 px-6 py-4 sm:flex-row sm:items-center sm:justify-between",
         @class
       ]}
       {@rest}

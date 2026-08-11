@@ -151,7 +151,7 @@ defmodule AiroWeb.Admin.LogsLive do
           </.form>
         </.card>
 
-        <.table id="logs" rows={@streams.events}>
+        <.data_table id="logs" rows={@streams.events}>
           <:col :let={{_id, e}} label="When">
             <span class="whitespace-nowrap font-mono text-xs text-base-content/55">
               {format_at(e.inserted_at)}
@@ -222,7 +222,7 @@ defmodule AiroWeb.Admin.LogsLive do
               <.icon name="hero-arrow-top-right-on-square" class="size-4" />
             </.button>
           </:action>
-        </.table>
+        </.data_table>
       </div>
     </Layouts.app>
     """
