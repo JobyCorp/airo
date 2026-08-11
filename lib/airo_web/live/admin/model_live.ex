@@ -262,6 +262,7 @@ defmodule AiroWeb.Admin.ModelLive do
               :if={orphaned?(@detail.summary)}
               size="sm"
               variant="danger"
+              class="btn-soft"
               phx-click="delete"
               phx-value-id={@detail.model.id}
               data-confirm={"Delete orphaned model “#{@detail.model.display_name}”? This removes the catalog entry permanently."}
@@ -542,6 +543,7 @@ defmodule AiroWeb.Admin.ModelLive do
           shape="square"
           size="sm"
           variant="danger"
+          class="btn-soft"
           title={"Delete #{@model.display_name}"}
           aria-label={"Delete #{@model.display_name}"}
           phx-click="delete"
@@ -933,7 +935,7 @@ defmodule AiroWeb.Admin.ModelLive do
 
       <CompositeComponents.section_panel body_class="p-4">
         <:title>Routing participation</:title>
-        <.table id="model-aliases" rows={@detail.aliases}>
+        <.data_table id="model-aliases" rows={@detail.aliases}>
           <:col :let={candidate} label="Alias">{candidate.alias.name}</:col>
           <:col :let={candidate} label="Capability">{candidate.alias.capability}</:col>
           <:col :let={candidate} label="Strategy">{candidate.alias.strategy}</:col>
@@ -942,12 +944,12 @@ defmodule AiroWeb.Admin.ModelLive do
           </:col>
           <:col :let={candidate} label="Weight">{candidate.weight}</:col>
           <:col :let={candidate} label="Priority">{candidate.priority}</:col>
-        </.table>
+        </.data_table>
       </CompositeComponents.section_panel>
 
       <CompositeComponents.section_panel body_class="p-4">
         <:title>Recent health transitions</:title>
-        <.table id="model-health-events" rows={@detail.health_events}>
+        <.data_table id="model-health-events" rows={@detail.health_events}>
           <:col :let={event} label="When">{event.inserted_at}</:col>
           <:col :let={event} label="Provider">{event.provider && event.provider.name}</:col>
           <:col :let={event} label="Status">
@@ -956,12 +958,12 @@ defmodule AiroWeb.Admin.ModelLive do
           <:col :let={event} label="Source">{event.source}</:col>
           <:col :let={event} label="Latency">{latency(event.latency_ms)}</:col>
           <:col :let={event} label="Reason">{event.reason || "—"}</:col>
-        </.table>
+        </.data_table>
       </CompositeComponents.section_panel>
 
       <CompositeComponents.section_panel body_class="p-4">
         <:title>Recent traces</:title>
-        <.table id="model-traces" rows={@detail.recent_records}>
+        <.data_table id="model-traces" rows={@detail.recent_records}>
           <:col :let={record} label="When">{record.inserted_at}</:col>
           <:col :let={record} label="Trace">
             <span class="font-mono text-xs">{record.trace_id || "—"}</span>
@@ -971,7 +973,7 @@ defmodule AiroWeb.Admin.ModelLive do
           <:col :let={record} label="Error">{record.error_code || "—"}</:col>
           <:col :let={record} label="Latency">{latency(record.latency_ms)}</:col>
           <:col :let={record} label="Tokens">{record.tokens_in}/{record.tokens_out}</:col>
-        </.table>
+        </.data_table>
       </CompositeComponents.section_panel>
     </div>
     """

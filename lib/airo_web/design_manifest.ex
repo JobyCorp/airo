@@ -45,6 +45,12 @@ defmodule AiroWeb.DesignManifest do
     summary: "Visible multi-choice checkbox group for enum-array form fields.",
     preview: &DesignPreviews.checkbox_group_preview/1
 
+  component CoreComponents, :data_table,
+    category: :wrapper,
+    daisy_basis: "table",
+    summary: "The kit's `<.table>` on Airo's bordered data surface, zebra off.",
+    preview: &DesignPreviews.data_table_preview/1
+
   component CoreComponents, :disclosure_table,
     category: :wrapper,
     daisy_basis: "table",

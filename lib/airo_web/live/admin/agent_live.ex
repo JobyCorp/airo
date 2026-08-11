@@ -686,7 +686,7 @@ defmodule AiroWeb.Admin.AgentLive do
       socket.
     </CompositeComponents.empty_state>
 
-    <.table
+    <.data_table
       :if={@agents != []}
       id="agents"
       rows={@agents}
@@ -714,7 +714,7 @@ defmodule AiroWeb.Admin.AgentLive do
         </.button>
         <.delete_agent_button agent={agent} online={@online[agent.host_id]} />
       </:action>
-    </.table>
+    </.data_table>
     """
   end
 
@@ -729,6 +729,7 @@ defmodule AiroWeb.Admin.AgentLive do
       shape="square"
       size="sm"
       variant="danger"
+      class="btn-soft"
       title={delete_label(@mode, @agent)}
       aria-label={delete_label(@mode, @agent)}
       disabled={@mode in [:online, :bound]}
@@ -854,7 +855,7 @@ defmodule AiroWeb.Admin.AgentLive do
           This agent hasn't registered any serving slots. They appear once it
           advertises its engine ports to Airo.
         </CompositeComponents.empty_state>
-        <.table :if={@detail.slots != []} id="agent-slots" rows={@detail.slots}>
+        <.data_table :if={@detail.slots != []} id="agent-slots" rows={@detail.slots}>
           <:col :let={slot} label="Slot">{slot.provider.name}</:col>
           <:col :let={slot} label="Resident model">
             <span class={[is_nil(slot.resident_model) && "text-base-content/40"]}>
@@ -888,6 +889,7 @@ defmodule AiroWeb.Admin.AgentLive do
               :if={slot.resident_model}
               size="sm"
               variant="danger"
+              class="btn-soft"
               phx-click="unload"
               phx-value-port={slot.port}
               disabled={!@detail.online}
@@ -906,7 +908,7 @@ defmodule AiroWeb.Admin.AgentLive do
               <.icon name="hero-arrow-top-right-on-square" class="size-4" />
             </.button>
           </:action>
-        </.table>
+        </.data_table>
       </.card>
 
       <.card variant="bordered">
@@ -934,7 +936,7 @@ defmodule AiroWeb.Admin.AgentLive do
           Footprints are estimates; a “won't fit” flag is advisory. Configuring the loaded
           model restarts it.
         </p>
-        <.table :if={@model_rows != []} id="inventory" rows={@model_rows}>
+        <.data_table :if={@model_rows != []} id="inventory" rows={@model_rows}>
           <:col :let={model} label="Model">
             <span class="font-mono text-sm">{model["id"]}</span>
             <CompositeComponents.tag :if={model.resident?} tone="success">
@@ -969,7 +971,7 @@ defmodule AiroWeb.Admin.AgentLive do
               {if model.resident?, do: "Configure", else: "Load"}
             </.button>
           </:action>
-        </.table>
+        </.data_table>
       </.card>
 
       <.config_modal :if={@config} config={@config} />

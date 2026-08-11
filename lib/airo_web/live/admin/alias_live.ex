@@ -297,7 +297,7 @@ defmodule AiroWeb.Admin.AliasLive do
       <.card :if={@editing} variant="bordered">
         <:title>Routing candidates — {@editing.name}</:title>
 
-        <.table id="candidates" rows={@editing.candidates}>
+        <.data_table id="candidates" rows={@editing.candidates}>
           <:col :let={c} label="Deployment">{c.deployment && c.deployment.model_name}</:col>
           <:col :let={c} label="Weight">{c.weight}</:col>
           <:col :let={c} label="Priority">{c.priority}</:col>
@@ -306,6 +306,7 @@ defmodule AiroWeb.Admin.AliasLive do
               shape="square"
               size="sm"
               variant="danger"
+              class="btn-soft"
               title="Remove candidate"
               aria-label="Remove candidate"
               phx-click="remove_candidate"
@@ -314,7 +315,7 @@ defmodule AiroWeb.Admin.AliasLive do
               <.icon name="hero-x-mark" class="size-4" />
             </.button>
           </:action>
-        </.table>
+        </.data_table>
 
         <.form
           for={%{}}
@@ -389,7 +390,7 @@ defmodule AiroWeb.Admin.AliasLive do
 
   defp alias_table(assigns) do
     ~H"""
-    <.table
+    <.data_table
       id="aliases"
       rows={@aliases}
       row_click={fn {_id, a} -> JS.navigate(~p"/admin/aliases/#{a.id}") end}
@@ -413,6 +414,7 @@ defmodule AiroWeb.Admin.AliasLive do
           shape="square"
           size="sm"
           variant="danger"
+          class="btn-soft"
           title={"Delete #{a.name}"}
           aria-label={"Delete #{a.name}"}
           phx-click="delete"
@@ -422,7 +424,7 @@ defmodule AiroWeb.Admin.AliasLive do
           <.icon name="hero-trash" class="size-4" />
         </.button>
       </:action>
-    </.table>
+    </.data_table>
     """
   end
 
@@ -451,13 +453,13 @@ defmodule AiroWeb.Admin.AliasLive do
 
       <.card variant="bordered">
         <:title>Routing candidates</:title>
-        <.table id="alias-candidates" rows={@alias.candidates}>
+        <.data_table id="alias-candidates" rows={@alias.candidates}>
           <:col :let={candidate} label="Deployment">
             {candidate.deployment && candidate.deployment.model_name}
           </:col>
           <:col :let={candidate} label="Weight">{candidate.weight}</:col>
           <:col :let={candidate} label="Priority">{candidate.priority}</:col>
-        </.table>
+        </.data_table>
       </.card>
     </div>
     """

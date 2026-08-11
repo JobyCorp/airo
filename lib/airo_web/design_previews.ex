@@ -41,6 +41,25 @@ defmodule AiroWeb.DesignPreviews do
     """
   end
 
+  def data_table_preview(assigns) do
+    assigns =
+      Map.put(assigns, :rows, [
+        %{id: 1, name: "BAAI/bge-m3", status: "up", latency: "38 ms"},
+        %{id: 2, name: "moondream:latest", status: "up", latency: "2560 ms"}
+      ])
+
+    ~H"""
+    <CoreComponents.data_table id="preview-data-table" rows={@rows}>
+      <:col :let={row} label="Model">
+        <div class="font-medium">{row.name}</div>
+      </:col>
+      <:col :let={row} label="Health">{row.status}</:col>
+      <:col :let={row} label="p95">{row.latency}</:col>
+      <:empty>No models yet.</:empty>
+    </CoreComponents.data_table>
+    """
+  end
+
   def disclosure_table_preview(assigns) do
     assigns =
       Map.put(assigns, :rows, [

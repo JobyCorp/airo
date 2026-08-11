@@ -170,7 +170,7 @@ defmodule AiroWeb.Admin.KeyLive do
 
   defp key_table(assigns) do
     ~H"""
-    <.table id="keys" rows={@keys}>
+    <.data_table id="keys" rows={@keys}>
       <:col :let={{_id, k}} label="Name">{k.name}</:col>
       <:col :let={{_id, k}} label="Allowed aliases">{Enum.join(k.allowed_aliases, ", ")}</:col>
       <:col :let={{_id, k}} label="Surfaces">{Enum.map_join(k.scopes, ", ", &to_string/1)}</:col>
@@ -191,6 +191,7 @@ defmodule AiroWeb.Admin.KeyLive do
           shape="square"
           size="sm"
           variant="danger"
+          class="btn-soft"
           title={"Delete #{k.name}"}
           aria-label={"Delete #{k.name}"}
           phx-click="delete"
@@ -200,7 +201,7 @@ defmodule AiroWeb.Admin.KeyLive do
           <.icon name="hero-trash" class="size-4" />
         </.button>
       </:action>
-    </.table>
+    </.data_table>
     """
   end
 end

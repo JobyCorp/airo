@@ -439,7 +439,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
 
   defp deployment_table(assigns) do
     ~H"""
-    <.table
+    <.data_table
       id="deployments"
       rows={@deployments}
       row_click={fn {_id, d} -> JS.navigate(~p"/admin/deployments/#{d.id}") end}
@@ -469,6 +469,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
           shape="square"
           size="sm"
           variant="danger"
+          class="btn-soft"
           title={"Delete #{d.model_name}"}
           aria-label={"Delete #{d.model_name}"}
           phx-click="delete"
@@ -478,7 +479,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
           <.icon name="hero-trash" class="size-4" />
         </.button>
       </:action>
-    </.table>
+    </.data_table>
     """
   end
 
@@ -556,7 +557,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
     <.card variant="bordered">
       <:title>Health transitions</:title>
       Recent deployment health changes from probes and live dispatches.
-      <.table id="health-events" rows={@events}>
+      <.data_table id="health-events" rows={@events}>
         <:col :let={{_id, event}} label="When">{event.inserted_at}</:col>
         <:col :let={{_id, event}} label="Provider">{event.provider && event.provider.name}</:col>
         <:col :let={{_id, event}} label="Model">
@@ -568,7 +569,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
         <:col :let={{_id, event}} label="Source">{event.source}</:col>
         <:col :let={{_id, event}} label="Latency">{latency(event.latency_ms)}</:col>
         <:col :let={{_id, event}} label="Reason">{event.reason || "—"}</:col>
-      </.table>
+      </.data_table>
     </.card>
     """
   end

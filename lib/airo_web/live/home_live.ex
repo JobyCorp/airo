@@ -178,13 +178,9 @@ defmodule AiroWeb.HomeLive do
                 href={~p"/admin/keys"}
               />
               <div class="grid grid-cols-3 gap-2 pt-2">
-                <.health_count label="Up" value={@overview.health_counts.up} status="up" />
-                <.health_count label="Down" value={@overview.health_counts.down} status="down" />
-                <.health_count
-                  label="Unknown"
-                  value={@overview.health_counts.unknown}
-                  status="unknown"
-                />
+                <.health_count value={@overview.health_counts.up} status="up" />
+                <.health_count value={@overview.health_counts.down} status="down" />
+                <.health_count value={@overview.health_counts.unknown} status="unknown" />
               </div>
             </div>
           </CompositeComponents.section_panel>
@@ -196,7 +192,7 @@ defmodule AiroWeb.HomeLive do
             <:actions>
               <.button size="sm" navigate={~p"/admin/models"}>Model shelf</.button>
             </:actions>
-            <.table
+            <.data_table
               id="dashboard-models"
               rows={@overview.model_posture.top}
               row_click={fn summary -> JS.navigate(~p"/admin/models/#{summary.model.id}") end}
@@ -215,7 +211,7 @@ defmodule AiroWeb.HomeLive do
               <:col :let={summary} label="Deployments">
                 {summary.enabled_deployment_count}/{summary.deployment_count}
               </:col>
-            </.table>
+            </.data_table>
           </CompositeComponents.section_panel>
 
           <CompositeComponents.section_panel>
@@ -234,7 +230,7 @@ defmodule AiroWeb.HomeLive do
         <div class="grid gap-5 xl:grid-cols-2">
           <CompositeComponents.section_panel body_class="p-4">
             <:title>Providers</:title>
-            <.table
+            <.data_table
               id="dashboard-providers"
               rows={@overview.provider_posture}
               row_click={fn posture -> JS.navigate(~p"/admin/providers/#{posture.provider.id}") end}
@@ -247,25 +243,25 @@ defmodule AiroWeb.HomeLive do
               <:col :let={posture} label="Enabled">
                 {posture.enabled_deployment_count}/{posture.deployment_count}
               </:col>
-            </.table>
+            </.data_table>
           </CompositeComponents.section_panel>
 
           <CompositeComponents.section_panel body_class="p-4">
             <:title>Recent traces</:title>
-            <.table id="dashboard-usage" rows={@overview.recent_usage}>
+            <.data_table id="dashboard-usage" rows={@overview.recent_usage}>
               <:col :let={record} label="Trace">
                 <span class="font-mono text-xs">{record.trace_id || "—"}</span>
               </:col>
               <:col :let={record} label="Requested">{record.request_model || record.alias_name}</:col>
               <:col :let={record} label="Outcome">{record.outcome}</:col>
               <:col :let={record} label="Latency">{latency(record.latency_ms)}</:col>
-            </.table>
+            </.data_table>
           </CompositeComponents.section_panel>
         </div>
 
         <CompositeComponents.section_panel body_class="p-4">
           <:title>Recent health transitions</:title>
-          <.table id="dashboard-health-events" rows={@overview.recent_health_events}>
+          <.data_table id="dashboard-health-events" rows={@overview.recent_health_events}>
             <:col :let={event} label="When">{event.inserted_at}</:col>
             <:col :let={event} label="Provider">{event.provider && event.provider.name}</:col>
             <:col :let={event} label="Model">{event.deployment && event.deployment.model_name}</:col>
@@ -273,7 +269,7 @@ defmodule AiroWeb.HomeLive do
               <CompositeComponents.health_status status={to_string(event.status)} />
             </:col>
             <:col :let={event} label="Reason">{event.reason || "—"}</:col>
-          </.table>
+          </.data_table>
         </CompositeComponents.section_panel>
       </div>
     </Layouts.app>
@@ -397,13 +393,25 @@ defmodule AiroWeb.HomeLive do
   attr :performance, :map, required: true
 
   defp chart_panel(assigns) do
+    assigns = assign(assigns, :any_traffic?, Enum.any?(assigns.performance.requests, &(&1 > 0)))
+
     ~H"""
     <div class="min-h-80 p-5">
       <div class="mb-4">
         <h3 class="text-sm font-semibold text-base-content">{@title}</h3>
         <p class="text-xs text-base-content/50">{@subtitle}</p>
       </div>
+      <%!-- Vega derives the axis from the data, so an all-zero window plots a
+           flat line against a "NaN" scale. A window with no traffic is a fact
+           worth stating plainly rather than a chart worth drawing. --%>
       <div
+        :if={!@any_traffic?}
+        class="flex min-h-64 items-center justify-center rounded-md border border-dashed border-base-content/15 text-sm text-base-content/45"
+      >
+        No traffic in this window.
+      </div>
+      <div
+        :if={@any_traffic?}
         id={@id}
         phx-hook="PerfChart"
         phx-update="ignore"
@@ -432,16 +440,16 @@ defmodule AiroWeb.HomeLive do
     """
   end
 
-  attr :label, :string, required: true
   attr :value, :integer, required: true
   attr :status, :string, values: ~w(up down unknown), required: true
 
+  # The pill already names the state, so there's no separate label — it read
+  # "Up / 1 / Up" before, the same word twice in a tile three lines tall.
   defp health_count(assigns) do
     ~H"""
     <div class="rounded-md border border-base-content/10 bg-base-100/45 p-3">
       <CompositeComponents.health_status status={@status} />
       <div class="mt-2 font-mono text-lg text-base-content">{@value}</div>
-      <div class="text-xs text-base-content/50">{@label}</div>
     </div>
     """
   end
@@ -494,7 +502,10 @@ defmodule AiroWeb.HomeLive do
   defp metric_accent("success"), do: "border-l-success"
   defp metric_accent("warning"), do: "border-l-warning"
   defp metric_accent("error"), do: "border-l-error"
-  defp metric_accent(_), do: "border-l-base-content/25"
+  # /40 rather than /25: at /25 the rule was invisible against the card border,
+  # so Deployments and Models read as though their accent had been forgotten
+  # next to the four that have one.
+  defp metric_accent(_), do: "border-l-base-content/40"
 
   defp chart_json(performance), do: Jason.encode!(performance)
 

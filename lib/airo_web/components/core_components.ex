@@ -92,6 +92,79 @@ defmodule AiroWeb.CoreComponents do
   end
 
   @doc """
+  A `<.table>` on Airo's data surface.
+
+      <.data_table id="providers" rows={@providers}>
+        <:col :let={p} label="Name">{p.name}</:col>
+        <:empty>No providers yet.</:empty>
+      </.data_table>
+
+  The kit's `table/1` renders a bare `<table>` — no container, so it has
+  nowhere to hang a border, a radius, or `overflow-x-auto`. Every other block
+  in this admin sits on `rounded-lg border-base-300 bg-base-100/35`; a table
+  floating on the page background is the one thing that doesn't, and on a
+  narrow viewport it also has no way to scroll instead of overflowing.
+
+  Zebra is off. Airo's rows are separated by a hairline rather than alternating
+  fills: these tables carry status pills and mono identifiers whose own tints
+  have to stay legible, and striping competes with them for the same signal.
+  Pass `zebra` if a particular table really wants it.
+
+  Slots forward to the kit component, so everything `table/1` accepts —
+  `row_click`, `row_id`, `size`, `:empty` — works unchanged.
+  """
+  attr :id, :string, required: true
+  attr :rows, :any, required: true
+  attr :zebra, :boolean, default: false
+  attr :class, :any, default: nil, doc: "Utilities for the surface, not the table."
+
+  # Declared rather than swept up by `:rest`, which only carries globals.
+  attr :table_id, :string, default: nil
+  attr :size, :string, values: ~w(xs sm md lg), default: "md"
+  attr :row_id, :any, default: nil
+  attr :row_click, :any, default: nil
+  attr :row_item, :any, default: &Function.identity/1
+  attr :rest, :global
+
+  slot :col, required: true do
+    attr :label, :string
+  end
+
+  slot :action
+  slot :empty
+
+  def data_table(assigns) do
+    ~H"""
+    <div
+      data-component="AiroWeb.CoreComponents.data_table"
+      class={["overflow-x-auto rounded-lg border border-base-300 bg-base-100/35", @class]}
+    >
+      <JobyKitCoreComponents.table
+        id={@id}
+        table_id={@table_id}
+        rows={@rows}
+        zebra={@zebra}
+        size={@size}
+        row_id={@row_id}
+        row_click={@row_click}
+        row_item={@row_item}
+        {@rest}
+      >
+        <:col :let={row} :for={col <- @col} label={col[:label]}>
+          {render_slot(col, row)}
+        </:col>
+        <:action :let={row} :for={action <- @action}>
+          {render_slot(action, row)}
+        </:action>
+        <:empty :for={empty <- @empty}>
+          {render_slot(empty)}
+        </:empty>
+      </JobyKitCoreComponents.table>
+    </div>
+    """
+  end
+
+  @doc """
   Data table whose rows expand into an inline detail panel.
 
   **Use `<.table>` (JobyKit) unless you need the disclosure.** This exists
