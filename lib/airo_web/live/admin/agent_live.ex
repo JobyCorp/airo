@@ -963,7 +963,7 @@ defmodule AiroWeb.Admin.AgentLive do
           <:action :let={model}>
             <.button
               size="sm"
-              variant={if model.resident?, do: "secondary", else: "primary"}
+              variant={if model.resident?, do: "soft", else: "primary"}
               phx-click="open_config"
               phx-value-model={model["id"]}
               disabled={!@detail.online}
