@@ -229,7 +229,7 @@ defmodule AiroWeb.Admin.AliasLive do
             </.button>
           </:actions>
           <:actions :if={@live_action in [:new, :edit]}>
-            <.button variant="ghost" size="sm" navigate={alias_return_path(@editing)}>Back</.button>
+            <.button size="sm" navigate={alias_return_path(@editing)}>Back</.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -289,7 +289,7 @@ defmodule AiroWeb.Admin.AliasLive do
           />
           <div class="flex gap-2">
             <.button variant="primary">Save</.button>
-            <.button variant="ghost" type="button" phx-click="cancel">Cancel</.button>
+            <.button type="button" phx-click="cancel">Cancel</.button>
           </div>
         </.form>
       </.card>

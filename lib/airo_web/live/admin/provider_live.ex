@@ -399,7 +399,7 @@ defmodule AiroWeb.Admin.ProviderLive do
             <.button navigate={~p"/admin/providers/new"} variant="primary">New provider</.button>
           </:actions>
           <:actions :if={@live_action == :show}>
-            <.button variant="ghost" size="sm" phx-click="refresh_detail">Refresh inventory</.button>
+            <.button size="sm" phx-click="refresh_detail">Refresh inventory</.button>
             <.button
               size="sm"
               navigate={~p"/admin/providers/#{@detail.provider.id}/edit"}
@@ -409,7 +409,7 @@ defmodule AiroWeb.Admin.ProviderLive do
             </.button>
           </:actions>
           <:actions :if={@live_action in [:new, :edit]}>
-            <.button variant="ghost" size="sm" navigate={provider_return_path(@editing)}>
+            <.button size="sm" navigate={provider_return_path(@editing)}>
               Back
             </.button>
           </:actions>
@@ -483,7 +483,7 @@ defmodule AiroWeb.Admin.ProviderLive do
         />
         <div class="flex gap-2">
           <.button variant="primary">Save</.button>
-          <.button variant="ghost" type="button" phx-click="cancel">Cancel</.button>
+          <.button type="button" phx-click="cancel">Cancel</.button>
         </div>
       </.form>
     </.card>
@@ -741,7 +741,7 @@ defmodule AiroWeb.Admin.ProviderLive do
           </li>
           <li>Copy the full address from the address bar and paste it below.</li>
         </ol>
-        <.button variant="ghost" size="sm" href={@login.url} target="_blank" rel="noopener">
+        <.button size="sm" href={@login.url} target="_blank" rel="noopener">
           <.icon name="hero-arrow-top-right-on-square" class="size-4" /> Open sign-in page
         </.button>
         <.form for={%{}} phx-submit="codex_complete" class="space-y-4">
@@ -753,7 +753,7 @@ defmodule AiroWeb.Admin.ProviderLive do
           />
           <div class="flex gap-2">
             <.button size="sm" variant="primary">Complete sign-in</.button>
-            <.button variant="ghost" size="sm" type="button" phx-click="codex_cancel">Cancel</.button>
+            <.button size="sm" type="button" phx-click="codex_cancel">Cancel</.button>
           </div>
         </.form>
       </div>

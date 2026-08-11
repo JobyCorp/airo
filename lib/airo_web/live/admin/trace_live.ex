@@ -79,7 +79,7 @@ defmodule AiroWeb.Admin.TraceLive do
               </span>
               Live
             </span>
-            <.button variant="ghost" size="sm" navigate={~p"/admin/usage"}>Usage</.button>
+            <.button size="sm" navigate={~p"/admin/usage"}>Usage</.button>
           </:actions>
         </CompositeComponents.page_header>
 

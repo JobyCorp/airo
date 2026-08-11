@@ -645,10 +645,10 @@ defmodule AiroWeb.Admin.AgentLive do
           <:crumb navigate={~p"/admin/agents"}>Agents</:crumb>
           <:crumb :if={@live_action == :show}>{@detail.agent.host_id}</:crumb>
           <:actions :if={@live_action == :show}>
-            <.button variant="ghost" size="sm" phx-click="resync" disabled={!@detail.online}>
+            <.button size="sm" phx-click="resync" disabled={!@detail.online}>
               Resync
             </.button>
-            <.button variant="ghost" size="sm" navigate={~p"/admin/agents"}>Back</.button>
+            <.button size="sm" navigate={~p"/admin/agents"}>Back</.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -877,7 +877,6 @@ defmodule AiroWeb.Admin.AgentLive do
           <:action :let={slot}>
             <.button
               :if={slot.resident_model}
-              variant="ghost"
               size="sm"
               phx-click="open_config"
               phx-value-model={slot.resident_model}
@@ -914,7 +913,7 @@ defmodule AiroWeb.Admin.AgentLive do
         <:eyebrow>Models on this host</:eyebrow>
         <:title>Loadable models</:title>
         <:actions>
-          <.button variant="ghost" size="sm" phx-click="refresh_inventory" disabled={!@detail.online}>
+          <.button size="sm" phx-click="refresh_inventory" disabled={!@detail.online}>
             Refresh
           </.button>
         </:actions>
@@ -1262,7 +1261,7 @@ defmodule AiroWeb.Admin.AgentLive do
         </p>
 
         <div class="flex justify-end gap-2 pt-2">
-          <.button variant="ghost" type="button" phx-click="cancel_config">Cancel</.button>
+          <.button type="button" phx-click="cancel_config">Cancel</.button>
           <.button variant="primary" disabled={@blocked? or @config.launch_error != nil}>
             {if @configure?, do: "Restart with changes", else: "Load model"}
           </.button>

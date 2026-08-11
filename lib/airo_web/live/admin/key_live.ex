@@ -109,7 +109,7 @@ defmodule AiroWeb.Admin.KeyLive do
             <.button navigate={~p"/admin/keys/new"} variant="primary">Mint key</.button>
           </:actions>
           <:actions :if={@live_action == :new}>
-            <.button variant="ghost" size="sm" navigate={~p"/admin/keys"}>Back</.button>
+            <.button size="sm" navigate={~p"/admin/keys"}>Back</.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -132,7 +132,7 @@ defmodule AiroWeb.Admin.KeyLive do
       <.card :if={@minted} variant="elevated">
         <:title>New key — copy it now</:title>
         <p class="break-all font-mono text-sm">{@minted}</p>
-        <:actions><.button variant="ghost" phx-click="dismiss">Done</.button></:actions>
+        <:actions><.button phx-click="dismiss">Done</.button></:actions>
       </.card>
 
       <.card :if={!@minted} variant="bordered">
@@ -158,7 +158,7 @@ defmodule AiroWeb.Admin.KeyLive do
           />
           <div class="flex gap-2">
             <.button variant="primary">Mint key</.button>
-            <.button variant="ghost" type="button" navigate={~p"/admin/keys"}>Cancel</.button>
+            <.button type="button" navigate={~p"/admin/keys"}>Cancel</.button>
           </div>
         </.form>
       </.card>

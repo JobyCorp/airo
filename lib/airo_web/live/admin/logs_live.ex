@@ -85,7 +85,7 @@ defmodule AiroWeb.Admin.LogsLive do
               </span>
               Live
             </span>
-            <.button variant="ghost" id="logs-header-reset" size="sm" phx-click="reset">
+            <.button id="logs-header-reset" size="sm" phx-click="reset">
               Reset filters
             </.button>
           </:actions>
