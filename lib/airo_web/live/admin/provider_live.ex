@@ -399,7 +399,7 @@ defmodule AiroWeb.Admin.ProviderLive do
             <.button navigate={~p"/admin/providers/new"} variant="primary">New provider</.button>
           </:actions>
           <:actions :if={@live_action == :show}>
-            <.button size="sm" phx-click="refresh_detail">Refresh inventory</.button>
+            <.button variant="ghost" size="sm" phx-click="refresh_detail">Refresh inventory</.button>
             <.button
               size="sm"
               navigate={~p"/admin/providers/#{@detail.provider.id}/edit"}
@@ -409,7 +409,9 @@ defmodule AiroWeb.Admin.ProviderLive do
             </.button>
           </:actions>
           <:actions :if={@live_action in [:new, :edit]}>
-            <.button size="sm" navigate={provider_return_path(@editing)}>Back</.button>
+            <.button variant="ghost" size="sm" navigate={provider_return_path(@editing)}>
+              Back
+            </.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -481,7 +483,7 @@ defmodule AiroWeb.Admin.ProviderLive do
         />
         <div class="flex gap-2">
           <.button variant="primary">Save</.button>
-          <.button type="button" phx-click="cancel">Cancel</.button>
+          <.button variant="ghost" type="button" phx-click="cancel">Cancel</.button>
         </div>
       </.form>
     </.card>
@@ -520,19 +522,28 @@ defmodule AiroWeb.Admin.ProviderLive do
         <CompositeComponents.health_status status={@health[p.id] || "unknown"} />
       </:col>
       <:action :let={{_id, p}}>
-        <.icon_button
-          icon="hero-pencil-square"
-          label={"Edit #{p.name}"}
+        <.button
+          shape="square"
+          size="sm"
+          variant="ghost"
+          title={"Edit #{p.name}"}
+          aria-label={"Edit #{p.name}"}
           navigate={~p"/admin/providers/#{p.id}/edit"}
-        />
-        <.icon_button
-          icon="hero-trash"
-          label={"Delete #{p.name}"}
+        >
+          <.icon name="hero-pencil-square" class="size-4" />
+        </.button>
+        <.button
+          shape="square"
+          size="sm"
           variant="danger"
+          title={"Delete #{p.name}"}
+          aria-label={"Delete #{p.name}"}
           phx-click="delete"
           phx-value-id={p.id}
           data-confirm="Delete this provider?"
-        />
+        >
+          <.icon name="hero-trash" class="size-4" />
+        </.button>
       </:action>
     </.table>
     """
@@ -644,19 +655,29 @@ defmodule AiroWeb.Admin.ProviderLive do
           </:col>
           <:col :let={deployment} label="Type">{metadata_value(deployment, "type")}</:col>
           <:action :let={deployment}>
-            <.icon_button
+            <.button
               :if={:inspect_model in @detail.capabilities}
-              icon="hero-arrow-path"
-              label={"Sync #{deployment.model_name}"}
+              shape="square"
+              size="sm"
+              variant="ghost"
+              title={"Sync #{deployment.model_name}"}
+              aria-label={"Sync #{deployment.model_name}"}
               phx-click="sync_deployment"
               phx-value-id={deployment.id}
-            />
-            <.icon_button
+            >
+              <.icon name="hero-arrow-path" class="size-4" />
+            </.button>
+            <.button
               :if={deployment.model}
-              icon="hero-arrow-top-right-on-square"
-              label={"Open #{deployment.model.display_name}"}
+              shape="square"
+              size="sm"
+              variant="ghost"
+              title={"Open #{deployment.model.display_name}"}
+              aria-label={"Open #{deployment.model.display_name}"}
               href={~p"/admin/models/#{deployment.model.id}"}
-            />
+            >
+              <.icon name="hero-arrow-top-right-on-square" class="size-4" />
+            </.button>
           </:action>
         </.table>
       </.card>
@@ -720,7 +741,7 @@ defmodule AiroWeb.Admin.ProviderLive do
           </li>
           <li>Copy the full address from the address bar and paste it below.</li>
         </ol>
-        <.button size="sm" href={@login.url} target="_blank" rel="noopener">
+        <.button variant="ghost" size="sm" href={@login.url} target="_blank" rel="noopener">
           <.icon name="hero-arrow-top-right-on-square" class="size-4" /> Open sign-in page
         </.button>
         <.form for={%{}} phx-submit="codex_complete" class="space-y-4">
@@ -732,7 +753,7 @@ defmodule AiroWeb.Admin.ProviderLive do
           />
           <div class="flex gap-2">
             <.button size="sm" variant="primary">Complete sign-in</.button>
-            <.button size="sm" type="button" phx-click="codex_cancel">Cancel</.button>
+            <.button variant="ghost" size="sm" type="button" phx-click="codex_cancel">Cancel</.button>
           </div>
         </.form>
       </div>

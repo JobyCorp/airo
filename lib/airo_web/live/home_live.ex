@@ -81,7 +81,7 @@ defmodule AiroWeb.HomeLive do
         <CompositeComponents.page_header subtitle="Gateway posture, traffic, local capacity, and model performance.">
           <:crumb>Overview</:crumb>
           <:actions>
-            <.button size="sm" navigate={~p"/admin/models"}>Models</.button>
+            <.button variant="ghost" size="sm" navigate={~p"/admin/models"}>Models</.button>
             <.button size="sm" navigate={~p"/admin/usage"} variant="primary">Usage</.button>
           </:actions>
         </CompositeComponents.page_header>
@@ -89,7 +89,7 @@ defmodule AiroWeb.HomeLive do
         <CompositeComponents.section_panel :if={@agents != []} body_class="p-4">
           <:title>Serving hosts</:title>
           <:actions>
-            <.button size="sm" navigate={~p"/admin/agents"}>All agents</.button>
+            <.button variant="ghost" size="sm" navigate={~p"/admin/agents"}>All agents</.button>
           </:actions>
           <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <.agent_ring_card :for={agent <- @agents} agent={agent} />
@@ -139,7 +139,7 @@ defmodule AiroWeb.HomeLive do
           <CompositeComponents.section_panel body_class="p-0">
             <:title>Performance monitor</:title>
             <:actions>
-              <.button size="sm" navigate={~p"/admin/usage"}>Open usage</.button>
+              <.button variant="ghost" size="sm" navigate={~p"/admin/usage"}>Open usage</.button>
             </:actions>
             <div class="grid divide-y divide-base-content/10 xl:grid-cols-2 xl:divide-x xl:divide-y-0">
               <.chart_panel
@@ -194,7 +194,7 @@ defmodule AiroWeb.HomeLive do
           <CompositeComponents.section_panel body_class="p-4">
             <:title>Model posture</:title>
             <:actions>
-              <.button size="sm" navigate={~p"/admin/models"}>Model shelf</.button>
+              <.button variant="ghost" size="sm" navigate={~p"/admin/models"}>Model shelf</.button>
             </:actions>
             <.table
               id="dashboard-models"

@@ -378,63 +378,6 @@ defmodule AiroWeb.CompositeComponents do
   defp meter_tone(_f), do: "bg-base-content/20"
 
   @doc """
-  A centered modal dialog (daisyUI `modal`). Server-driven: render it only while
-  open (or pass `show`), wire `on_cancel` to the event that closes it. Backdrop
-  click and Escape both fire `on_cancel`.
-
-      <.modal :if={@editing} id="config" show on_cancel="cancel">
-        <:title>Configure model</:title>
-        <.form ...>…</.form>
-        <:actions><.button variant="primary">Save</.button></:actions>
-      </.modal>
-  """
-  attr :id, :string, required: true
-  attr :show, :boolean, default: false
-  attr :on_cancel, :string, default: nil, doc: "phx event fired on backdrop/Escape close."
-  attr :rest, :global
-
-  slot :title
-  slot :actions
-  slot :inner_block, required: true
-
-  def modal(assigns) do
-    ~H"""
-    <div
-      id={@id}
-      data-component="AiroWeb.CompositeComponents.modal"
-      class={["modal", @show && "modal-open"]}
-      phx-window-keydown={@on_cancel}
-      phx-key="Escape"
-      {@rest}
-    >
-      <div class="modal-box border border-base-300 bg-base-100" role="dialog" aria-modal="true">
-        <h3
-          :if={@title != []}
-          class="text-lg font-semibold leading-tight text-base-content"
-        >
-          {render_slot(@title)}
-        </h3>
-        <div class="mt-3 text-sm text-base-content/80">
-          {render_slot(@inner_block)}
-        </div>
-        <div :if={@actions != []} class="modal-action">
-          {render_slot(@actions)}
-        </div>
-      </div>
-      <button
-        :if={@on_cancel}
-        type="button"
-        class="modal-backdrop"
-        phx-click={@on_cancel}
-        aria-label="Close"
-      >
-        close
-      </button>
-    </div>
-    """
-  end
-
-  @doc """
   A labeled range slider (daisyUI `range`) — direct manipulation for a bounded
   numeric value (context window, a budget, a weight). The label sits left and an
   optional `:readout` (typically the current value against its max) sits right,
@@ -584,7 +527,7 @@ defmodule AiroWeb.CompositeComponents do
           value={@json}
           label="Everything else (JSON)"
           placeholder={~s({"max_tokens": 4096, "stop": […], "chat_template_kwargs": {…}})}
-          class="min-h-28 font-mono text-xs"
+          input_class="min-h-28 font-mono text-xs"
           phx-debounce="300"
         />
         <p :if={@error} class="mt-1 text-xs text-error">

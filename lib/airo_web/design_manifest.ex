@@ -2,11 +2,11 @@ defmodule AiroWeb.DesignManifest do
   @moduledoc """
   This app's component manifest. Backed by `JobyKit.Manifest`.
 
-  The default registrations mostly point at `JobyKit.CoreComponents` — the
-  kit ships standard scaffolding (`card`, `icon`, `input`, `flash`, `header`,
-  `list`, `table`) so every JobyKit-installed app gets contract-clean
-  wrappers for free. Airo owns local wrappers when the product needs a
-  different hierarchy, such as quieter secondary buttons.
+  Core registrations point at `JobyKit.CoreComponents`. Airo forks nothing:
+  0.3 filled the gaps we used to fork for (button tones and `shape`, table
+  hooks), so the two local entries here are components the kit doesn't ship
+  at all — `checkbox_group` and `disclosure_table` — and neither is named
+  after a kit component, so nothing shadows.
 
   Add a `component/3` line for every additional wrapper, composite, and
   domain component you want to surface on `/design` and
@@ -38,29 +38,42 @@ defmodule AiroWeb.DesignManifest do
   # contract (data-component, attr :rest, :global, attrs with values:
   # enums) and is lint-clean by construction.
 
-  component CoreComponents, :button,
-    category: :core,
-    daisy_basis: "btn",
-    summary: "Airo button with quiet secondary defaults and explicit primary actions.",
-    preview: &DesignPreviews.button_preview/1
-
-  component CoreComponents, :icon_button,
-    category: :core,
-    daisy_basis: "btn",
-    summary: "Compact icon-only action button for dense table and toolbar surfaces.",
-    preview: &DesignPreviews.icon_button_preview/1
-
   component CoreComponents, :checkbox_group,
     category: :core,
     daisy_basis: "checkbox",
     summary: "Visible multi-choice checkbox group for enum-array form fields.",
     preview: &DesignPreviews.checkbox_group_preview/1
 
-  component CoreComponents, :table,
+  component CoreComponents, :disclosure_table,
     category: :core,
     daisy_basis: "table",
-    summary: "Calm data table with clickable row affordances and compact action cells.",
+    summary: "Data table whose rows expand into an inline detail panel.",
+    preview: &DesignPreviews.disclosure_table_preview/1
+
+  component JobyKitCoreComponents, :button,
+    category: :core,
+    daisy_basis: "btn",
+    summary:
+      "Text or icon button. `variant` carries tone; `shape` squares off icon-only actions.",
+    preview: &DesignPreviews.button_preview/1
+
+  component JobyKitCoreComponents, :table,
+    category: :core,
+    daisy_basis: "table",
+    summary: "Data table with col/action slots, an empty state, and density control.",
     preview: &DesignPreviews.table_preview/1
+
+  component JobyKitCoreComponents, :badge,
+    category: :core,
+    daisy_basis: "badge",
+    summary: "Status chip whose `tone` names the state rather than a colour.",
+    preview: &DesignPreviews.badge_preview/1
+
+  component JobyKitCoreComponents, :modal,
+    category: :core,
+    daisy_basis: "modal",
+    summary: "Server-driven dialog; render it while open and wire `on_cancel` to close.",
+    preview: &DesignPreviews.modal_preview/1
 
   component JobyKitCoreComponents, :card,
     category: :core,
@@ -127,12 +140,6 @@ defmodule AiroWeb.DesignManifest do
     summary: "Horizontal fill gauge with a mono readout; color encodes pressure.",
     preview: &DesignPreviews.meter_preview/1
 
-  component CompositeComponents, :modal,
-    category: :composite,
-    daisy_basis: "modal",
-    summary: "Server-driven centered dialog with title/actions; backdrop + Escape close.",
-    preview: &DesignPreviews.modal_preview/1
-
   component CompositeComponents, :slider,
     category: :composite,
     daisy_basis: "range",
@@ -166,7 +173,11 @@ defmodule AiroWeb.DesignManifest do
     %{
       button: %{
         wrapper: "<.button>",
-        anchor: "#jobykit-component-airoweb-corecomponents-button"
+        anchor: "#jobykit-component-jobykit-corecomponents-button"
+      },
+      badge: %{
+        wrapper: "<.badge>",
+        anchor: "#jobykit-component-jobykit-corecomponents-badge"
       },
       card: %{
         wrapper: "<.card>",
@@ -176,9 +187,13 @@ defmodule AiroWeb.DesignManifest do
         wrapper: "<.checkbox_group>",
         anchor: "#jobykit-component-airoweb-corecomponents-checkbox-group"
       },
+      modal: %{
+        wrapper: "<.modal>",
+        anchor: "#jobykit-component-jobykit-corecomponents-modal"
+      },
       table: %{
         wrapper: "<.table>",
-        anchor: "#jobykit-component-airoweb-corecomponents-table"
+        anchor: "#jobykit-component-jobykit-corecomponents-table"
       }
     }
   end

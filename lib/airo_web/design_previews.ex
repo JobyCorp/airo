@@ -25,23 +25,70 @@ defmodule AiroWeb.DesignPreviews do
   def button_preview(assigns) do
     ~H"""
     <div class="flex flex-wrap items-center gap-2">
-      <CoreComponents.button>Secondary</CoreComponents.button>
-      <CoreComponents.button variant="primary">Primary</CoreComponents.button>
-      <CoreComponents.button variant="ghost">Ghost</CoreComponents.button>
-      <CoreComponents.button variant="danger">Danger</CoreComponents.button>
-      <CoreComponents.button size="sm">Small</CoreComponents.button>
-      <CoreComponents.button size="lg">Large</CoreComponents.button>
+      <JobyKitCoreComponents.button variant="ghost">Ghost</JobyKitCoreComponents.button>
+      <JobyKitCoreComponents.button variant="primary">Primary</JobyKitCoreComponents.button>
+      <JobyKitCoreComponents.button variant="neutral">Neutral</JobyKitCoreComponents.button>
+      <JobyKitCoreComponents.button variant="danger">Danger</JobyKitCoreComponents.button>
+      <JobyKitCoreComponents.button size="sm" variant="ghost">Small</JobyKitCoreComponents.button>
+      <JobyKitCoreComponents.button shape="square" variant="ghost" aria-label="Edit">
+        <JobyKitCoreComponents.icon name="hero-pencil-square" class="size-4" />
+      </JobyKitCoreComponents.button>
     </div>
     """
   end
 
-  def icon_button_preview(assigns) do
+  def table_preview(assigns) do
+    assigns =
+      Map.put(assigns, :rows, [
+        %{id: 1, name: "BAAI/bge-m3", status: "up", latency: "38 ms"},
+        %{id: 2, name: "moondream:latest", status: "up", latency: "2560 ms"}
+      ])
+
+    ~H"""
+    <JobyKitCoreComponents.table id="preview-models" rows={@rows}>
+      <:col :let={row} label="Model">
+        <div class="font-medium">{row.name}</div>
+      </:col>
+      <:col :let={row} label="Health">{row.status}</:col>
+      <:col :let={row} label="p95">{row.latency}</:col>
+      <:action :let={row}>
+        <JobyKitCoreComponents.button
+          shape="square"
+          size="sm"
+          variant="ghost"
+          aria-label={"Edit #{row.name}"}
+        >
+          <JobyKitCoreComponents.icon name="hero-pencil-square" class="size-4" />
+        </JobyKitCoreComponents.button>
+      </:action>
+      <:empty>No models yet.</:empty>
+    </JobyKitCoreComponents.table>
+    """
+  end
+
+  def badge_preview(assigns) do
     ~H"""
     <div class="flex flex-wrap items-center gap-2">
-      <CoreComponents.icon_button icon="hero-pencil-square" label="Edit" />
-      <CoreComponents.icon_button icon="hero-arrow-top-right-on-square" label="Open" />
-      <CoreComponents.icon_button icon="hero-trash" label="Delete" variant="danger" />
+      <JobyKitCoreComponents.badge tone="ok">up</JobyKitCoreComponents.badge>
+      <JobyKitCoreComponents.badge tone="warn">degraded</JobyKitCoreComponents.badge>
+      <JobyKitCoreComponents.badge tone="danger">down</JobyKitCoreComponents.badge>
+      <JobyKitCoreComponents.badge tone="info">edge</JobyKitCoreComponents.badge>
+      <JobyKitCoreComponents.badge tone="neutral">unknown</JobyKitCoreComponents.badge>
     </div>
+    """
+  end
+
+  def modal_preview(assigns) do
+    ~H"""
+    <JobyKitCoreComponents.modal id="preview-modal" static>
+      <:title>Load model</:title>
+      Rendered inline here so the preview doesn't cover the page; drop
+      <span class="font-mono">static</span>
+      for the real overlay.
+      <:actions>
+        <JobyKitCoreComponents.button variant="primary">Load</JobyKitCoreComponents.button>
+      </:actions>
+    </JobyKitCoreComponents.modal>
     """
   end
 
@@ -64,7 +111,7 @@ defmodule AiroWeb.DesignPreviews do
     """
   end
 
-  def table_preview(assigns) do
+  def disclosure_table_preview(assigns) do
     assigns =
       Map.put(assigns, :rows, [
         %{id: 1, name: "BAAI/bge-m3", status: "up", latency: "38 ms"},
@@ -72,16 +119,20 @@ defmodule AiroWeb.DesignPreviews do
       ])
 
     ~H"""
-    <CoreComponents.table id="preview-models" rows={@rows}>
+    <CoreComponents.disclosure_table
+      id="preview-models"
+      rows={@rows}
+      row_id={&"preview-model-#{&1.id}"}
+    >
       <:col :let={row} label="Model">
         <div class="font-medium">{row.name}</div>
       </:col>
       <:col :let={row} label="Health">{row.status}</:col>
       <:col :let={row} label="p95">{row.latency}</:col>
-      <:action :let={row}>
-        <CoreComponents.icon_button icon="hero-pencil-square" label={"Edit #{row.name}"} />
-      </:action>
-    </CoreComponents.table>
+      <:detail :let={row}>
+        Expanded detail for {row.name}.
+      </:detail>
+    </CoreComponents.disclosure_table>
     """
   end
 
@@ -92,7 +143,9 @@ defmodule AiroWeb.DesignPreviews do
         <:eyebrow>Bordered</:eyebrow>
         <:title>Default card</:title>
         Padded content surface backed by daisyUI's <code class="font-mono text-xs">card</code>.
-        <:actions><CoreComponents.button>Action</CoreComponents.button></:actions>
+        <:actions>
+          <JobyKitCoreComponents.button variant="ghost">Action</JobyKitCoreComponents.button>
+        </:actions>
       </JobyKitCoreComponents.card>
       <JobyKitCoreComponents.card variant="elevated">
         <:eyebrow>Elevated</:eyebrow>
@@ -191,27 +244,6 @@ defmodule AiroWeb.DesignPreviews do
     """
   end
 
-  def modal_preview(assigns) do
-    ~H"""
-    <div class="rounded-box border border-base-300 bg-base-100 p-5">
-      <p class="text-sm text-base-content/60">
-        Renders a centered dialog over a backdrop. Shown here inert; in use it's
-        gated on a <code class="font-mono text-xs">show</code>
-        assign with an <code class="font-mono text-xs">on_cancel</code>
-        event.
-      </p>
-      <div class="mt-4 rounded-box border border-base-300 bg-base-100 p-4 shadow-lg">
-        <h3 class="text-lg font-semibold">Configure model</h3>
-        <p class="mt-2 text-sm text-base-content/70">Modal body content goes here.</p>
-        <div class="mt-4 flex justify-end gap-2">
-          <CoreComponents.button>Cancel</CoreComponents.button>
-          <CoreComponents.button variant="primary">Save</CoreComponents.button>
-        </div>
-      </div>
-    </div>
-    """
-  end
-
   def slider_preview(assigns) do
     ~H"""
     <div class="max-w-md space-y-4">
@@ -258,7 +290,7 @@ defmodule AiroWeb.DesignPreviews do
       <CompositeComponents.empty_state icon="hero-inbox" title="No messages yet">
         Start a conversation with a teammate to see it here.
         <:action>
-          <CoreComponents.button variant="primary">New message</CoreComponents.button>
+          <JobyKitCoreComponents.button variant="primary">New message</JobyKitCoreComponents.button>
         </:action>
       </CompositeComponents.empty_state>
       <CompositeComponents.empty_state
@@ -277,7 +309,9 @@ defmodule AiroWeb.DesignPreviews do
     <CompositeComponents.page_header subtitle="Physical upstream model backends.">
       <:crumb navigate="/admin/providers">Providers</:crumb>
       <:actions>
-        <CoreComponents.button variant="primary" size="sm">New provider</CoreComponents.button>
+        <JobyKitCoreComponents.button variant="primary" size="sm">
+          New provider
+        </JobyKitCoreComponents.button>
       </:actions>
     </CompositeComponents.page_header>
     """

@@ -273,7 +273,7 @@ defmodule AiroWeb.Admin.ModelLive do
             </.button>
           </:actions>
           <:actions :if={@live_action in [:new, :edit]}>
-            <.button size="sm" navigate={model_return_path(@editing)}>Back</.button>
+            <.button variant="ghost" size="sm" navigate={model_return_path(@editing)}>Back</.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -327,7 +327,7 @@ defmodule AiroWeb.Admin.ModelLive do
         <.input field={@form[:notes]} type="textarea" label="Notes" class="md:col-span-2" />
         <div class="flex gap-2 md:col-span-2">
           <.button variant="primary">Save</.button>
-          <.button type="button" phx-click="cancel">Cancel</.button>
+          <.button variant="ghost" type="button" phx-click="cancel">Cancel</.button>
         </div>
       </.form>
     </.card>
@@ -356,7 +356,9 @@ defmodule AiroWeb.Admin.ModelLive do
           class="rounded-box border border-dashed border-base-content/15 bg-base-100/45 px-4 py-10 text-center text-sm text-base-content/60"
         >
           <p>No models match these filters.</p>
-          <.button size="sm" phx-click="reset_filters" class="mt-3">Clear filters</.button>
+          <.button variant="ghost" size="sm" phx-click="reset_filters" class="mt-3">
+            Clear filters
+          </.button>
         </div>
 
         <.model_card :for={summary <- @models} summary={summary} />
@@ -429,6 +431,7 @@ defmodule AiroWeb.Admin.ModelLive do
         />
       </div>
       <.button
+        variant="ghost"
         type="button"
         size="sm"
         phx-click="toggle_dir"
@@ -525,20 +528,29 @@ defmodule AiroWeb.Admin.ModelLive do
       </div>
 
       <div class="flex items-center justify-end gap-1 border-t border-base-content/10 px-4 py-2 lg:border-l lg:border-t-0 lg:py-0">
-        <.icon_button
-          icon="hero-pencil-square"
-          label={"Edit #{@model.display_name}"}
+        <.button
+          shape="square"
+          size="sm"
+          variant="ghost"
+          title={"Edit #{@model.display_name}"}
+          aria-label={"Edit #{@model.display_name}"}
           navigate={~p"/admin/models/#{@model.id}/edit"}
-        />
-        <.icon_button
+        >
+          <.icon name="hero-pencil-square" class="size-4" />
+        </.button>
+        <.button
           :if={orphaned?(@summary)}
-          icon="hero-trash"
+          shape="square"
+          size="sm"
           variant="danger"
-          label={"Delete #{@model.display_name}"}
+          title={"Delete #{@model.display_name}"}
+          aria-label={"Delete #{@model.display_name}"}
           phx-click="delete"
           phx-value-id={@model.id}
           data-confirm={"Delete orphaned model “#{@model.display_name}”? This removes the catalog entry permanently."}
-        />
+        >
+          <.icon name="hero-trash" class="size-4" />
+        </.button>
       </div>
     </div>
     """
@@ -817,6 +829,7 @@ defmodule AiroWeb.Admin.ModelLive do
 
             <div :if={:inspect_model in row.local_capabilities} class="mt-4 flex justify-end">
               <.button
+                variant="ghost"
                 size="sm"
                 phx-click="sync_deployment"
                 phx-value-id={row.deployment.id}
