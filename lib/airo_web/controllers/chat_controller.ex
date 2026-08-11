@@ -55,6 +55,7 @@ defmodule AiroWeb.ChatController do
     case Gateway.run_stream(plan, conn, &sse_delta/2, &committed?/1) do
       {:ok, conn, info} ->
         latency = System.monotonic_time(:millisecond) - started
+
         GatewayUsage.record(conn, plan, info,
           latency_ms: latency,
           response: stream_response(conn)

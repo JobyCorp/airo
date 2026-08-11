@@ -106,6 +106,7 @@ defmodule Airo.Agents.Control do
         decode_json: [keys: :strings]
       ]
       |> maybe_put_json(json)
+      |> Keyword.merge(default_req_options())
       |> Keyword.merge(Keyword.get(opts, :req_options, []))
 
     case Req.request(req_opts) do
@@ -149,4 +150,20 @@ defmodule Airo.Agents.Control do
     do: {:error, {:http_error, status, reason(body)}}
 
   defp error({:error, _} = err), do: err
+
+  # Req options from application env, merged *under* the caller's so an explicit
+  # `opts[:req_options]` still wins.
+  #
+  # This is the seam that makes callers testable. `Control` was always
+  # stubbable by passing `req_options` — but only by the caller, and
+  # `AiroWeb.Admin.AgentLive` passes none, which left every online-only path on
+  # `/admin/agents/:id` unreachable from a test. That is how a broken button
+  # variant reached production with the suite green (S23). Configuring it here
+  # keeps the seam in the HTTP client instead of pushing test concerns into the
+  # LiveView. Unset in dev and prod, so behaviour there is unchanged.
+  defp default_req_options do
+    :airo
+    |> Application.get_env(__MODULE__, [])
+    |> Keyword.get(:req_options, [])
+  end
 end

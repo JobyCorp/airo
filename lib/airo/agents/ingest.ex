@@ -100,7 +100,13 @@ defmodule Airo.Agents.Ingest do
           refresh_cluster_head(cluster.cluster_id)
         else
           record_launch_profile(slot)
-          mark_deployments(provider, model && model.id, head_status(slot, cluster), slot_context(slot))
+
+          mark_deployments(
+            provider,
+            model && model.id,
+            head_status(slot, cluster),
+            slot_context(slot)
+          )
         end
 
         broadcast(host_id)

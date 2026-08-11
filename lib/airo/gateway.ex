@@ -437,7 +437,8 @@ defmodule Airo.Gateway do
               adapter: adapter,
               provider: provider,
               deployment: deployment,
-              context: Context.new(provider, deployment: deployment, opts: context_opts(capability)),
+              context:
+                Context.new(provider, deployment: deployment, opts: context_opts(capability)),
               body:
                 Params.normalize(params, %{
                   provider: provider,

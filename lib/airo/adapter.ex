@@ -77,7 +77,11 @@ defmodule Airo.Adapter do
   A TTS voice the upstream offers. `id` is the name a client passes as `voice`;
   `language`/`gender` are optional metadata (Kokoro carries them, Qwen-TTS omits).
   """
-  @type voice :: %{:id => String.t(), optional(:language) => String.t(), optional(:gender) => String.t()}
+  @type voice :: %{
+          :id => String.t(),
+          optional(:language) => String.t(),
+          optional(:gender) => String.t()
+        }
 
   @doc """
   List the TTS voices the upstream offers (its `/audio/voices` endpoint or model

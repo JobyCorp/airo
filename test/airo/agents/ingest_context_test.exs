@@ -45,7 +45,11 @@ defmodule Airo.Agents.IngestContextTest do
     provider = push(host_id, attrs)
 
     {:ok, deployment} =
-      Config.create_deployment(%{provider_id: provider.id, model_name: @model, capabilities: [:chat]})
+      Config.create_deployment(%{
+        provider_id: provider.id,
+        model_name: @model,
+        capabilities: [:chat]
+      })
 
     deployment
   end

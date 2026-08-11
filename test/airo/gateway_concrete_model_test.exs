@@ -55,7 +55,12 @@ defmodule Airo.GatewayConcreteModelTest do
       assert {:ok, plan} =
                Gateway.resolve(%{"model" => "qwen3.5-9b", "messages" => []}, key, capability)
 
-      req_opts = plan.attempts |> hd() |> get_in([Access.key!(:context), Access.key!(:opts)]) |> Keyword.get(:req_options, [])
+      req_opts =
+        plan.attempts
+        |> hd()
+        |> get_in([Access.key!(:context), Access.key!(:opts)])
+        |> Keyword.get(:req_options, [])
+
       assert Keyword.get(req_opts, :receive_timeout) == 300_000
     end
   end
@@ -74,7 +79,14 @@ defmodule Airo.GatewayConcreteModelTest do
     on_exit(fn -> Application.delete_env(:airo, Airo.Gateway) end)
 
     assert {:ok, plan} = Gateway.resolve(%{"model" => "qwen3.5-9b", "messages" => []}, key, :chat)
-    req_opts = plan.attempts |> hd() |> Map.fetch!(:context) |> Map.fetch!(:opts) |> Keyword.get(:req_options, [])
+
+    req_opts =
+      plan.attempts
+      |> hd()
+      |> Map.fetch!(:context)
+      |> Map.fetch!(:opts)
+      |> Keyword.get(:req_options, [])
+
     assert Keyword.get(req_opts, :receive_timeout) == 123_456
   end
 

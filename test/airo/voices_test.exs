@@ -38,14 +38,23 @@ defmodule Airo.VoicesTest do
 
   defp speech_provider(name, adapter, url) do
     {:ok, p} =
-      Config.create_provider(%{name: name, adapter_type: adapter, base_url: url, auth_kind: :none})
+      Config.create_provider(%{
+        name: name,
+        adapter_type: adapter,
+        base_url: url,
+        auth_kind: :none
+      })
 
     p
   end
 
   defp speech_deployment(provider, model) do
     {:ok, d} =
-      Config.create_deployment(%{provider_id: provider.id, model_name: model, capabilities: [:speech]})
+      Config.create_deployment(%{
+        provider_id: provider.id,
+        model_name: model,
+        capabilities: [:speech]
+      })
 
     d
   end

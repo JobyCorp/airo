@@ -95,7 +95,11 @@ defmodule Airo.Dashboard do
       label: "Power",
       tone: "warning",
       fraction: fraction(draw, limit),
-      display: if(is_number(draw) && is_number(limit), do: "#{round(draw)} / #{round(limit)} W", else: "—")
+      display:
+        if(is_number(draw) && is_number(limit),
+          do: "#{round(draw)} / #{round(limit)} W",
+          else: "—"
+        )
     }
   end
 

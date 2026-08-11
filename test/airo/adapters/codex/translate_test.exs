@@ -139,7 +139,10 @@ defmodule Airo.Adapters.Codex.TranslateTest do
           "model" => "gpt-5.1-codex",
           "status" => "completed",
           "output" => [
-            %{"type" => "reasoning", "summary" => [%{"type" => "summary_text", "text" => "mull"}]},
+            %{
+              "type" => "reasoning",
+              "summary" => [%{"type" => "summary_text", "text" => "mull"}]
+            },
             %{
               "type" => "message",
               "role" => "assistant",
