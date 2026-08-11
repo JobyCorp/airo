@@ -229,7 +229,7 @@ defmodule AiroWeb.Admin.AliasLive do
             </.button>
           </:actions>
           <:actions :if={@live_action in [:new, :edit]}>
-            <.button size="sm" navigate={alias_return_path(@editing)}>Back</.button>
+            <.button variant="ghost" size="sm" navigate={alias_return_path(@editing)}>Back</.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -289,7 +289,7 @@ defmodule AiroWeb.Admin.AliasLive do
           />
           <div class="flex gap-2">
             <.button variant="primary">Save</.button>
-            <.button type="button" phx-click="cancel">Cancel</.button>
+            <.button variant="ghost" type="button" phx-click="cancel">Cancel</.button>
           </div>
         </.form>
       </.card>
@@ -302,13 +302,17 @@ defmodule AiroWeb.Admin.AliasLive do
           <:col :let={c} label="Weight">{c.weight}</:col>
           <:col :let={c} label="Priority">{c.priority}</:col>
           <:action :let={c}>
-            <.icon_button
-              icon="hero-x-mark"
-              label="Remove candidate"
+            <.button
+              shape="square"
+              size="sm"
               variant="danger"
+              title="Remove candidate"
+              aria-label="Remove candidate"
               phx-click="remove_candidate"
               phx-value-id={c.id}
-            />
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </.button>
           </:action>
         </.table>
 
@@ -395,19 +399,28 @@ defmodule AiroWeb.Admin.AliasLive do
       <:col :let={{_id, a}} label="Strategy">{a.strategy}</:col>
       <:col :let={{_id, a}} label="Candidates">{length(a.candidates)}</:col>
       <:action :let={{_id, a}}>
-        <.icon_button
-          icon="hero-pencil-square"
-          label={"Edit #{a.name}"}
+        <.button
+          shape="square"
+          size="sm"
+          variant="ghost"
+          title={"Edit #{a.name}"}
+          aria-label={"Edit #{a.name}"}
           navigate={~p"/admin/aliases/#{a.id}/edit"}
-        />
-        <.icon_button
-          icon="hero-trash"
-          label={"Delete #{a.name}"}
+        >
+          <.icon name="hero-pencil-square" class="size-4" />
+        </.button>
+        <.button
+          shape="square"
+          size="sm"
           variant="danger"
+          title={"Delete #{a.name}"}
+          aria-label={"Delete #{a.name}"}
           phx-click="delete"
           phx-value-id={a.id}
           data-confirm="Delete this alias?"
-        />
+        >
+          <.icon name="hero-trash" class="size-4" />
+        </.button>
       </:action>
     </.table>
     """

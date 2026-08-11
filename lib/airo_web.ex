@@ -66,13 +66,16 @@ defmodule AiroWeb do
     quote do
       import Phoenix.HTML
 
-      # JobyKit-shipped wrappers: <.card>, <.icon>, <.input>, <.flash>,
-      # <.flash_group>, <.header>, <.list>.
-      import JobyKit.CoreComponents, except: [button: 1, table: 1]
+      # JobyKit-shipped wrappers, all of them — nothing is forked. 0.3 filled
+      # the gaps we used to fork for: `variant="danger"`/`"ghost"` on <.button>,
+      # `shape` for icon-only buttons (was our own <.icon_button>), and the
+      # <.table> hooks. Keep it that way: a fork stops receiving kit fixes and
+      # `mix joby_kit.lint` will say so (`:forked_wrapper`).
+      import JobyKit.CoreComponents
 
-      # Airo-specific wrappers.
-      import AiroWeb.CoreComponents,
-        only: [button: 1, checkbox_group: 1, icon_button: 1, table: 1]
+      # Airo-only wrappers, filling what the kit doesn't ship. Deliberately not
+      # named after kit components, so nothing shadows.
+      import AiroWeb.CoreComponents, only: [checkbox_group: 1, disclosure_table: 1]
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS

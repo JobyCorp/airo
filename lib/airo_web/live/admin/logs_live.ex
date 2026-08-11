@@ -85,7 +85,9 @@ defmodule AiroWeb.Admin.LogsLive do
               </span>
               Live
             </span>
-            <.button id="logs-header-reset" size="sm" phx-click="reset">Reset filters</.button>
+            <.button variant="ghost" id="logs-header-reset" size="sm" phx-click="reset">
+              Reset filters
+            </.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -208,12 +210,17 @@ defmodule AiroWeb.Admin.LogsLive do
             <span :if={!e.trace_id} class="text-base-content/30">—</span>
           </:col>
           <:action :let={{_id, e}}>
-            <.icon_button
+            <.button
               :if={e.trace_id}
-              icon="hero-arrow-top-right-on-square"
-              label="Open trace timeline"
+              shape="square"
+              size="sm"
+              variant="ghost"
+              title="Open trace timeline"
+              aria-label="Open trace timeline"
               navigate={~p"/admin/logs/#{e.trace_id}"}
-            />
+            >
+              <.icon name="hero-arrow-top-right-on-square" class="size-4" />
+            </.button>
           </:action>
         </.table>
       </div>

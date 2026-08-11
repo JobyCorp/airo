@@ -109,7 +109,7 @@ defmodule AiroWeb.Admin.KeyLive do
             <.button navigate={~p"/admin/keys/new"} variant="primary">Mint key</.button>
           </:actions>
           <:actions :if={@live_action == :new}>
-            <.button size="sm" navigate={~p"/admin/keys"}>Back</.button>
+            <.button variant="ghost" size="sm" navigate={~p"/admin/keys"}>Back</.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -132,7 +132,7 @@ defmodule AiroWeb.Admin.KeyLive do
       <.card :if={@minted} variant="elevated">
         <:title>New key — copy it now</:title>
         <p class="break-all font-mono text-sm">{@minted}</p>
-        <:actions><.button phx-click="dismiss">Done</.button></:actions>
+        <:actions><.button variant="ghost" phx-click="dismiss">Done</.button></:actions>
       </.card>
 
       <.card :if={!@minted} variant="bordered">
@@ -158,7 +158,7 @@ defmodule AiroWeb.Admin.KeyLive do
           />
           <div class="flex gap-2">
             <.button variant="primary">Mint key</.button>
-            <.button type="button" navigate={~p"/admin/keys"}>Cancel</.button>
+            <.button variant="ghost" type="button" navigate={~p"/admin/keys"}>Cancel</.button>
           </div>
         </.form>
       </.card>
@@ -176,20 +176,29 @@ defmodule AiroWeb.Admin.KeyLive do
       <:col :let={{_id, k}} label="Surfaces">{Enum.map_join(k.scopes, ", ", &to_string/1)}</:col>
       <:col :let={{_id, k}} label="Enabled">{k.enabled}</:col>
       <:action :let={{_id, k}}>
-        <.icon_button
-          icon="hero-power"
-          label={if k.enabled, do: "Disable key", else: "Enable key"}
+        <.button
+          shape="square"
+          size="sm"
+          variant="ghost"
+          title={if k.enabled, do: "Disable key", else: "Enable key"}
+          aria-label={if k.enabled, do: "Disable key", else: "Enable key"}
           phx-click="toggle"
           phx-value-id={k.id}
-        />
-        <.icon_button
-          icon="hero-trash"
-          label={"Delete #{k.name}"}
+        >
+          <.icon name="hero-power" class="size-4" />
+        </.button>
+        <.button
+          shape="square"
+          size="sm"
           variant="danger"
+          title={"Delete #{k.name}"}
+          aria-label={"Delete #{k.name}"}
           phx-click="delete"
           phx-value-id={k.id}
           data-confirm="Delete this key?"
-        />
+        >
+          <.icon name="hero-trash" class="size-4" />
+        </.button>
       </:action>
     </.table>
     """

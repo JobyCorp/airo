@@ -645,8 +645,10 @@ defmodule AiroWeb.Admin.AgentLive do
           <:crumb navigate={~p"/admin/agents"}>Agents</:crumb>
           <:crumb :if={@live_action == :show}>{@detail.agent.host_id}</:crumb>
           <:actions :if={@live_action == :show}>
-            <.button size="sm" phx-click="resync" disabled={!@detail.online}>Resync</.button>
-            <.button size="sm" navigate={~p"/admin/agents"}>Back</.button>
+            <.button variant="ghost" size="sm" phx-click="resync" disabled={!@detail.online}>
+              Resync
+            </.button>
+            <.button variant="ghost" size="sm" navigate={~p"/admin/agents"}>Back</.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -700,11 +702,16 @@ defmodule AiroWeb.Admin.AgentLive do
       <:col :let={agent} label="Version">{present(agent.version)}</:col>
       <:col :let={agent} label="Last seen">{format_at(agent.last_seen_at)}</:col>
       <:action :let={agent}>
-        <.icon_button
-          icon="hero-arrow-top-right-on-square"
-          label={"Open #{agent.host_id}"}
+        <.button
+          shape="square"
+          size="sm"
+          variant="ghost"
+          title={"Open #{agent.host_id}"}
+          aria-label={"Open #{agent.host_id}"}
           navigate={~p"/admin/agents/#{agent.id}"}
-        />
+        >
+          <.icon name="hero-arrow-top-right-on-square" class="size-4" />
+        </.button>
         <.delete_agent_button agent={agent} online={@online[agent.host_id]} />
       </:action>
     </.table>
@@ -718,15 +725,19 @@ defmodule AiroWeb.Admin.AgentLive do
     assigns = assign(assigns, mode: delete_mode(assigns.agent, assigns.online))
 
     ~H"""
-    <.icon_button
-      icon="hero-trash"
-      label={delete_label(@mode, @agent)}
+    <.button
+      shape="square"
+      size="sm"
       variant="danger"
+      title={delete_label(@mode, @agent)}
+      aria-label={delete_label(@mode, @agent)}
       disabled={@mode in [:online, :bound]}
       phx-click="delete_agent"
       phx-value-id={@agent.id}
       data-confirm={delete_confirm(@mode, @agent)}
-    />
+    >
+      <.icon name="hero-trash" class="size-4" />
+    </.button>
     """
   end
 
@@ -832,7 +843,7 @@ defmodule AiroWeb.Admin.AgentLive do
 
       <.card variant="bordered">
         <:title>Managed slots</:title>
-        <p :if={!@detail.online} class="-mt-1 mb-3 text-xs text-base-content/55">
+        <p :if={!@detail.online} class="mb-3 text-xs text-base-content/55">
           Controls are disabled while the host is offline.
         </p>
         <CompositeComponents.empty_state
@@ -866,6 +877,7 @@ defmodule AiroWeb.Admin.AgentLive do
           <:action :let={slot}>
             <.button
               :if={slot.resident_model}
+              variant="ghost"
               size="sm"
               phx-click="open_config"
               phx-value-model={slot.resident_model}
@@ -884,11 +896,16 @@ defmodule AiroWeb.Admin.AgentLive do
             >
               Unload
             </.button>
-            <.icon_button
-              icon="hero-arrow-top-right-on-square"
-              label={"Open #{slot.provider.name}"}
+            <.button
+              shape="square"
+              size="sm"
+              variant="ghost"
+              title={"Open #{slot.provider.name}"}
+              aria-label={"Open #{slot.provider.name}"}
               navigate={~p"/admin/providers/#{slot.provider.id}"}
-            />
+            >
+              <.icon name="hero-arrow-top-right-on-square" class="size-4" />
+            </.button>
           </:action>
         </.table>
       </.card>
@@ -897,7 +914,7 @@ defmodule AiroWeb.Admin.AgentLive do
         <:eyebrow>Models on this host</:eyebrow>
         <:title>Loadable models</:title>
         <:actions>
-          <.button size="sm" phx-click="refresh_inventory" disabled={!@detail.online}>
+          <.button variant="ghost" size="sm" phx-click="refresh_inventory" disabled={!@detail.online}>
             Refresh
           </.button>
         </:actions>
@@ -1024,7 +1041,7 @@ defmodule AiroWeb.Admin.AgentLive do
       )
 
     ~H"""
-    <CompositeComponents.modal id="slot-config" show on_cancel="cancel_config">
+    <.modal id="slot-config" show on_cancel="cancel_config">
       <:title>
         {if @configure?, do: "Configure", else: "Load"}
         <span class="font-mono text-base">{@config.model["id"]}</span>
@@ -1082,7 +1099,7 @@ defmodule AiroWeb.Admin.AgentLive do
             value={@config.disable_thinking}
             label="Disable thinking"
           />
-          <p class="-mt-1 text-xs text-base-content/55">
+          <p class="text-xs text-base-content/55">
             Launches the engine with reasoning traces off (llama.cpp <span class="font-mono">--reasoning off</span>, vLLM <span class="font-mono">enable_thinking: false</span>). Takes effect on {if @configure?,
               do: "restart",
               else: "load"}.
@@ -1157,7 +1174,7 @@ defmodule AiroWeb.Admin.AgentLive do
               step="0.1"
             />
           </div>
-          <p class="-mt-1 text-xs text-base-content/55">
+          <p class="text-xs text-base-content/55">
             Engine defaults baked into the launch; a request that sends its own sampler
             params still overrides. Blank keeps the engine default. Example: Qwen
             recommends temp <span class="font-mono">0.7</span>, top-p <span class="font-mono">0.8</span>, presence
@@ -1191,7 +1208,7 @@ defmodule AiroWeb.Admin.AgentLive do
               step="1"
             />
           </div>
-          <p :if={@config.nnodes > 1} class="-mt-1 mb-2 text-xs text-base-content/55">
+          <p :if={@config.nnodes > 1} class="mb-2 text-xs text-base-content/55">
             Spans this host and its cabled cluster worker (vLLM multi-node, one slot).
             The host needs its cluster fabric configured and the weights already synced
             to the worker at the same snapshot path — otherwise the agent rejects the
@@ -1203,13 +1220,13 @@ defmodule AiroWeb.Admin.AgentLive do
             value={@config.launch_json}
             label="Advanced launch profile (JSON)"
             placeholder={~s({"image": "…", "container_env": {…}, "extra_argv": […]})}
-            class="min-h-32 font-mono text-xs"
+            input_class="min-h-32 font-mono text-xs"
             phx-debounce="300"
           />
-          <p :if={@config.launch_error} class="-mt-1 text-xs text-error">
+          <p :if={@config.launch_error} class="text-xs text-error">
             {@config.launch_error}
           </p>
-          <p class="-mt-1 text-xs text-base-content/55">
+          <p class="text-xs text-base-content/55">
             Extra profile keys passed to the agent verbatim — e.g. <span class="font-mono">image</span>, <span class="font-mono">container_env</span>, <span class="font-mono">gpu_memory_utilization</span>, <span class="font-mono">kv_cache_dtype</span>, <span class="font-mono">extra_argv</span>. Saved per model on {if @configure?,
               do: "restart",
               else: "load"}, so the next load starts
@@ -1245,13 +1262,13 @@ defmodule AiroWeb.Admin.AgentLive do
         </p>
 
         <div class="flex justify-end gap-2 pt-2">
-          <.button type="button" phx-click="cancel_config">Cancel</.button>
+          <.button variant="ghost" type="button" phx-click="cancel_config">Cancel</.button>
           <.button variant="primary" disabled={@blocked? or @config.launch_error != nil}>
             {if @configure?, do: "Restart with changes", else: "Load model"}
           </.button>
         </div>
       </.form>
-    </CompositeComponents.modal>
+    </.modal>
     """
   end
 

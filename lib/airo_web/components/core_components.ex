@@ -13,104 +13,6 @@ defmodule AiroWeb.CoreComponents do
   alias Phoenix.LiveView.JS
 
   @doc """
-  Standard Airo button.
-
-  The default variant is intentionally quiet so table actions, resets, and
-  secondary commands do not compete with page-level primary actions.
-  """
-  attr :rest, :global, include: ~w(href navigate patch method download name value disabled type)
-
-  attr :class, :any, default: nil
-  attr :variant, :string, values: ~w(primary secondary ghost danger), default: "secondary"
-  attr :size, :string, values: ~w(sm md lg), default: "md"
-  slot :inner_block, required: true
-
-  def button(%{rest: rest} = assigns) do
-    variants = %{
-      "primary" => "btn-primary",
-      "secondary" =>
-        "border border-base-300 bg-base-200/80 text-base-content/80 shadow-none hover:border-base-content/30 hover:bg-base-300 hover:text-base-content",
-      "ghost" => "btn-ghost text-base-content/70 hover:text-base-content",
-      "danger" => "btn-error btn-soft"
-    }
-
-    sizes = %{"sm" => "btn-sm", "md" => nil, "lg" => "btn-lg"}
-
-    assigns =
-      assign(assigns, :class_list, [
-        "btn",
-        Map.fetch!(variants, assigns.variant),
-        Map.fetch!(sizes, assigns.size),
-        assigns.class
-      ])
-
-    if rest[:href] || rest[:navigate] || rest[:patch] do
-      ~H"""
-      <.link data-component="AiroWeb.CoreComponents.button" class={@class_list} {@rest}>
-        {render_slot(@inner_block)}
-      </.link>
-      """
-    else
-      ~H"""
-      <button data-component="AiroWeb.CoreComponents.button" class={@class_list} {@rest}>
-        {render_slot(@inner_block)}
-      </button>
-      """
-    end
-  end
-
-  @doc """
-  Compact icon-only button for dense table/action surfaces.
-  """
-  attr :rest, :global,
-    include:
-      ~w(href navigate patch method download name value disabled type title aria-label phx-click phx-value-id data-confirm)
-
-  attr :class, :any, default: nil
-  attr :icon, :string, required: true
-  attr :label, :string, required: true
-  attr :variant, :string, values: ~w(primary secondary ghost danger), default: "ghost"
-  attr :size, :string, values: ~w(sm md lg), default: "sm"
-
-  def icon_button(%{rest: rest} = assigns) do
-    assigns =
-      assign(assigns, :class_list, [
-        "btn btn-square",
-        button_variant(assigns.variant),
-        button_size(assigns.size),
-        assigns.class
-      ])
-
-    if rest[:href] || rest[:navigate] || rest[:patch] do
-      ~H"""
-      <.link
-        data-component="AiroWeb.CoreComponents.icon_button"
-        class={@class_list}
-        title={@label}
-        aria-label={@label}
-        {@rest}
-      >
-        <JobyKitCoreComponents.icon name={@icon} class="size-4" />
-        <span class="sr-only">{@label}</span>
-      </.link>
-      """
-    else
-      ~H"""
-      <button
-        data-component="AiroWeb.CoreComponents.icon_button"
-        class={@class_list}
-        title={@label}
-        aria-label={@label}
-        {@rest}
-      >
-        <JobyKitCoreComponents.icon name={@icon} class="size-4" />
-        <span class="sr-only">{@label}</span>
-      </button>
-      """
-    end
-  end
-
-  @doc """
   Checkbox group for small enum arrays.
 
   Use this when a native multi-select would hide available choices or require
@@ -190,15 +92,18 @@ defmodule AiroWeb.CoreComponents do
   end
 
   @doc """
-  Airo data table.
+  Data table whose rows expand into an inline detail panel.
 
-  Rows use calmer separators instead of zebra blocks. When `row_click` is
-  provided, non-action cells receive the click target and hover affordance.
+  **Use `<.table>` (JobyKit) unless you need the disclosure.** This exists
+  only for the `:detail` slot, which the kit's table has no equivalent for;
+  everything else here duplicates it. Clicking a row toggles a panel rendered
+  from the slot. Detail mode requires `row_id` (for the panel's DOM id), takes
+  precedence over `row_click`, and expects a plain list rather than a stream.
 
-  An optional `:detail` slot turns rows into expand/collapse disclosures:
-  clicking a row toggles an inline panel rendered from the slot. Detail mode
-  requires `row_id` (for the panel's DOM id), takes precedence over
-  `row_click`, and expects a plain list rather than a stream.
+  Named apart from `table/1` on purpose: shadowing the kit's component would
+  silently divert every `<.table>` call site here and cut them off from kit
+  fixes — the failure `mix joby_kit.lint`'s `:forked_wrapper` rule exists to
+  catch.
   """
   attr :id, :string, required: true
   attr :rows, :list, required: true
@@ -215,7 +120,7 @@ defmodule AiroWeb.CoreComponents do
   slot :action
   slot :detail
 
-  def table(assigns) do
+  def disclosure_table(assigns) do
     assigns =
       with %{rows: %Phoenix.LiveView.LiveStream{}} <- assigns do
         assign(assigns, row_id: assigns.row_id || fn {id, _item} -> id end)
@@ -223,7 +128,7 @@ defmodule AiroWeb.CoreComponents do
 
     ~H"""
     <div
-      data-component="AiroWeb.CoreComponents.table"
+      data-component="AiroWeb.CoreComponents.disclosure_table"
       class="overflow-x-auto rounded-lg border border-base-300 bg-base-100/35"
       {@rest}
     >
@@ -279,7 +184,15 @@ defmodule AiroWeb.CoreComponents do
               >
                 {render_slot(col, @row_item.(row))}
               </td>
-              <td :if={@action != []} class="w-0 px-4 py-3 align-middle">
+              <!-- `whitespace-nowrap` because `w-0` makes the cell report
+                   min-content, and wrappable action text then lets it
+                   under-report and paint past the table edge. Carried over
+                   from the kit's 0.2.1 table fix, which this fork missed. -->
+              <td
+                :if={@action != []}
+                data-table-actions
+                class="w-0 whitespace-nowrap px-4 py-3 align-middle"
+              >
                 <div class="flex justify-end gap-1 opacity-80 transition-opacity group-hover:opacity-100">
                   <%= for action <- @action do %>
                     {render_slot(action, @row_item.(row))}
@@ -314,19 +227,6 @@ defmodule AiroWeb.CoreComponents do
       true -> nil
     end
   end
-
-  defp button_variant("primary"), do: "btn-primary"
-
-  defp button_variant("secondary"),
-    do:
-      "border border-base-300 bg-base-200/80 text-base-content/80 shadow-none hover:border-base-content/30 hover:bg-base-300 hover:text-base-content"
-
-  defp button_variant("ghost"), do: "btn-ghost text-base-content/70 hover:text-base-content"
-  defp button_variant("danger"), do: "btn-error btn-soft"
-
-  defp button_size("sm"), do: "btn-sm"
-  defp button_size("md"), do: nil
-  defp button_size("lg"), do: "btn-lg"
 
   defp normalize_checkbox_options(options, base_id) do
     Enum.map(options, fn

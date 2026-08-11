@@ -63,7 +63,9 @@ defmodule AiroWeb.Admin.UsageLive do
             <.button id="usage-toggle-routing" size="sm" variant="ghost" phx-click="toggle_routing">
               {if @show_routing, do: "Hide routing", else: "Show routing"}
             </.button>
-            <.button id="usage-header-reset" size="sm" phx-click="reset">Reset filters</.button>
+            <.button variant="ghost" id="usage-header-reset" size="sm" phx-click="reset">
+              Reset filters
+            </.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -140,7 +142,7 @@ defmodule AiroWeb.Admin.UsageLive do
           </.form>
         </.card>
 
-        <.table id="usage" rows={@records} row_id={&"usage-#{&1.id}"}>
+        <.disclosure_table id="usage" rows={@records} row_id={&"usage-#{&1.id}"}>
           <:col :let={r} label="When">
             <span class="whitespace-nowrap">{format_at(r.inserted_at)}</span>
           </:col>
@@ -180,6 +182,7 @@ defmodule AiroWeb.Admin.UsageLive do
               </dl>
               <.button
                 :if={r.trace_id}
+                variant="ghost"
                 size="sm"
                 phx-click="trace"
                 phx-value-id={r.trace_id}
@@ -188,7 +191,7 @@ defmodule AiroWeb.Admin.UsageLive do
               </.button>
             </div>
           </:detail>
-        </.table>
+        </.disclosure_table>
       </div>
     </Layouts.app>
     """

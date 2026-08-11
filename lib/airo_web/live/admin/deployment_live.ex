@@ -320,7 +320,9 @@ defmodule AiroWeb.Admin.DeploymentLive do
             </.button>
           </:actions>
           <:actions :if={@live_action in [:new, :edit]}>
-            <.button size="sm" navigate={deployment_return_path(@editing)}>Back</.button>
+            <.button variant="ghost" size="sm" navigate={deployment_return_path(@editing)}>
+              Back
+            </.button>
           </:actions>
         </CompositeComponents.page_header>
 
@@ -405,7 +407,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
             value={@disable_thinking}
             label="Disable thinking"
           />
-          <p class="-mt-1 text-xs text-base-content/55">
+          <p class="text-xs text-base-content/55">
             Sends <span class="font-mono">chat_template_kwargs.enable_thinking=false</span>
             on every request to this deployment, so the model skips reasoning traces.
             Per-request values override it.
@@ -425,7 +427,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
         />
         <div class="flex gap-2">
           <.button variant="primary">Save</.button>
-          <.button type="button" phx-click="cancel">Cancel</.button>
+          <.button variant="ghost" type="button" phx-click="cancel">Cancel</.button>
         </div>
       </.form>
     </.card>
@@ -453,19 +455,28 @@ defmodule AiroWeb.Admin.DeploymentLive do
         <CompositeComponents.health_status status={@health[d.id] || "unknown"} />
       </:col>
       <:action :let={{_id, d}}>
-        <.icon_button
-          icon="hero-pencil-square"
-          label={"Edit #{d.model_name}"}
+        <.button
+          shape="square"
+          size="sm"
+          variant="ghost"
+          title={"Edit #{d.model_name}"}
+          aria-label={"Edit #{d.model_name}"}
           navigate={~p"/admin/deployments/#{d.id}/edit"}
-        />
-        <.icon_button
-          icon="hero-trash"
-          label={"Delete #{d.model_name}"}
+        >
+          <.icon name="hero-pencil-square" class="size-4" />
+        </.button>
+        <.button
+          shape="square"
+          size="sm"
           variant="danger"
+          title={"Delete #{d.model_name}"}
+          aria-label={"Delete #{d.model_name}"}
           phx-click="delete"
           phx-value-id={d.id}
           data-confirm="Delete this deployment?"
-        />
+        >
+          <.icon name="hero-trash" class="size-4" />
+        </.button>
       </:action>
     </.table>
     """
