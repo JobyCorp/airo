@@ -2,16 +2,18 @@ defmodule AiroWeb.DesignManifest do
   @moduledoc """
   This app's component manifest. Backed by `JobyKit.Manifest`.
 
-  Core registrations point at `JobyKit.CoreComponents`. Airo forks nothing:
-  0.3 filled the gaps we used to fork for (button tones and `shape`, table
-  hooks), so the two local entries here are components the kit doesn't ship
-  at all — `checkbox_group` and `disclosure_table` — and neither is named
-  after a kit component, so nothing shadows.
+  **Registers only Airo's own components.** `/design` is the kit's page:
+  since 0.3.2 it renders `JobyKit.KitManifest` directly, so registering
+  kit components here does nothing except pin a snapshot of whatever
+  inventory the kit had when the line was written. Airo had eight such
+  entries against the fourteen the kit ships — the six it never listed
+  (`eyebrow`, `flash_group`, `header`, `list`, `simple_nav`,
+  `theme_toggle`) were invisible on our `/design` as though they didn't
+  exist. They're gone; the kit lists itself.
 
-  Add a `component/3` line for every additional wrapper, composite, and
-  domain component you want to surface on `/design` and
-  `/custom-designs`. The JSON manifest at `/design.json` combines all
-  entries.
+  Which page an entry lands on is decided by who owns the module, not by
+  the `category` below — everything here is Airo's, so all of it renders
+  on `/custom-designs`. Category only groups entries within that page.
   """
 
   use JobyKit.Manifest
@@ -19,11 +21,10 @@ defmodule AiroWeb.DesignManifest do
   alias AiroWeb.CoreComponents
   alias AiroWeb.CompositeComponents
   alias AiroWeb.DesignPreviews
-  alias JobyKit.CoreComponents, as: JobyKitCoreComponents
 
-  category :core,
-    label: "Core wrappers",
-    description: "One wrapper per daisyUI primitive. Ship by JobyKit."
+  category :wrapper,
+    label: "App wrappers",
+    description: "Single primitives the kit doesn't ship, wrapped to the same contract."
 
   category :composite,
     label: "Generic composites",
@@ -33,71 +34,22 @@ defmodule AiroWeb.DesignManifest do
     label: "Domain composites",
     description: "Composites tied to a product area."
 
-  # ---------------------------------------------------------------------- core
-  # The core scaffolding. Each component carries the wrapper
-  # contract (data-component, attr :rest, :global, attrs with values:
-  # enums) and is lint-clean by construction.
+  # ------------------------------------------------------------------- wrapper
+  # Two primitives the kit has no equivalent for. Both carry the wrapper
+  # contract (data-component, attr :rest, :global, attrs with values: enums).
+  # Neither is named after a kit component, so nothing shadows `<.table>`.
 
   component CoreComponents, :checkbox_group,
-    category: :core,
+    category: :wrapper,
     daisy_basis: "checkbox",
     summary: "Visible multi-choice checkbox group for enum-array form fields.",
     preview: &DesignPreviews.checkbox_group_preview/1
 
   component CoreComponents, :disclosure_table,
-    category: :core,
+    category: :wrapper,
     daisy_basis: "table",
     summary: "Data table whose rows expand into an inline detail panel.",
     preview: &DesignPreviews.disclosure_table_preview/1
-
-  component JobyKitCoreComponents, :button,
-    category: :core,
-    daisy_basis: "btn",
-    summary:
-      "Text or icon button. `variant` carries tone; `shape` squares off icon-only actions.",
-    preview: &DesignPreviews.button_preview/1
-
-  component JobyKitCoreComponents, :table,
-    category: :core,
-    daisy_basis: "table",
-    summary: "Data table with col/action slots, an empty state, and density control.",
-    preview: &DesignPreviews.table_preview/1
-
-  component JobyKitCoreComponents, :badge,
-    category: :core,
-    daisy_basis: "badge",
-    summary: "Status chip whose `tone` names the state rather than a colour.",
-    preview: &DesignPreviews.badge_preview/1
-
-  component JobyKitCoreComponents, :modal,
-    category: :core,
-    daisy_basis: "modal",
-    summary: "Server-driven dialog; render it while open and wire `on_cancel` to close.",
-    preview: &DesignPreviews.modal_preview/1
-
-  component JobyKitCoreComponents, :card,
-    category: :core,
-    daisy_basis: "card",
-    summary: "Padded content surface with eyebrow, title, and actions slots.",
-    preview: &DesignPreviews.card_preview/1
-
-  component JobyKitCoreComponents, :icon,
-    category: :core,
-    daisy_basis: "hero-*",
-    summary: "Heroicon span. Pass `name=\"hero-x-mark\"` and an optional `class`.",
-    preview: &DesignPreviews.icon_preview/1
-
-  component JobyKitCoreComponents, :input,
-    category: :core,
-    daisy_basis: "input / select / textarea / checkbox",
-    summary: "Form input with label and error rendering. Supports all standard input types.",
-    preview: &DesignPreviews.input_preview/1
-
-  component JobyKitCoreComponents, :flash,
-    category: :core,
-    daisy_basis: "alert",
-    summary: "Toast-style flash notice. Use inside `flash_group/1` from your root layout.",
-    preview: &DesignPreviews.flash_preview/1
 
   # ----------------------------------------------------------------- composite
   # `empty_state` is the worked example — a real composite that bundles
@@ -164,37 +116,27 @@ defmodule AiroWeb.DesignManifest do
     preview: &DesignPreviews.health_status_preview/1
 
   @doc """
-  Tells `JobyKit.DaisyCatalogue` which daisyUI primitives this app has
-  wrapped, so the catalogue rendering flips them to `:wrapped` and links
-  to the signature card on the index. The atoms must match
-  `JobyKit.DaisyCatalogue` ids (`:button`, `:badge`, `:card`, …).
+  The daisyUI primitives *Airo* wraps that the kit doesn't.
+
+  `JobyKit.DaisyCatalogue.merged/1` merges this over
+  `JobyKit.KitManifest.daisy_overrides/0`, so restating a primitive the
+  kit already claims (button, badge, card, table, modal, alert, the four
+  `<.input>` types, …) is pure duplication — and stale duplication the
+  moment the kit's anchors change. Only list what the kit leaves
+  unwrapped, or the catalogue will show it as `:available` and invite the
+  next contributor to hand-roll a primitive we already have.
+
+  These three live on `/custom-designs`, so the anchors carry that path —
+  the catalogue itself renders on `/design`.
   """
   def daisy_overrides do
     %{
-      button: %{
-        wrapper: "<.button>",
-        anchor: "#jobykit-component-jobykit-corecomponents-button"
-      },
-      badge: %{
-        wrapper: "<.badge>",
-        anchor: "#jobykit-component-jobykit-corecomponents-badge"
-      },
-      card: %{
-        wrapper: "<.card>",
-        anchor: "#jobykit-component-jobykit-corecomponents-card"
-      },
-      checkbox: %{
-        wrapper: "<.checkbox_group>",
-        anchor: "#jobykit-component-airoweb-corecomponents-checkbox-group"
-      },
-      modal: %{
-        wrapper: "<.modal>",
-        anchor: "#jobykit-component-jobykit-corecomponents-modal"
-      },
-      table: %{
-        wrapper: "<.table>",
-        anchor: "#jobykit-component-jobykit-corecomponents-table"
-      }
+      range: %{wrapper: "<.slider>", anchor: custom_anchor("slider")},
+      progress: %{wrapper: "<.meter>", anchor: custom_anchor("meter")},
+      stat: %{wrapper: "<.stat_tile>", anchor: custom_anchor("stat_tile")}
     }
   end
+
+  defp custom_anchor(function),
+    do: "/custom-designs#jobykit-component-airoweb-compositecomponents-#{function}"
 end
