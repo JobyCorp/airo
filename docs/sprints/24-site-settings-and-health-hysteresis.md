@@ -180,11 +180,35 @@ and the slot is coming up. It's recorded as `:unknown`, the same value that
 means "stale, we have not heard anything for 90 seconds". Each reload therefore
 writes two to four transitions into the operational log.
 
-Buried in that is the actual signal: `tp_cluster_incomplete`, the two-node
-sparky/sparky2 TP cluster losing a member and the model genuinely going down.
-**That is a real recurring failure and it is currently indistinguishable from
-the noise around it.** Part B is what makes it visible; diagnosing it is not in
-this sprint.
+### Cause 4 — `tp_cluster_incomplete` is also fiction
+
+I first read this as the one real signal in the pile: the two-node
+sparky/sparky2 TP cluster losing a member. **It isn't, and the operator said
+so.** The cluster never loses a member; there is a primary and a secondary, and
+only the primary meaningfully reports.
+
+Checking bears that out. `sparky2:8081` has **zero deployments** and has
+produced **zero health events**, ever — rank 1 holds a shard and serves no API,
+so there is nothing to mark. And the sequence around every incident is a
+reload, not a loss:
+
+```
+14:59:53  down     tp_cluster_incomplete
+15:00:29  unknown  loading
+15:07:39  up
+```
+
+`Ingest.incomplete?/2` is `length(SlotState.members(cluster_id)) < tp_size` —
+it infers "a member is gone" from the *absence* of an ETS record. `SlotState`
+is cleared on agent disconnect and populated by each agent's own push, so
+during a coordinated restart the peer's record is briefly missing and the head
+is marked down for the gap. The comment above it ("absence — not just a `down`
+status — is what a lost peer looks like here") is exactly the assumption that
+doesn't hold.
+
+The head already knows the truth: a vLLM head cannot serve without its workers,
+so it reports its own failure. Airo second-guessing that from two independent
+push streams adds a race and no information.
 
 ## Design
 
