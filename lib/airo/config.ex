@@ -21,7 +21,8 @@ defmodule Airo.Config do
     Model,
     Provider,
     RoutingSetting,
-    Secret
+    Secret,
+    SiteSetting
   }
 
   ## Routing setting (system classifier — S16)
@@ -46,6 +47,41 @@ defmodule Airo.Config do
 
   def change_routing_setting(%RoutingSetting{} = setting, attrs \\ %{}),
     do: RoutingSetting.changeset(setting, attrs)
+
+  @doc """
+  The singleton site setting. Returns the persisted row, or an unpersisted
+  default struct when none exists (fresh DB / tests), so every caller gets a
+  usable value without a nil branch.
+  """
+  def site_setting do
+    Repo.one(from s in SiteSetting, limit: 1) || %SiteSetting{}
+  end
+
+  @doc "Update (or insert) the singleton."
+  def update_site_setting(attrs) do
+    case Repo.one(from s in SiteSetting, limit: 1) do
+      nil -> %SiteSetting{}
+      setting -> setting
+    end
+    |> SiteSetting.changeset(attrs)
+    |> Repo.insert_or_update()
+  end
+
+  def change_site_setting(%SiteSetting{} = setting, attrs \\ %{}),
+    do: SiteSetting.changeset(setting, attrs)
+
+  @doc "The configured IANA zone the admin renders timestamps in."
+  def time_zone, do: site_setting().time_zone || SiteSetting.default_time_zone()
+
+  @doc """
+  Consecutive failing observations before a deployment is considered down.
+
+  Read on each health mark rather than cached: it is one indexed query against
+  a one-row table, next to an HTTP probe, and caching would need invalidation
+  and would not respect the test sandbox.
+  """
+  def down_after_failures,
+    do: site_setting().down_after_failures || SiteSetting.default_down_after_failures()
 
   @doc """
   The parsed system classifier config that `Airo.Routing.Classifier` consumes —

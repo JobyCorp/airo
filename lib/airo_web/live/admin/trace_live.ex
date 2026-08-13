@@ -7,6 +7,8 @@ defmodule AiroWeb.Admin.TraceLive do
   """
   use AiroWeb, :live_view
 
+  import AiroWeb.Time, only: [format_at: 1]
+
   alias Airo.{Logs, Usage}
   alias AiroWeb.CompositeComponents
 
@@ -123,7 +125,4 @@ defmodule AiroWeb.Admin.TraceLive do
   defp source_tone(%{level: :warning}), do: "warning"
   defp source_tone(%{source: "usage"}), do: "primary"
   defp source_tone(_), do: "neutral"
-
-  defp format_at(%NaiveDateTime{} = at), do: Calendar.strftime(at, "%b %d  %H:%M:%S")
-  defp format_at(other), do: to_string(other)
 end

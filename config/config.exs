@@ -79,6 +79,18 @@ config :phoenix, :json_library, Jason
 # fails open. Override per-env below if a different model set is wanted.
 config :airo, Airo.Routing.LocalClassifier, models: ["nvidia-prompt-task-complexity"]
 
+# Time zones. `DateTime.shift_zone/2` needs a real IANA database, and the admin
+# renders every stored (UTC) timestamp in the operator's zone.
+#
+# `tz`, not `tzdata`, which was the ask: tzdata depends on hackney, which pins
+# `idna ~> 6.1`, while this project is on idna 7.1 via Mint — the transport
+# every gateway request runs through. A clock feature is not worth downgrading
+# the HTTP stack. `tz` implements the same `Calendar.TimeZoneDatabase`
+# behaviour with no HTTP dependency, and has no background updater to disable
+# (its periodic-update module is opt-in and we don't start it), which was the
+# other thing we wanted off on a LAN-only box.
+config :elixir, :time_zone_database, Tz.TimeZoneDatabase
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

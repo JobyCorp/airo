@@ -1,6 +1,12 @@
 defmodule Airo.GatewayFailoverTest do
   use Airo.DataCase, async: true
 
+  # These assert health *classification*, not how many failures it takes (S24).
+  setup do
+    Airo.Test.Health.set_failure_threshold(1)
+    :ok
+  end
+
   alias Airo.Config
   alias Airo.Gateway
   alias Airo.Health
@@ -165,6 +171,34 @@ defmodule Airo.GatewayFailoverTest do
 
     assert %HealthEvent{source: :dispatch} =
              Repo.get_by(HealthEvent, deployment_id: up.id, status: :up)
+  end
+
+  test "live health: a timed-out primary is NOT marked down" do
+    # S24. A timeout says the request was slow, not that the host is gone, and
+    # this gateway allows very slow requests on purpose (300s receive timeout
+    # for big-context and multi-step calls). Marking health on one made
+    # `dispatch` the biggest source of false outages in production: 21 downs
+    # against 1 up in a day, each undone by the next agent push seconds later.
+    #
+    # The request still fails and still fails over — asserted below by the
+    # successful response from the second candidate.
+    {key, name, down, up} = health_alias("timeoutt")
+
+    Req.Test.stub(Airo.TestStub, fn conn ->
+      case conn.host do
+        "timeoutt" -> Req.Test.transport_error(conn, :timeout)
+        "up-timeoutt" -> Req.Test.json(conn, @completion)
+      end
+    end)
+
+    {:ok, plan} = Gateway.resolve(%{"model" => name, "messages" => []}, key, :chat)
+    assert {:ok, _body, _info} = Gateway.run(plan)
+
+    refute Health.status(down.id) == :down, "a timeout must not mark a host down"
+    assert Health.status(up.id) == :up
+
+    refute Repo.get_by(HealthEvent, deployment_id: down.id, status: :down),
+           "and must not write an outage into the history"
   end
 
   test "live health: a 4xx primary stays :up (reachable, not a host fault)" do

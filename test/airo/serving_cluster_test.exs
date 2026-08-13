@@ -8,6 +8,12 @@ defmodule Airo.ServingClusterTest do
   """
   use Airo.DataCase, async: false
 
+  # These assert health *classification*, not how many failures it takes (S24).
+  setup do
+    Airo.Test.Health.set_failure_threshold(1)
+    :ok
+  end
+
   alias Airo.Agents.{Ingest, SlotState}
   alias Airo.{Config, Health, Serving}
 

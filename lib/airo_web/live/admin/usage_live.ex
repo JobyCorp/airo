@@ -2,6 +2,8 @@ defmodule AiroWeb.Admin.UsageLive do
   @moduledoc "Read-only usage view: recent records + total cost (DESIGN §10)."
   use AiroWeb, :live_view
 
+  import AiroWeb.Time, only: [format_at: 1]
+
   alias Airo.Usage
   alias AiroWeb.CompositeComponents
 
@@ -234,8 +236,6 @@ defmodule AiroWeb.Admin.UsageLive do
     ]
     |> Enum.reject(fn {_label, value} -> is_nil(value) or value == "" end)
   end
-
-  defp format_at(%NaiveDateTime{} = at), do: Calendar.strftime(at, "%b %d  %H:%M:%S")
 
   defp short_trace(nil), do: "—"
   defp short_trace(trace_id), do: String.slice(trace_id, 0, 10) <> "…"

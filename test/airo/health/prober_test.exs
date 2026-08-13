@@ -1,6 +1,12 @@
 defmodule Airo.Health.ProberTest do
   use Airo.DataCase, async: true
 
+  # These assert health *classification*, not how many failures it takes (S24).
+  setup do
+    Airo.Test.Health.set_failure_threshold(1)
+    :ok
+  end
+
   import Ecto.Query
 
   alias Airo.Config

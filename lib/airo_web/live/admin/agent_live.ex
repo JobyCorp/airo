@@ -13,6 +13,8 @@ defmodule AiroWeb.Admin.AgentLive do
   """
   use AiroWeb, :live_view
 
+  import AiroWeb.Time, only: [format_at: 1]
+
   require Logger
 
   alias Airo.Agents
@@ -1428,7 +1430,4 @@ defmodule AiroWeb.Admin.AgentLive do
 
   defp present(value) when value in [nil, ""], do: "—"
   defp present(value), do: value
-
-  defp format_at(nil), do: "—"
-  defp format_at(%DateTime{} = at), do: Calendar.strftime(at, "%b %d  %H:%M:%S")
 end
