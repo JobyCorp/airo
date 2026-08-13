@@ -2,10 +2,11 @@
 
 > **Status: complete (S24).** 564 tests (+9), lint clean.
 
-> **Decisions taken:** route is `/admin/settings`; tzdata autoupdate disabled;
+> **Decisions taken:** route is `/admin/settings`; no time zone auto-updater;
 > the lifecycle log mirror is suppressed (not downgraded). The health threshold
 > is a *setting on that page*, not a module attribute — configuration belongs in
-> the UI.
+> the UI. The tz library changed from the requested `tzdata` for a hard
+> dependency reason — see below.
 
 Two independent pieces. Companion to
 [DESIGN-logging-traceability.md](../design/DESIGN-logging-traceability.md)
@@ -61,11 +62,6 @@ HTTP dependency. It also has no background updater to disable — its
 periodic-update module is opt-in and we don't start it — which satisfies the
 autoupdate decision for free.
 
-**Tzdata's auto-update is disabled** (`config :tzdata, :autoupdate, :disabled`).
-It fetches new IANA releases over HTTPS on a timer, which on a LAN-only gateway
-either fails quietly forever or is surprise egress. New rules arrive with
-dependency bumps instead.
-
 **One formatter, not four.** The four private `format_at/1` clones collapse into
 a helper that takes the naive-UTC value, converts, and labels:
 
@@ -83,7 +79,7 @@ existing nav. (The brief said `/settings`; every other admin page is under
 
 1. `site_settings` table + `Airo.Config.SiteSetting` singleton, seeded with the
    default zone.
-2. `tzdata` dependency + `:time_zone_database` config, autoupdate off.
+2. `tz` dependency + `:time_zone_database` config; no background updater.
 3. Settings LiveView with a time zone select **and Part B's failure
    threshold**, plus a nav entry. The threshold is a knob an operator tunes
    against their own network, so it belongs on this page rather than in a
