@@ -1,6 +1,12 @@
 defmodule AiroWeb.AgentChannelTest do
   use AiroWeb.ChannelCase, async: false
 
+  # These assert health *classification*, not how many failures it takes (S24).
+  setup do
+    Airo.Test.Health.set_failure_threshold(1)
+    :ok
+  end
+
   alias Airo.{Config, Health}
   alias AiroWeb.AgentSocket
 

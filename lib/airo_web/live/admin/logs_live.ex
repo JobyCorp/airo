@@ -6,6 +6,8 @@ defmodule AiroWeb.Admin.LogsLive do
   """
   use AiroWeb, :live_view
 
+  import AiroWeb.Time, only: [format_at: 1]
+
   alias Airo.Logs
   alias AiroWeb.CompositeComponents
 
@@ -286,9 +288,6 @@ defmodule AiroWeb.Admin.LogsLive do
 
   defp latency_str(ms) when is_integer(ms), do: "#{ms}ms"
   defp latency_str(_), do: nil
-
-  defp format_at(%NaiveDateTime{} = at), do: Calendar.strftime(at, "%b %d  %H:%M:%S")
-  defp format_at(other), do: to_string(other)
 
   ## Live-feed filter matching (mirrors query/1; a new event is always in-range)
 

@@ -27,6 +27,7 @@ defmodule AiroWeb.Layouts do
         %{key: "keys", label: "Keys", href: "/admin/keys"},
         %{key: "usage", label: "Usage", href: "/admin/usage"},
         %{key: "logs", label: "Logs", href: "/admin/logs"},
+        %{key: "settings", label: "Settings", href: "/admin/settings"},
         %{key: "docs", label: "Docs", href: "/docs"}
       ])
 

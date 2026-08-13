@@ -221,6 +221,19 @@ defmodule Airo.Gateway do
           reason: "http_#{status}"
         )
 
+      # A timeout says the request was slow, not that the host is gone — and
+      # this gateway deliberately allows very slow requests (the chat/stream
+      # receive timeout is 300s for big-context and multi-step calls). Marking
+      # health on one made `dispatch` the single largest source of false
+      # outages: 21 downs against 1 up in a day, each reversed by the next
+      # agent push about four seconds later. The request still fails and still
+      # fails over; it just no longer libels the model. See S24.
+      {:transport_error, :timeout} ->
+        :ok
+
+      {:transport_error, %{reason: :timeout}} ->
+        :ok
+
       {:transport_error, reason} ->
         Health.mark_deployment(deployment, provider, :down,
           source: :dispatch,
