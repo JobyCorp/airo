@@ -2,6 +2,8 @@ defmodule AiroWeb.Admin.ProviderLive do
   @moduledoc "Admin CRUD for upstream providers (DESIGN §6, §8)."
   use AiroWeb, :live_view
 
+  import AiroWeb.Time, only: [format_at: 1]
+
   alias Airo.Adapters.Codex.Login
   alias Airo.Config
   alias Airo.Config.Provider
@@ -719,7 +721,7 @@ defmodule AiroWeb.Admin.ProviderLive do
       <div :if={codex_connected?(@provider)} class="text-sm text-base-content/70">
         Connected via <span class="font-mono">{@provider.credential.name}</span>
         <span :if={@provider.credential.expires_at}>
-          — access token expires {@provider.credential.expires_at}
+          — access token expires {format_at(@provider.credential.expires_at)}
         </span>
       </div>
       <div :if={!codex_connected?(@provider)} class="text-sm text-base-content/70">

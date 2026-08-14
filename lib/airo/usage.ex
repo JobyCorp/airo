@@ -409,8 +409,21 @@ defmodule Airo.Usage do
   defp bucket_config("7d"), do: {604_800, 86_400, 7}
   defp bucket_config(_range), do: {86_400, 3_600, 24}
 
-  defp bucket_label(datetime, "7d"), do: Calendar.strftime(datetime, "%m/%d")
-  defp bucket_label(datetime, _range), do: Calendar.strftime(datetime, "%H:%M")
+  defp bucket_label(datetime, "7d"), do: Calendar.strftime(to_site_zone(datetime), "%m/%d")
+  defp bucket_label(datetime, _range), do: Calendar.strftime(to_site_zone(datetime), "%I:%M %p")
+
+  # Chart axis labels follow the operator zone (`/admin/settings`) like every
+  # other rendered timestamp. Bucket *boundaries* stay UTC — the windows are
+  # rolling, anchored at `utc_now`, so only the label needs shifting. A zone
+  # the tz database can't resolve falls back to UTC rather than raising.
+  defp to_site_zone(%NaiveDateTime{} = datetime) do
+    utc = DateTime.from_naive!(datetime, "Etc/UTC")
+
+    case DateTime.shift_zone(utc, Airo.Config.time_zone()) do
+      {:ok, shifted} -> shifted
+      {:error, _reason} -> utc
+    end
+  end
 
   defp percent(_part, 0), do: "0.0%"
 

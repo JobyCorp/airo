@@ -2,6 +2,8 @@ defmodule AiroWeb.Admin.ModelLive do
   @moduledoc "Model Shelf admin surface for model identity, deployments, and performance."
   use AiroWeb, :live_view
 
+  import AiroWeb.Time, only: [format_at: 1]
+
   alias Airo.Config
   alias Airo.Config.Model
   alias Airo.LocalModels
@@ -950,7 +952,7 @@ defmodule AiroWeb.Admin.ModelLive do
       <CompositeComponents.section_panel body_class="p-4">
         <:title>Recent health transitions</:title>
         <.data_table id="model-health-events" rows={@detail.health_events}>
-          <:col :let={event} label="When">{event.inserted_at}</:col>
+          <:col :let={event} label="When">{format_at(event.inserted_at)}</:col>
           <:col :let={event} label="Provider">{event.provider && event.provider.name}</:col>
           <:col :let={event} label="Status">
             <CompositeComponents.health_status status={to_string(event.status)} />
@@ -964,7 +966,7 @@ defmodule AiroWeb.Admin.ModelLive do
       <CompositeComponents.section_panel body_class="p-4">
         <:title>Recent traces</:title>
         <.data_table id="model-traces" rows={@detail.recent_records}>
-          <:col :let={record} label="When">{record.inserted_at}</:col>
+          <:col :let={record} label="When">{format_at(record.inserted_at)}</:col>
           <:col :let={record} label="Trace">
             <span class="font-mono text-xs">{record.trace_id || "—"}</span>
           </:col>

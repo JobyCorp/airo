@@ -17,7 +17,7 @@ defmodule AiroWeb.Time do
 
   alias Airo.Config
 
-  @default_format "%b %d  %H:%M:%S %Z"
+  @default_format "%b %d  %I:%M:%S %p %Z"
 
   @doc """
   Format a stored timestamp in the configured zone.
@@ -25,8 +25,8 @@ defmodule AiroWeb.Time do
   Accepts the naive UTC values Ecto hands back, an already-zoned `DateTime`,
   and `nil` (rendered as an em dash, matching the rest of the admin).
 
-      format_at(~N[2026-08-13 21:15:40])   #=> "Aug 13  14:15:40 PDT"
-      format_at(~N[2026-01-15 21:15:40])   #=> "Jan 15  13:15:40 PST"
+      format_at(~N[2026-08-13 21:15:40])   #=> "Aug 13  02:15:40 PM PDT"
+      format_at(~N[2026-01-15 21:15:40])   #=> "Jan 15  01:15:40 PM PST"
   """
   def format_at(at, format \\ @default_format)
 

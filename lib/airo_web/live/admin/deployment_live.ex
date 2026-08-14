@@ -2,6 +2,8 @@ defmodule AiroWeb.Admin.DeploymentLive do
   @moduledoc "Admin CRUD for deployments — concrete (provider, model) + pricing."
   use AiroWeb, :live_view
 
+  import AiroWeb.Time, only: [format_at: 1]
+
   alias Airo.Config
   alias Airo.Config.Deployment
   alias Airo.Health
@@ -558,7 +560,7 @@ defmodule AiroWeb.Admin.DeploymentLive do
       <:title>Health transitions</:title>
       Recent deployment health changes from probes and live dispatches.
       <.data_table id="health-events" rows={@events}>
-        <:col :let={{_id, event}} label="When">{event.inserted_at}</:col>
+        <:col :let={{_id, event}} label="When">{format_at(event.inserted_at)}</:col>
         <:col :let={{_id, event}} label="Provider">{event.provider && event.provider.name}</:col>
         <:col :let={{_id, event}} label="Model">
           {event.deployment && event.deployment.model_name}

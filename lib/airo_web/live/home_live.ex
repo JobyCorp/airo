@@ -3,6 +3,8 @@ defmodule AiroWeb.HomeLive do
 
   use AiroWeb, :live_view
 
+  import AiroWeb.Time, only: [format_at: 1]
+
   alias Airo.Dashboard
   alias AiroWeb.CompositeComponents
   alias AiroWeb.Presence
@@ -262,7 +264,7 @@ defmodule AiroWeb.HomeLive do
         <CompositeComponents.section_panel body_class="p-4">
           <:title>Recent health transitions</:title>
           <.data_table id="dashboard-health-events" rows={@overview.recent_health_events}>
-            <:col :let={event} label="When">{event.inserted_at}</:col>
+            <:col :let={event} label="When">{format_at(event.inserted_at)}</:col>
             <:col :let={event} label="Provider">{event.provider && event.provider.name}</:col>
             <:col :let={event} label="Model">{event.deployment && event.deployment.model_name}</:col>
             <:col :let={event} label="Status">
