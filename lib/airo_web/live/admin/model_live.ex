@@ -731,11 +731,11 @@ defmodule AiroWeb.Admin.ModelLive do
               </div>
               <div class="sm:col-span-2">
                 <div class="text-xs uppercase tracking-wide text-base-content/50">First seen</div>
-                <div class="mt-1 font-mono text-sm text-base-content/80">{row.first_seen}</div>
+                <div class="mt-1 font-mono text-sm text-base-content/80">{format_at(row.first_seen)}</div>
               </div>
               <div class="sm:col-span-2">
                 <div class="text-xs uppercase tracking-wide text-base-content/50">Last seen</div>
-                <div class="mt-1 font-mono text-sm text-base-content/80">{row.last_seen}</div>
+                <div class="mt-1 font-mono text-sm text-base-content/80">{format_at(row.last_seen)}</div>
               </div>
             </div>
           </div>
