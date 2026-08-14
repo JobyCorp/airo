@@ -68,6 +68,12 @@ defmodule Airo.Usage do
           p50_latency_ms: integer() | nil,
           p95_latency_ms: integer() | nil
         }
+  # Latency stats skip `:realtime` rows: their `latency_ms` is the wall-clock
+  # length of a WebSocket session (stamped at upgrade, computed at close), not a
+  # response time — one ten-minute voice call would otherwise read as a
+  # ten-minute p95 and score the model as broken. Requests/errors still count
+  # them; only the latency columns filter. `IS DISTINCT FROM` keeps rows with a
+  # NULL capability, which plain `<>` would silently drop.
   def aggregate(queryable) do
     queryable
     |> exclude(:preload)
@@ -78,9 +84,23 @@ defmodule Airo.Usage do
       errors: filter(count(r.id), r.outcome == :error),
       fallbacks: filter(count(r.id), r.fallback_used == true),
       cost: type(coalesce(sum(r.cost), 0), :decimal),
-      avg_latency_ms: type(avg(r.latency_ms), :integer),
-      p50_latency_ms: fragment("percentile_disc(0.5) WITHIN GROUP (ORDER BY ?)", r.latency_ms),
-      p95_latency_ms: fragment("percentile_disc(0.95) WITHIN GROUP (ORDER BY ?)", r.latency_ms)
+      avg_latency_ms:
+        type(
+          filter(avg(r.latency_ms), is_nil(r.capability) or r.capability != :realtime),
+          :integer
+        ),
+      p50_latency_ms:
+        fragment(
+          "percentile_disc(0.5) WITHIN GROUP (ORDER BY ?) FILTER (WHERE ? IS DISTINCT FROM 'realtime')",
+          r.latency_ms,
+          r.capability
+        ),
+      p95_latency_ms:
+        fragment(
+          "percentile_disc(0.95) WITHIN GROUP (ORDER BY ?) FILTER (WHERE ? IS DISTINCT FROM 'realtime')",
+          r.latency_ms,
+          r.capability
+        )
     })
     |> Repo.one()
   end
@@ -125,10 +145,19 @@ defmodule Airo.Usage do
           errors: filter(count(r.id), r.outcome == :error),
           fallbacks: filter(count(r.id), r.fallback_used == true),
           cost: type(coalesce(sum(r.cost), 0), :decimal),
+          # Session-duration rows excluded, same as `aggregate/1`.
           p50_latency_ms:
-            fragment("percentile_disc(0.5) WITHIN GROUP (ORDER BY ?)", r.latency_ms),
+            fragment(
+              "percentile_disc(0.5) WITHIN GROUP (ORDER BY ?) FILTER (WHERE ? IS DISTINCT FROM 'realtime')",
+              r.latency_ms,
+              r.capability
+            ),
           p95_latency_ms:
-            fragment("percentile_disc(0.95) WITHIN GROUP (ORDER BY ?)", r.latency_ms)
+            fragment(
+              "percentile_disc(0.95) WITHIN GROUP (ORDER BY ?) FILTER (WHERE ? IS DISTINCT FROM 'realtime')",
+              r.latency_ms,
+              r.capability
+            )
         })
         |> Repo.all()
     end
@@ -200,8 +229,19 @@ defmodule Airo.Usage do
         requests: count(r.id),
         errors: filter(count(r.id), r.outcome == :error),
         fallbacks: filter(count(r.id), r.fallback_used == true),
-        p50_latency_ms: fragment("percentile_disc(0.5) WITHIN GROUP (ORDER BY ?)", r.latency_ms),
-        p95_latency_ms: fragment("percentile_disc(0.95) WITHIN GROUP (ORDER BY ?)", r.latency_ms)
+        # Session-duration rows excluded, same as `aggregate/1`.
+        p50_latency_ms:
+          fragment(
+            "percentile_disc(0.5) WITHIN GROUP (ORDER BY ?) FILTER (WHERE ? IS DISTINCT FROM 'realtime')",
+            r.latency_ms,
+            r.capability
+          ),
+        p95_latency_ms:
+          fragment(
+            "percentile_disc(0.95) WITHIN GROUP (ORDER BY ?) FILTER (WHERE ? IS DISTINCT FROM 'realtime')",
+            r.latency_ms,
+            r.capability
+          )
       })
       |> group_by([_r], selected_as(:bucket))
       |> Repo.all()

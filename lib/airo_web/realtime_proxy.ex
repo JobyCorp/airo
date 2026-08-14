@@ -13,6 +13,11 @@ defmodule AiroWeb.RealtimeProxy do
   Lifecycle: the client WebSocket is already upgraded when `init/1` runs, so the
   outbound connection is opened there; client frames that arrive before the
   upstream handshake completes are buffered and flushed on open.
+
+  Usage rows are stamped `capability: :realtime` and their `latency_ms` is the
+  wall-clock session duration (upgrade → close) — deliberately not a
+  time-to-first-token figure. `Airo.Usage` excludes these rows from latency
+  aggregates for exactly that reason.
   """
   @behaviour WebSock
 
@@ -29,7 +34,8 @@ defmodule AiroWeb.RealtimeProxy do
       {:error, reason} ->
         Logger.warning("realtime: upstream connect failed: #{inspect(reason)}")
 
-        {:stop, :normal, {1011, "upstream unavailable"}, close_state(%{state | status: :error})}
+        {:stop, :normal, {1011, "upstream unavailable"},
+         close_state(fail(state, "upstream_unavailable"))}
     end
   end
 
@@ -67,9 +73,13 @@ defmodule AiroWeb.RealtimeProxy do
   def handle_info(_message, state), do: {:ok, state}
 
   @impl true
+  # The client-hangup path. Hanging up on a live session is a served session;
+  # hanging up while still `:connecting` means the relay never delivered — so
+  # the outcome is classified from state, not hardcoded (`:success` here used
+  # to swallow every never-connected session).
   def terminate(_reason, state) do
     if state[:conn], do: Mint.HTTP.close(state.conn)
-    unless state[:usage_recorded], do: record_usage(state, :success)
+    unless state[:usage_recorded], do: record_usage(state, outcome_for(state))
     :ok
   end
 
@@ -125,7 +135,7 @@ defmodule AiroWeb.RealtimeProxy do
         Logger.warning("realtime: upstream upgrade rejected: #{inspect(reason)}")
 
         {:stop, :normal, {1011, "upstream upgrade failed"}, Enum.reverse(pushes),
-         close_state(%{state | conn: conn, status: :error})}
+         close_state(fail(%{state | conn: conn}, "upstream_upgrade_failed"))}
     end
   end
 
@@ -139,7 +149,7 @@ defmodule AiroWeb.RealtimeProxy do
         Logger.warning("realtime: decode error: #{inspect(reason)}")
 
         {:stop, :normal, {1011, "decode error"}, Enum.reverse(pushes),
-         close_state(%{state | websocket: websocket, status: :error})}
+         close_state(fail(%{state | websocket: websocket}, "decode_error"))}
     end
   end
 
@@ -174,9 +184,19 @@ defmodule AiroWeb.RealtimeProxy do
 
   ## ── close / usage ────────────────────────────────────────────────
 
+  # Mid-session failure on the upstream leg (send error or transport drop). The
+  # session may still be `:open` from the client's point of view, but it did not
+  # end by anyone's choice — recording it `:success` (as this used to) hid every
+  # upstream drop from the error rate.
   defp close(state, reason) do
     Logger.debug("realtime: closing session: #{inspect(reason)}")
-    {:stop, :normal, 1011, close_state(state)}
+    {:stop, :normal, 1011, close_state(fail(state, "upstream_closed"))}
+  end
+
+  defp fail(state, code) do
+    state
+    |> Map.put(:status, :error)
+    |> Map.put(:error_code, code)
   end
 
   defp close_state(state) do
@@ -184,6 +204,8 @@ defmodule AiroWeb.RealtimeProxy do
     %{state | status: :closed, usage_recorded: true}
   end
 
+  # `:open` means the relay was live and someone hung up — a served session.
+  # Anything else never reached, or lost, the relay.
   defp outcome_for(%{status: :open}), do: :success
   defp outcome_for(_state), do: :error
 
@@ -191,17 +213,20 @@ defmodule AiroWeb.RealtimeProxy do
 
   defp record_usage(state, outcome) do
     latency = System.monotonic_time(:millisecond) - state.started_at
+    error_code = if outcome == :error, do: state[:error_code] || "abnormal_close"
 
     Logger.info("gateway.realtime.closed",
       gateway_trace_id: state[:trace_id],
       client_key_id: state.client_key && state.client_key.id,
       client_key_name: state.client_key && state.client_key.name,
       request_model: state.model,
-      capability: state.target.capability,
+      capability: :realtime,
+      intent: state.target.capability,
       provider: state.target.provider.name,
       deployment_id: state.target.deployment.id,
       model: state.target.deployment.model_name,
       outcome: outcome,
+      error_code: error_code,
       latency_ms: latency
     )
 
@@ -210,8 +235,9 @@ defmodule AiroWeb.RealtimeProxy do
       trace_id: state[:trace_id],
       served: %{deployment: state.target.deployment},
       alias_name: state.model,
-      capability: state.target.capability,
+      capability: :realtime,
       outcome: outcome,
+      error_code: error_code,
       latency_ms: latency
     })
   rescue

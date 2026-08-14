@@ -2,9 +2,12 @@ defmodule AiroWeb.RealtimeProxyTest do
   # Drives the WebSock callbacks directly against a real echo upstream. init/1
   # opens the Mint socket in *this* process, so its messages arrive here and we
   # feed them to handle_info/2 — exercising the full relay without an HTTP server.
-  use ExUnit.Case, async: false
+  # DataCase (not plain ExUnit.Case) because usage recording is synchronous in
+  # test, so outcome classification lands in the sandboxed repo and is assertable.
+  use Airo.DataCase, async: false
 
   alias Airo.Config.{Deployment, Provider}
+  alias Airo.Usage.UsageRecord
   alias AiroWeb.RealtimeProxy
 
   @port 4123
@@ -121,5 +124,45 @@ defmodule AiroWeb.RealtimeProxyTest do
     # WebSock close must be a `{:stop, …}` with a close_detail — never a pushed
     # `{:close, …}` frame (which has no opcode and crashes Bandit's deflate).
     assert {:stop, :normal, {1011, _reason}, _pushes, _state} = pump_until_stop(state)
+
+    assert [
+             %UsageRecord{
+               capability: :realtime,
+               outcome: :error,
+               error_code: "upstream_upgrade_failed"
+             }
+           ] =
+             Repo.all(UsageRecord)
+  end
+
+  test "client hangup on a live session records a served :realtime session" do
+    assert {:ok, state} = RealtimeProxy.init(initial_state())
+    state = pump_until_open(state)
+
+    assert :ok = RealtimeProxy.terminate(:remote, state)
+
+    assert [%UsageRecord{capability: :realtime, outcome: :success, error_code: nil}] =
+             Repo.all(UsageRecord)
+  end
+
+  test "client hangup before the upstream opens records an error, not a success" do
+    assert {:ok, state} = RealtimeProxy.init(initial_state())
+    assert state.status == :connecting
+
+    assert :ok = RealtimeProxy.terminate(:remote, state)
+
+    assert [%UsageRecord{outcome: :error, error_code: "abnormal_close"}] = Repo.all(UsageRecord)
+  end
+
+  test "upstream dropping a live session records an error, not a success" do
+    assert {:ok, state} = RealtimeProxy.init(initial_state())
+    state = pump_until_open(state)
+
+    socket = Mint.HTTP.get_socket(state.conn)
+
+    assert {:stop, :normal, 1011, _state} =
+             RealtimeProxy.handle_info({:tcp_closed, socket}, state)
+
+    assert [%UsageRecord{outcome: :error, error_code: "upstream_closed"}] = Repo.all(UsageRecord)
   end
 end

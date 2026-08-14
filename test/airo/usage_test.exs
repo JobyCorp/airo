@@ -237,6 +237,35 @@ defmodule Airo.UsageTest do
       assert summary.p95_latency_ms == 40
     end
 
+    test "realtime session durations count as requests but never as latency" do
+      # A realtime row's latency_ms is how long the WebSocket session was held
+      # open — a two-minute voice call is not a two-minute response time.
+      {:ok, _} =
+        Usage.record_usage(%{
+          trace_id: "gt_rt_session",
+          capability: :realtime,
+          outcome: :success,
+          latency_ms: 120_000
+        })
+
+      {:ok, _} =
+        Usage.record_usage(%{
+          trace_id: "gt_http_call",
+          capability: :chat,
+          outcome: :success,
+          latency_ms: 40
+        })
+
+      summary = Usage.usage_summary(%{"range" => "24h"})
+
+      assert summary.total == 2
+      assert summary.p50_latency_ms == 40
+      assert summary.p95_latency_ms == 40
+
+      agg = Usage.aggregate(Airo.Usage.UsageRecord)
+      assert agg.avg_latency_ms == 40
+    end
+
     test "an empty window reports zeroes rather than dividing by zero" do
       summary = Usage.usage_summary(%{"range" => "1h"})
 

@@ -18,7 +18,7 @@ defmodule AiroWeb.RealtimeController do
 
     cond do
       model in [nil, ""] ->
-        GatewayUsage.record_error(conn, :transcription, :missing_model,
+        GatewayUsage.record_error(conn, :realtime, :missing_model,
           request_model: model,
           latency_ms: System.monotonic_time(:millisecond) - started
         )
@@ -31,7 +31,7 @@ defmodule AiroWeb.RealtimeController do
             upgrade(conn, model, target)
 
           {:error, reason} ->
-            GatewayUsage.record_error(conn, :transcription, reason,
+            GatewayUsage.record_error(conn, :realtime, reason,
               request_model: model,
               latency_ms: System.monotonic_time(:millisecond) - started
             )

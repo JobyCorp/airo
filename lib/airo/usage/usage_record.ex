@@ -13,7 +13,19 @@ defmodule Airo.Usage.UsageRecord do
 
   alias Airo.Config.{ClientKey, Deployment, Model}
 
-  @capabilities [:chat, :embeddings, :rerank, :speech, :transcription, :vision, :classify]
+  # `:realtime` marks rows written by the WebSocket relay, where `latency_ms` is
+  # the wall-clock length of the whole session — not time-to-first-token. Latency
+  # aggregates filter on it so voice sessions don't read as hundred-second p95s.
+  @capabilities [
+    :chat,
+    :embeddings,
+    :rerank,
+    :speech,
+    :transcription,
+    :vision,
+    :classify,
+    :realtime
+  ]
   @outcomes [:success, :error, :timeout]
 
   @type t :: %__MODULE__{}
