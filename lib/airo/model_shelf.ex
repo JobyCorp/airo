@@ -59,6 +59,7 @@ defmodule Airo.ModelShelf do
       requests: metrics.requests,
       error_rate: metrics.error_rate,
       fallback_rate: metrics.fallback_rate,
+      avg_latency_ms: metrics.avg_latency_ms,
       p50_latency_ms: metrics.p50_latency_ms,
       p95_latency_ms: metrics.p95_latency_ms,
       cost: metrics.cost
@@ -201,6 +202,7 @@ defmodule Airo.ModelShelf do
       fallback_ratio: ratio(fallbacks, total),
       error_rate: percent(errors, total),
       fallback_rate: percent(fallbacks, total),
+      avg_latency_ms: agg.avg_latency_ms,
       p50_latency_ms: agg.p50_latency_ms,
       p95_latency_ms: agg.p95_latency_ms,
       cost: agg.cost

@@ -19,6 +19,7 @@ defmodule Airo.Usage do
     requests: 0,
     errors: 0,
     fallbacks: 0,
+    avg_latency_ms: nil,
     p50_latency_ms: nil,
     p95_latency_ms: nil
   }
@@ -63,6 +64,7 @@ defmodule Airo.Usage do
           errors: non_neg_integer(),
           fallbacks: non_neg_integer(),
           cost: Decimal.t(),
+          avg_latency_ms: integer() | nil,
           p50_latency_ms: integer() | nil,
           p95_latency_ms: integer() | nil
         }
@@ -76,6 +78,7 @@ defmodule Airo.Usage do
       errors: filter(count(r.id), r.outcome == :error),
       fallbacks: filter(count(r.id), r.fallback_used == true),
       cost: type(coalesce(sum(r.cost), 0), :decimal),
+      avg_latency_ms: type(avg(r.latency_ms), :integer),
       p50_latency_ms: fragment("percentile_disc(0.5) WITHIN GROUP (ORDER BY ?)", r.latency_ms),
       p95_latency_ms: fragment("percentile_disc(0.95) WITHIN GROUP (ORDER BY ?)", r.latency_ms)
     })

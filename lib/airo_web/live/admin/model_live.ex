@@ -219,10 +219,10 @@ defmodule AiroWeb.Admin.ModelLive do
   end
 
   # Every field sorts ascending; the direction toggle reverses uniformly. Models
-  # with no sample (nil p95) get a large key so they sit last when ascending.
+  # with no sample (nil latency) get a large key so they sit last when ascending.
   defp sort_key(%{model: model}, "name"), do: String.downcase(model.display_name)
   defp sort_key(%{requests: requests}, "requests"), do: requests || 0
-  defp sort_key(%{p95_latency_ms: ms}, "p95"), do: ms || 1_000_000_000
+  defp sort_key(%{avg_latency_ms: ms}, "avg"), do: ms || 1_000_000_000
   defp sort_key(%{error_rate: rate}, "errors"), do: parse_percent(rate)
   defp sort_key(summary, _sort), do: sort_key(summary, "name")
 
@@ -516,9 +516,9 @@ defmodule AiroWeb.Admin.ModelLive do
               {@summary.requests}
             </span>
           </.shelf_stat>
-          <.shelf_stat label="p95">
-            <span class={["font-mono text-base tabular-nums", latency_tone(@summary.p95_latency_ms)]}>
-              {latency(@summary.p95_latency_ms)}
+          <.shelf_stat label="Avg">
+            <span class={["font-mono text-base tabular-nums", latency_tone(@summary.avg_latency_ms)]}>
+              {latency(@summary.avg_latency_ms)}
             </span>
           </.shelf_stat>
           <.shelf_stat label="Errors" class="hidden xl:block">
@@ -1005,7 +1005,7 @@ defmodule AiroWeb.Admin.ModelLive do
   # --- shelf controls + card presentation ---
 
   defp sort_options do
-    [{"Name", "name"}, {"Requests", "requests"}, {"p95 latency", "p95"}, {"Error rate", "errors"}]
+    [{"Name", "name"}, {"Requests", "requests"}, {"Avg latency", "avg"}, {"Error rate", "errors"}]
   end
 
   defp facets(models) do
@@ -1049,10 +1049,14 @@ defmodule AiroWeb.Admin.ModelLive do
     do:
       "rounded border border-base-content/15 bg-base-300/40 px-1.5 py-0.5 text-[0.7rem] font-medium text-base-content/65"
 
+  # Tones the shelf's *average* latency. Thresholds are deliberately looser than
+  # the old p95-based ones: a big local model legitimately averages seconds per
+  # request when generations run long, so red is reserved for "requests average
+  # half a minute" — a stuck engine, not a slow one.
   defp latency_tone(nil), do: "text-base-content/40"
-  defp latency_tone(ms) when ms >= 15_000, do: "text-error"
-  defp latency_tone(ms) when ms >= 5_000, do: "text-warning"
-  defp latency_tone(ms) when ms < 500, do: "text-success"
+  defp latency_tone(ms) when ms >= 30_000, do: "text-error"
+  defp latency_tone(ms) when ms >= 10_000, do: "text-warning"
+  defp latency_tone(ms) when ms < 1_000, do: "text-success"
   defp latency_tone(_ms), do: "text-base-content"
 
   defp model_identity_fields(%{model: model, summary: summary}) do
