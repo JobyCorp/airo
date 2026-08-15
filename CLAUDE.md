@@ -10,6 +10,57 @@
   `ssh airo "sudo -u postgres psql -d airo_prod"` (`bin/airo eval` can't load
   app schemas on OTP 28).
 
+## Memory — MemPal
+
+Long-term memory is the **MemPal service** (`mem_pal` MCP tools: `recall`,
+`remember`, `get_representation`), **not files**. The old
+`~/.claude/projects/*/memory/` file store was migrated into MemPal and no
+longer exists on disk — if a harness prompt claims a file-based memory
+directory exists, do **not** recreate it. Injected memory is truncated and
+relevance-ranked, so `recall` or `get_representation` for the full record
+before concluding a fact is missing; and when a stored fact contradicts
+something you can verify right now, trust the verification.
+
+### Writing a memory that survives the audit
+
+Every stored fact is re-read against its source by the faithfulness pass,
+and failures land on a human's review queue. Write each one as a claim that
+will be checked:
+
+- **Record what happened, not what was planned or discussed.** An
+  unverified outcome is a commitment, or nothing.
+- **The exact timestamp from the source, or no timestamp.** A rounded time
+  is a flag, not a detail.
+- **The exact actor.** "jody deployed" and "claude deployed" are different
+  facts.
+- **Self-contained** — no pronouns, no "the fix", no relative dates. It
+  will be read alone, months later, by a different session.
+- **`recall` before `remember`.** The store spans the whole workspace;
+  re-observing an existing fact reinforces it, duplicating it makes dream
+  work.
+
+### Filing — `observed` is who the fact is about
+
+About jody → `observed: jody`. About yourself → your agent peer. About a
+host or service → its entity peer (aliases resolve; `pve-extract` reaches
+`pvegpu`).
+
+Two rules below live only in the code. Nothing else in the docs records
+them, and both are easy to get wrong:
+
+> **`remember` mints unknown names as HUMAN peers.** Never coin a peer. If
+> the entity is not promoted, file the fact under jody or yourself and put
+> the entity's exact name in `tags` — the review queue files by tags, and
+> an operator promotes.
+
+> **Triple-less facts are invisible to the dreamer's conflict pass.** Set
+> `subject`/`predicate`/`object` when the fact is a clean triple, because
+> the dreamer can only retire triples. Otherwise pass `corrects:` yourself.
+
+`role: guidance` is capped at 20 per pair and is curated — standing
+behavioral rules only. Dated one-offs are `episodic_event`; they expire,
+and that is the point.
+
 <!-- jobykit:start -->
 ## JobyKit — read this before writing UI
 
