@@ -1,4 +1,16 @@
 <!-- jobykit:start -->
+## Prod
+
+- Host: **Proxmox VM 302 on pve2**, guest hostname **`phx2`**,
+  `192.168.68.74`, SSH alias `airo`. Served by Traefik at
+  **https://llm.local.joby.gg** (`airo.local.joby.gg` is retired and dead).
+- Deploy: `bin/deploy-docker.sh` (container build — native builds won't boot
+  on the VM's older glibc). It ships **committed HEAD**, so commit first.
+  Full runbook: `DEPLOY.md` — trust it over memory when they disagree.
+- Prod DB writes/queries: raw SQL via
+  `ssh airo "sudo -u postgres psql -d airo_prod"` (`bin/airo eval` can't load
+  app schemas on OTP 28).
+
 ## JobyKit — read this before writing UI
 
 This project uses [JobyKit](https://github.com/jobycorp/joby_kit). Every UI
