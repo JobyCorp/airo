@@ -6,7 +6,7 @@ incogito deploy pattern (prod release → tarball over SSH → systemd).
 ## TL;DR
 
 ```bash
-cd ~/airo
+cd ~/Work/airo-workspace/airo
 bin/deploy-docker.sh
 ```
 
@@ -50,7 +50,8 @@ and your toolchain change silently won't apply.
 ## Architecture
 
 Airo is **private to the LAN — no public tunnel.** It runs as a Mix release
-under systemd on the VM reached by the SSH alias **`airo`**.
+under systemd on **Proxmox VM 302 (node pve2)** — guest hostname **`phx2`**,
+`192.168.68.74` — reached by the SSH alias **`airo`**.
 
 - Release at `/opt/airo/`, run by systemd unit `airo.service`
   (`/opt/airo/bin/server`), which sets `PHX_SERVER=true` and binds Bandit to
@@ -58,8 +59,10 @@ under systemd on the VM reached by the SSH alias **`airo`**.
 - Runtime env from `/etc/airo.env` (0640, root:airo).
 - Postgres `airo_prod` (role `airo`) on `127.0.0.1:5432`, reached via
   `DATABASE_URL` (scram password) in that env file.
-- **Traefik** terminates TLS at **`https://airo.local.joby.gg`** and forwards to
-  the app at **`192.168.68.74:4000`** (plain HTTP). It sets
+- **Traefik** terminates TLS at **`https://llm.local.joby.gg`** and forwards to
+  the app at **`192.168.68.74:4000`** (plain HTTP). (The earlier
+  `airo.local.joby.gg` name was retired in the DNS re-org and no longer
+  resolves.) It sets
   `X-Forwarded-Proto: https`, which `config/prod.exs`'s
   `force_ssl: [rewrite_on: [:x_forwarded_proto]]` trusts — so the app stays HTTP
   behind the proxy without redirect loops. (Hitting `192.168.68.74:4000`
@@ -84,7 +87,8 @@ Airo to the public internet** (a tunnel, a port-forward) without first gating
 3. **`mise`/`.tool-versions` runtimes match the VM** (Erlang/Elixir/OTP).
 4. **`/etc/airo.env`** exists (0640, root:airo) with at least:
    - `PHX_SERVER=true`
-   - `PHX_HOST=<airo's public host>`
+   - `PHX_HOST=llm.local.joby.gg` (the public host — also what `check_origin`
+     derives from)
    - `PORT=4000`
    - `DATABASE_URL=ecto://USER:PASS@HOST/airo_prod`
    - `SECRET_KEY_BASE` (generate: `mix phx.gen.secret`)
