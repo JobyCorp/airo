@@ -84,5 +84,10 @@ Ordered — each depends on prior merged sprints unless noted in the sprint file
 - [x] [S19 — Resident-model identity & provenance](./19-resident-model-identity-provenance.md)
 - [x] [S20 — Slot configuration & reload](./20-slot-configuration-reload.md)
 - [x] [S21 — VRAM validation & context legibility](./21-vram-validation-context-legibility.md)
+- [x] [S22 — Engine parity & engine-aware capacity](./22-engine-parity-capacity.md)
+- [x] [S23 — A test seam for the agent control plane](./23-agent-control-plane-test-seam.md)
+- [x] [S24 — Site settings & health flap suppression](./24-site-settings-and-health-hysteresis.md)
+- [ ] [S25 — Agent lifecycle observability](./25-agent-lifecycle-observability.md) — airo only; prod-deployable alone
+- [ ] [S26 — Observer airos (one controller, N observers per agent)](./26-observer-airos.md) — airo + airo_agent; depends on S25
 
 See [`STATUS.md`](./STATUS.md) for merge history.
