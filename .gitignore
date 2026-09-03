@@ -48,3 +48,9 @@ npm-debug.log
 
 # Local ONNX routing models (S15) — fetched, never committed
 /priv/models/
+
+# Claude Code per-machine permission grants (the shared .claude/settings.json stays tracked).
+/.claude/settings.local.json
+
+# macOS Finder metadata.
+.DS_Store
