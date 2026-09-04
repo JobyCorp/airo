@@ -7,8 +7,11 @@ defmodule AiroWeb.AgentChannelTest do
     :ok
   end
 
-  alias Airo.{Config, Health}
+  alias Airo.{Config, Health, Repo}
+  alias Airo.Agents.HostEvent
   alias AiroWeb.AgentSocket
+
+  import Ecto.Query, only: [from: 2]
 
   @host "test-host"
   @port 8081
@@ -125,6 +128,56 @@ defmodule AiroWeb.AgentChannelTest do
     })
 
     assert Health.status(dep.id) == :down
+  end
+
+  defp host_events(host \\ @host),
+    do: Repo.all(from e in HostEvent, where: e.host_id == ^host, order_by: e.id)
+
+  test "join records a connected event on the fleet topic; leave records disconnected" do
+    Phoenix.PubSub.subscribe(Airo.PubSub, Airo.Agents.Lifecycle.topic())
+    socket = join_host()
+
+    assert_receive {:agent_event, %{host_id: @host, kind: :connected}}
+    assert [%{kind: :connected, agent_id: nil}] = host_events()
+
+    Process.unlink(socket.channel_pid)
+    leave(socket)
+
+    assert_receive {:agent_event, %{host_id: @host, kind: :disconnected}}
+    eventually(fn -> match?([_, %{kind: :disconnected}], host_events()) end, 50)
+    [_, disconnected] = host_events()
+    assert disconnected.reason == "agent_disconnected"
+  end
+
+  test "a heartbeat register writes no host event; a changed version writes one" do
+    socket = join_host()
+    push_sync(socket, "register", register_payload())
+    push_sync(socket, "register", register_payload())
+    assert [%{kind: :connected}] = host_events()
+
+    changed = put_in(register_payload(), ["agent", "version"], "0.2.0")
+    push_sync(socket, "register", changed)
+
+    assert [%{kind: :connected}, %{kind: :version_changed} = event] = host_events()
+    assert event.meta == %{"field" => "version", "from" => "0.1.0", "to" => "0.2.0"}
+    assert event.agent_id == Config.get_agent_by_host_id(@host).id
+  end
+
+  test "register and slot pushes emit telemetry" do
+    ref =
+      :telemetry_test.attach_event_handlers(self(), [
+        [:airo, :agent, :register],
+        [:airo, :agent, :slot]
+      ])
+
+    socket = join_host()
+    push_sync(socket, "register", register_payload())
+    assert_receive {[:airo, :agent, :register], ^ref, %{count: 1, slots: 1}, %{host_id: @host}}
+
+    push_sync(socket, "slot", %{"port" => @port, "resident_model" => @model, "status" => "up"})
+
+    assert_receive {[:airo, :agent, :slot], ^ref, %{count: 1},
+                    %{host_id: @host, port: @port, status: "up"}}
   end
 
   test "disconnect marks the agent's deployments down" do

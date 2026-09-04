@@ -170,8 +170,8 @@ defmodule AiroWeb.Admin.LogsLive do
                 </CompositeComponents.tag>
                 <%= case e.kind do %>
                   <% :route_prediction -> %>
-                    <span class="font-medium text-base-content">{e.alias_name || "—"}</span>
-                    <.icon name="hero-arrow-right" class="size-4 text-base-content/30" />
+                    <.event_subject>{e.alias_name || "—"}</.event_subject>
+                    <.event_arrow />
                     <CompositeComponents.tag tone={tier_tone(e.data["predicted_class"])}>
                       {e.data["predicted_class"] || "—"}
                     </CompositeComponents.tag>
@@ -182,12 +182,16 @@ defmodule AiroWeb.Admin.LogsLive do
                       <.icon name="hero-check-circle" class="size-4" /> applied
                     </span>
                   <% :health -> %>
-                    <span class="font-medium text-base-content">
-                      deployment {e.deployment_id || "?"}
-                    </span>
-                    <.icon name="hero-arrow-right" class="size-4 text-base-content/30" />
+                    <.event_subject>deployment {e.deployment_id || "?"}</.event_subject>
+                    <.event_arrow />
                     <CompositeComponents.tag tone={status_tone(e.data["status"])}>
                       {e.data["status"]}
+                    </CompositeComponents.tag>
+                  <% :host -> %>
+                    <.event_subject>{e.data["host_id"] || "?"}</.event_subject>
+                    <.event_arrow />
+                    <CompositeComponents.tag tone={host_kind_tone(e.data["kind"])}>
+                      {e.data["kind"]}
                     </CompositeComponents.tag>
                   <% _ -> %>
                     <span class="text-base-content/70">{e.summary}</span>
@@ -240,12 +244,34 @@ defmodule AiroWeb.Admin.LogsLive do
 
   ## Row presentation
 
+  # Every event row reads "<subject> → <state tag>"; these two keep that shape
+  # in one place so a new kind (S25 added `:host`) doesn't copy the classes.
+  slot :inner_block, required: true
+
+  defp event_subject(assigns) do
+    ~H"""
+    <span class="font-medium text-base-content">{render_slot(@inner_block)}</span>
+    """
+  end
+
+  defp event_arrow(assigns) do
+    ~H"""
+    <.icon name="hero-arrow-right" class="size-4 text-base-content/30" />
+    """
+  end
+
   defp kind_label(:route_prediction), do: "route"
   defp kind_label(:health), do: "health"
+  defp kind_label(:host), do: "host"
   defp kind_label(other), do: to_string(other)
 
   defp kind_tone(:route_prediction), do: "primary"
   defp kind_tone(_), do: "neutral"
+
+  # Host lifecycle (S25): a drop or a silence is the thing to notice.
+  defp host_kind_tone(kind) when kind in ["connected", "recovered"], do: "success"
+  defp host_kind_tone(kind) when kind in ["disconnected", "stale"], do: "warning"
+  defp host_kind_tone(_), do: "neutral"
 
   defp level_tone(:error), do: "error"
   defp level_tone(:warning), do: "warning"
@@ -271,6 +297,12 @@ defmodule AiroWeb.Admin.LogsLive do
   defp event_meta(%{kind: :health, data: data}) do
     [data["source"], data["reason"]]
     |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" · ")
+  end
+
+  defp event_meta(%{kind: :host, data: data}) do
+    [data["reason"], data["version"] && "agent #{data["version"]}", data["control_url"]]
+    |> Enum.reject(&(&1 in [nil, "", false]))
     |> Enum.join(" · ")
   end
 

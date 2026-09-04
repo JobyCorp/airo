@@ -19,6 +19,7 @@ config :airo, Airo.Transport, req_options: [plug: {Req.Test, Airo.TestStub}]
 
 # Don't run the periodic health prober in tests; tests set health explicitly.
 config :airo, Airo.Health.Prober, enabled: false
+config :airo, Airo.Agents.Liveness, enabled: false
 
 # Record usage + logs synchronously in tests so writes hit the SQL sandbox connection.
 config :airo, Airo.Usage, async: false

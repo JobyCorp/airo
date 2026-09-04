@@ -97,6 +97,14 @@ defmodule AiroWeb.Admin.SettingLive do
                 min="1"
                 max="20"
               />
+              <.input
+                field={@form[:agent_stale_after_ms]}
+                type="number"
+                label="Host stale after (ms of heartbeat silence)"
+                min="20000"
+                max="600000"
+                step="1000"
+              />
             </div>
             <p class="text-xs text-base-content/55">
               How many failing observations in a row before a deployment counts as down.
@@ -105,6 +113,12 @@ defmodule AiroWeb.Admin.SettingLive do
               request or one timed-out probe would mark a working model down and
               something would reverse it seconds later. Recovery is always immediate —
               one success restores it. <span class="font-mono">1</span> restores the old behaviour.
+            </p>
+            <p class="text-xs text-base-content/55">
+              A connected host that stops sending its 10-second heartbeat for longer than
+              the stale window is flagged stale: its deployments drop to unknown and the
+              host shows as silent, without waiting for the socket to close. The next
+              heartbeat clears it immediately. Two heartbeats is the floor.
             </p>
           </.card>
 

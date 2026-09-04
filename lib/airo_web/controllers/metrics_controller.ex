@@ -17,6 +17,12 @@ defmodule AiroWeb.MetricsController do
   means "nothing is reporting on this deployment", which is a different failure
   from "this deployment answered and said no".
 
+  `airo_host_online` and `airo_host_stale` (S25) are the host-level pair: alert
+  on `airo_host_online == 0` for a dropped agent, and on `airo_host_stale == 1`
+  for the quieter failure — a socket that is open with nobody heartbeating
+  behind it. `airo_host_last_seen_timestamp_seconds` is the raw signal both are
+  derived from.
+
   **Counter caveat:** the `_total` counters are derived from `usage_records`,
   which `Airo.Usage.PruneWorker` trims on a retention window. A prune makes them
   decrease, which Prometheus reads as a counter reset — `rate()` over a prune
@@ -63,6 +69,20 @@ defmodule AiroWeb.MetricsController do
         fn h ->
           {[host_id: h.host_id], bool(h.enabled)}
         end
+      ),
+      metric(
+        "airo_host_online",
+        :gauge,
+        "1 while the host agent holds an open channel to Airo.",
+        hosts,
+        fn h -> {[host_id: h.host_id], bool(h.online)} end
+      ),
+      metric(
+        "airo_host_stale",
+        :gauge,
+        "1 when the host is connected but has not sent a heartbeat within the stale window.",
+        hosts,
+        fn h -> {[host_id: h.host_id], bool(h.stale)} end
       ),
       metric(
         "airo_host_last_seen_timestamp_seconds",

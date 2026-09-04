@@ -19,6 +19,10 @@ defmodule Airo.Config.SiteSetting do
       slow request or one timed-out probe marked a working model down, and
       something reversed it seconds later. See DESIGN-logging-traceability.md.
 
+    * `agent_stale_after_ms` — how long a *connected* agent host may go without
+      a `register` heartbeat before `Airo.Agents.Liveness` calls it stale (S25).
+      Presence alone cannot tell a hung agent from a healthy one.
+
   Enforced as a singleton via a unique `singleton` flag.
   """
   use Ecto.Schema
@@ -26,12 +30,14 @@ defmodule Airo.Config.SiteSetting do
 
   @default_time_zone "America/Los_Angeles"
   @default_down_after 3
+  @default_agent_stale_after_ms 45_000
 
   @type t :: %__MODULE__{}
 
   schema "site_settings" do
     field :time_zone, :string, default: @default_time_zone
     field :down_after_failures, :integer, default: @default_down_after
+    field :agent_stale_after_ms, :integer, default: @default_agent_stale_after_ms
     # Singleton guard — always true, unique.
     field :singleton, :boolean, default: true
 
@@ -43,6 +49,9 @@ defmodule Airo.Config.SiteSetting do
 
   @doc "The failure threshold used when nothing is configured."
   def default_down_after_failures, do: @default_down_after
+
+  @doc "Silence (ms) a connected host is allowed before it counts as stale, when unconfigured."
+  def default_agent_stale_after_ms, do: @default_agent_stale_after_ms
 
   # A `Calendar.TimeZoneDatabase` isn't required to enumerate its zones, and the
   # installed one doesn't, so the picker is a curated list rather than all ~600
@@ -91,8 +100,8 @@ defmodule Airo.Config.SiteSetting do
 
   def changeset(setting, attrs) do
     setting
-    |> cast(attrs, [:time_zone, :down_after_failures])
-    |> validate_required([:time_zone, :down_after_failures])
+    |> cast(attrs, [:time_zone, :down_after_failures, :agent_stale_after_ms])
+    |> validate_required([:time_zone, :down_after_failures, :agent_stale_after_ms])
     |> validate_time_zone()
     # 1 restores the old "react immediately" behaviour, which is a legitimate
     # choice on a LAN where a failure really does mean down. The upper bound is
@@ -100,6 +109,12 @@ defmodule Airo.Config.SiteSetting do
     |> validate_number(:down_after_failures,
       greater_than_or_equal_to: 1,
       less_than_or_equal_to: 20
+    )
+    # Two heartbeats is the floor: below that a GC pause on the host reads as an
+    # outage. Ten minutes is the ceiling, so a typo can't switch the check off.
+    |> validate_number(:agent_stale_after_ms,
+      greater_than_or_equal_to: 20_000,
+      less_than_or_equal_to: 600_000
     )
     |> put_change(:singleton, true)
     |> unique_constraint(:singleton)

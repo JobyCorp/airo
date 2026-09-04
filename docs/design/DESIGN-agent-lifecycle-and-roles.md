@@ -45,8 +45,9 @@ nothing distinguishes *an airo that may look* from *the airo that may command*.
   `host_events` row only when something changed — first register after
   connect, `version` changed, `control_url` changed, `role` changed (S26).
 - **Stale is a state, derived from two signals.** *Connected* = Presence has
-  the host. *Stale* = connected **and** `last_seen_at` older than
-  `agent_stale_after_ms`. A `Liveness` sweeper evaluates every host on a tick;
+  the host (`Liveness.online?/1` is the one reader core code uses). *Stale* =
+  connected **and** `last_seen_at` older than `agent_stale_after_ms`. A
+  `Liveness` sweeper evaluates every host on a 15 s tick;
   entering stale writes `stale`, the next register writes `recovered`. Stale
   also marks the host's deployments `:unknown` through the existing
   `Health.mark_deployment/4` path (`source: :agent, reason: "agent_stale"`),
@@ -145,11 +146,12 @@ old airo: the extra param and key are ignored. No flag day.
 
 | Event | Measurements | Metadata | Emitted from |
 |---|---|---|---|
-| `[:airo, :agent, :join]` | `%{count: 1}` | `host_id`, `role`, `version` | `AgentChannel.handle_info(:after_join)` |
-| `[:airo, :agent, :leave]` | `%{count: 1}` | `host_id`, `role`, `reason` | `AgentChannel.terminate/2` |
+| `[:airo, :agent, :join]` | `%{count: 1}` | `host_id`, `version`, `control_url` (role in S26) | `AgentChannel.handle_info(:after_join)` via `Lifecycle` |
+| `[:airo, :agent, :leave]` | `%{count: 1}` | `host_id`, `exit` (role in S26) | `AgentChannel.terminate/2` via `Lifecycle` |
 | `[:airo, :agent, :register]` | `%{count: 1, slots: n}` | `host_id`, `role` | `Ingest.register/2` |
 | `[:airo, :agent, :slot]` | `%{count: 1}` | `host_id`, `port`, `status`, `reason` | `Ingest.slot/2` |
-| `[:airo, :agent, :stale]` / `[:airo, :agent, :recovered]` | `%{silent_ms: ms}` | `host_id` | `Liveness` sweeper / `Ingest.register/2` |
+| `[:airo, :agent, :stale]` / `[:airo, :agent, :recovered]` | `%{count: 1, silent_ms: ms}` | `host_id` | `Liveness` sweeper / `Liveness.registered/1` |
+| `[:airo, :agent, :changed]` | `%{count: 1}` | `host_id`, `kind` (`version_changed` \| `control_url_changed`), `field`, `from`, `to` | `Ingest.register/2` via `Lifecycle` |
 | `[:airo, :agent, :control, :start \| :stop \| :exception]` | span (`duration`) | `host_id`, `op` (`load`, `unload`, `inventory`, …), `status` | `Control.request/5` via `:telemetry.span/3` |
 
 The `control` span is the one that will show what `Ingest.inventory_index/1`

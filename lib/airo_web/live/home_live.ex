@@ -5,73 +5,81 @@ defmodule AiroWeb.HomeLive do
 
   import AiroWeb.Time, only: [format_at: 1]
 
+  alias Airo.Agents.{Lifecycle, Liveness}
   alias Airo.Dashboard
   alias AiroWeb.CompositeComponents
   alias AiroWeb.Presence
 
-  # GPU telemetry is DB state the host agents push over their channel; a light
-  # timer re-reads the overview so the host rings stay live without a reload.
-  # Online/offline is faster still — a Presence subscription flips it instantly.
-  @refresh_ms 10_000
+  # Host lifecycle arrives as a push on the fleet topic (S25): connect, drop,
+  # stale, recovered. GPU telemetry is DB state refreshed by every heartbeat
+  # register, which also rides the topic, so the rings stay live without a poll.
+  # The timer is a safety net for drift only.
+  @refresh_ms 60_000
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Process.send_after(self(), :refresh, @refresh_ms)
+    if connected?(socket) do
+      Process.send_after(self(), :refresh, @refresh_ms)
+      Lifecycle.subscribe()
+    end
 
     overview = Dashboard.overview()
 
     {:ok,
      socket
-     |> assign(page_title: "Airo overview", subscribed: MapSet.new())
+     |> assign(page_title: "Airo overview")
      |> assign(overview: overview)
-     |> assign(agents: with_presence(overview.agents))
-     |> subscribe_agents(overview.agents)}
+     |> assign(agents: with_liveness(overview.agents))}
   end
 
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_ms)
-    overview = Dashboard.overview()
-
-    {:noreply,
-     socket
-     |> assign(overview: overview, agents: with_presence(overview.agents))
-     |> subscribe_agents(overview.agents)}
+    {:noreply, reload(socket)}
   end
 
-  # A host connected or dropped — re-derive the online flags from Presence
-  # without re-running the heavier overview query.
+  # A host connected or dropped: the roster may have changed (a first connect
+  # creates the row), so re-read the overview. The event is the truth for that
+  # host's online flag — Presence untracks only after the channel process has
+  # exited, which is after this broadcast, so reading it here would race.
   @impl true
-  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
-    {:noreply, assign(socket, agents: with_presence(socket.assigns.overview.agents))}
+  def handle_info({:agent_event, %{host_id: host_id, kind: kind}}, socket)
+      when kind in [:connected, :disconnected] do
+    socket = reload(socket)
+    agents = Enum.map(socket.assigns.agents, &set_online(&1, host_id, kind == :connected))
+    {:noreply, assign(socket, agents: agents)}
   end
 
-  # The agent topic also carries channel control messages; ignore the rest.
-  def handle_info(%Phoenix.Socket.Broadcast{}, socket), do: {:noreply, socket}
-
-  # Watch each host's Presence topic so up/down flips arrive as a push. Tracks
-  # which hosts we already hold so re-listing never double-subscribes.
-  defp subscribe_agents(%{assigns: %{subscribed: subscribed}} = socket, agents) do
-    if connected?(socket) do
-      subscribed =
-        Enum.reduce(agents, subscribed, fn agent, acc ->
-          if MapSet.member?(acc, agent.host_id) do
-            acc
-          else
-            Phoenix.PubSub.subscribe(Airo.PubSub, "agent:#{agent.host_id}")
-            MapSet.put(acc, agent.host_id)
-          end
-        end)
-
-      assign(socket, subscribed: subscribed)
-    else
-      socket
-    end
+  # Silence and its end change only the stale flag; no query needed.
+  def handle_info({:agent_event, %{host_id: host_id, kind: kind}}, socket)
+      when kind in [:stale, :recovered] do
+    agents = Enum.map(socket.assigns.agents, &set_stale(&1, host_id, kind == :stale))
+    {:noreply, assign(socket, agents: agents)}
   end
 
-  defp with_presence(agents) do
-    Enum.map(agents, &Map.put(&1, :online, Presence.list("agent:#{&1.host_id}") != %{}))
+  def handle_info({:agent_event, _event}, socket), do: {:noreply, socket}
+
+  defp reload(socket) do
+    overview = Dashboard.overview()
+    assign(socket, overview: overview, agents: with_liveness(overview.agents))
   end
+
+  defp with_liveness(agents) do
+    Enum.map(agents, fn agent ->
+      Map.merge(agent, %{
+        online: Presence.list("agent:#{agent.host_id}") != %{},
+        stale: Liveness.stale?(agent.host_id)
+      })
+    end)
+  end
+
+  defp set_online(%{host_id: host_id} = agent, host_id, online),
+    do: %{agent | online: online, stale: online and agent.stale}
+
+  defp set_online(agent, _host_id, _online), do: agent
+
+  defp set_stale(%{host_id: host_id} = agent, host_id, stale), do: %{agent | stale: stale}
+  defp set_stale(agent, _host_id, _stale), do: agent
 
   @impl true
   def render(assigns) do
@@ -310,11 +318,12 @@ defmodule AiroWeb.HomeLive do
       <span class="absolute right-3 top-3 inline-flex items-center gap-1.5">
         <span class={[
           "size-2 rounded-full",
-          @agent.online && "bg-success",
+          @agent.online && !@agent.stale && "bg-success",
+          @agent.online && @agent.stale && "bg-warning",
           !@agent.online && "bg-base-content/30"
         ]} />
         <span class="text-[0.65rem] font-medium uppercase tracking-[0.14em] text-base-content/50">
-          {if @agent.online, do: "online", else: "offline"}
+          {liveness_label(@agent)}
         </span>
       </span>
 
@@ -367,6 +376,12 @@ defmodule AiroWeb.HomeLive do
     </.link>
     """
   end
+
+  # Three states, not two: a connected host that has stopped heartbeating is
+  # "stale" — the socket is open but nobody is home (S25).
+  defp liveness_label(%{online: true, stale: true}), do: "stale"
+  defp liveness_label(%{online: true}), do: "online"
+  defp liveness_label(_agent), do: "offline"
 
   defp ring_color("primary"), do: "var(--color-primary)"
   defp ring_color("success"), do: "var(--color-success)"

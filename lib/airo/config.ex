@@ -83,6 +83,10 @@ defmodule Airo.Config do
   def down_after_failures,
     do: site_setting().down_after_failures || SiteSetting.default_down_after_failures()
 
+  @doc "Milliseconds of heartbeat silence before a connected host is stale (S25)."
+  def agent_stale_after_ms,
+    do: site_setting().agent_stale_after_ms || SiteSetting.default_agent_stale_after_ms()
+
   @doc """
   The parsed system classifier config that `Airo.Routing.Classifier` consumes —
   the same shape the per-alias `router_config` used to produce. Read straight

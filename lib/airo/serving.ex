@@ -46,6 +46,7 @@ defmodule Airo.Serving do
 
   alias Airo.Agents.{Capacity, Control, SlotState}
   alias Airo.Config.Provider
+  alias Airo.Agents.{HostEvent, Liveness}
   alias Airo.Health.HealthEvent
   alias Airo.Usage.UsageRecord
   alias Airo.{Config, Health, Repo}
@@ -169,6 +170,12 @@ defmodule Airo.Serving do
       agent_version: agent.version,
       enabled: agent.enabled,
       last_seen_at: agent.last_seen_at,
+      # Liveness beyond `last_seen_at` (S25): `online` is the open channel,
+      # `stale` is online-but-silent past the configured window. `role` is the
+      # S26 concept; every host is a controller until an agent says otherwise.
+      online: Liveness.online?(agent.host_id),
+      stale: Liveness.stale?(agent.host_id),
+      role: "controller",
       gpu: gpu(agent.gpu),
       inventory: inventory && Enum.map(inventory, &inventory_entry/1),
       slots: Enum.map(slots, &slot(&1, agent, activity, index, sole_resident?))
@@ -444,6 +451,43 @@ defmodule Airo.Serving do
   ## ------------------------------------------------------------------
   ## Health transitions
   ## ------------------------------------------------------------------
+
+  @doc """
+  Host lifecycle events after `since` (S25) — connects, drops, stale and
+  recovered, identity changes — oldest first, with the same cursor contract as
+  `health_transitions/1`: pass `next_since` back to continue.
+  """
+  def host_transitions(opts \\ []) do
+    limit = clamp_limit(opts[:limit])
+
+    events =
+      HostEvent
+      |> apply_since(opts[:since])
+      |> order_by([e], asc: e.id)
+      |> limit(^(limit + 1))
+      |> Repo.all()
+
+    {events, has_more} = split_page(events, limit)
+
+    %{
+      generated_at: now(),
+      events: Enum.map(events, &host_event/1),
+      next_since: next_cursor(events, opts[:since]),
+      has_more: has_more
+    }
+  end
+
+  defp host_event(event) do
+    %{
+      id: event.id,
+      at: event.inserted_at,
+      host_id: event.host_id,
+      agent_id: event.agent_id,
+      kind: event.kind,
+      reason: event.reason,
+      meta: event.meta
+    }
+  end
 
   @doc """
   Health transitions newest-last, for recording flaps rather than only current

@@ -25,14 +25,22 @@ defmodule Airo.Agents.Ingest do
   require Logger
 
   alias Airo.{Agents, Config, Health, Repo}
-  alias Airo.Agents.{Control, Provenance, SlotState}
+  alias Airo.Agents.{Control, Lifecycle, Liveness, Provenance, SlotState}
 
   @doc "Full registration (on channel join/rejoin): structure + per-slot reconcile."
   def register(host_id, payload) when is_binary(host_id) and is_map(payload) do
     case Agents.register(host_id, payload) do
-      {:ok, _} ->
+      {:ok, %{agent: agent, changes: changes}} ->
+        slots = Map.get(payload, "slots", [])
+        record_changes(host_id, agent, changes)
+        Liveness.registered(host_id)
+
+        :telemetry.execute([:airo, :agent, :register], %{count: 1, slots: length(slots)}, %{
+          host_id: host_id
+        })
+
         index = inventory_index(host_id)
-        payload |> Map.get("slots", []) |> Enum.each(&apply_slot(host_id, &1, index))
+        Enum.each(slots, &apply_slot(host_id, &1, index))
         :ok
 
       {:error, reason} ->
@@ -42,8 +50,29 @@ defmodule Airo.Agents.Ingest do
   end
 
   @doc "A single slot transition (load/up/down/swap)."
-  def slot(host_id, slot) when is_binary(host_id) and is_map(slot),
-    do: apply_slot(host_id, slot, inventory_index(host_id))
+  def slot(host_id, slot) when is_binary(host_id) and is_map(slot) do
+    :telemetry.execute([:airo, :agent, :slot], %{count: 1}, %{
+      host_id: host_id,
+      port: slot["port"],
+      status: slot["status"],
+      reason: slot["reason"]
+    })
+
+    apply_slot(host_id, slot, inventory_index(host_id))
+  end
+
+  # A register that carried a different agent identity than the row held is a
+  # lifecycle event (S25). A plain heartbeat reaches here with `[]` and writes
+  # nothing.
+  defp record_changes(host_id, agent, changes) do
+    Enum.each(changes, fn {field, from, to} ->
+      Lifecycle.transition(host_id, :"#{field}_changed",
+        agent: agent,
+        reason: "#{field} #{from} -> #{to}",
+        meta: %{field: field, from: from, to: to}
+      )
+    end)
+  end
 
   @doc "The agent's socket dropped — mark its deployments down and forget slot state."
   def host_down(host_id) do

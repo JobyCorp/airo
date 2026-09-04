@@ -122,3 +122,66 @@ defmodule AiroWeb.AgentLiveTest do
     assert render(view) =~ "Qwen-Test"
   end
 end
+
+defmodule AiroWeb.Admin.AgentLiveLifecycleTest do
+  # Not async: Presence and the hosts ETS table are node-global.
+  use AiroWeb.ConnCase, async: false
+
+  import Phoenix.LiveViewTest
+
+  alias Airo.Agents.Lifecycle
+  alias Airo.Config
+  alias Airo.Test.AgentControl
+
+  setup do
+    :ets.delete_all_objects(Airo.Runtime.Store.hosts_table())
+    {:ok, agent} = Config.create_agent(%{host_id: "tl-host", control_url: "http://tl:4400"})
+    %{agent: agent}
+  end
+
+  # Tag text is rendered with surrounding whitespace, and "offline" contains
+  # "online", so match the tag body exactly but tolerate the whitespace.
+  defp tag?(view, text), do: Regex.match?(~r/>\s*#{text}\s*</, render(view))
+
+  test "the index shows stale as its own state and follows fleet events", %{conn: conn} do
+    {:ok, view, html} = live(conn, ~p"/admin/agents")
+    assert html =~ "offline"
+
+    AgentControl.mark_online("tl-host")
+    Lifecycle.transition("tl-host", :connected)
+    assert tag?(view, "online")
+
+    Lifecycle.transition("tl-host", :stale)
+    assert tag?(view, "stale")
+
+    Lifecycle.transition("tl-host", :disconnected)
+    assert tag?(view, "offline")
+  end
+
+  test "the detail page lists host events newest first and live-updates", %{
+    conn: conn,
+    agent: agent
+  } do
+    Lifecycle.transition("tl-host", :connected,
+      meta: %{version: "0.1.0", control_url: "http://tl:4400"}
+    )
+
+    Lifecycle.transition("tl-host", :version_changed, meta: %{from: "0.1.0", to: "0.2.0"})
+
+    {:ok, view, html} = live(conn, ~p"/admin/agents/#{agent.id}")
+    assert html =~ "Host events"
+    assert html =~ "0.1.0 → 0.2.0"
+    assert html =~ "agent 0.1.0 · http://tl:4400"
+
+    # version_changed (newer) renders above connected.
+    assert :binary.match(html, "version_changed") < :binary.match(html, "connected")
+
+    Lifecycle.transition("tl-host", :disconnected, reason: "agent_disconnected")
+    assert render(view) =~ "agent_disconnected"
+  end
+
+  test "the detail page says so when a host has no events yet", %{conn: conn, agent: agent} do
+    {:ok, _view, html} = live(conn, ~p"/admin/agents/#{agent.id}")
+    assert html =~ "No lifecycle events recorded for this host yet."
+  end
+end

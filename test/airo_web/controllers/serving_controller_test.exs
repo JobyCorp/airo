@@ -467,3 +467,107 @@ defmodule AiroWeb.ServingControllerTest do
     end
   end
 end
+
+defmodule AiroWeb.ServingControllerHostsTest do
+  # S25 — host liveness in the snapshot, the hosts endpoint, the metrics gauges.
+  use AiroWeb.ConnCase, async: false
+
+  alias Airo.Agents.Lifecycle
+  alias Airo.Config
+  alias Airo.Test.AgentControl
+
+  setup do
+    :ets.delete_all_objects(Airo.Runtime.Store.hosts_table())
+    {:ok, agent} = Config.create_agent(%{host_id: "srv-host", control_url: "http://srv:4400"})
+    %{agent: agent}
+  end
+
+  defp mint(scopes) do
+    {:ok, key} =
+      Config.mint_client_key(%{
+        name: "k-#{System.unique_integer([:positive])}",
+        allowed_aliases: ["*"],
+        scopes: scopes
+      })
+
+    key.key
+  end
+
+  defp management(conn),
+    do: put_req_header(conn, "authorization", "Bearer " <> mint([:management]))
+
+  defp host(conn) do
+    conn
+    |> management()
+    |> get(~p"/v1/serving")
+    |> json_response(200)
+    |> Map.fetch!("hosts")
+    |> Enum.find(&(&1["host_id"] == "srv-host"))
+  end
+
+  test "the snapshot carries online, stale and role per host", %{conn: conn} do
+    assert %{"online" => false, "stale" => false, "role" => "controller"} = host(conn)
+
+    AgentControl.mark_online("srv-host")
+    assert %{"online" => true, "stale" => false} = host(conn)
+
+    :ets.insert(
+      Airo.Runtime.Store.hosts_table(),
+      {{:stale, "srv-host"}, %{since: 0, silent_ms: 1}}
+    )
+
+    assert %{"online" => true, "stale" => true} = host(conn)
+  end
+
+  test "/metrics exposes the host online and stale gauges", %{conn: conn} do
+    AgentControl.mark_online("srv-host")
+    body = conn |> management() |> get(~p"/metrics") |> response(200)
+
+    assert body =~ ~s(airo_host_online{host_id="srv-host"} 1)
+    assert body =~ ~s(airo_host_stale{host_id="srv-host"} 0)
+  end
+
+  test "/v1/serving/hosts pages lifecycle events by cursor", %{conn: conn, agent: agent} do
+    {:ok, first} = Lifecycle.transition("srv-host", :connected, meta: %{version: "0.1.0"})
+    Lifecycle.transition("srv-host", :stale, reason: "no register for 47000ms")
+    Lifecycle.transition("srv-host", :recovered)
+
+    page = conn |> management() |> get(~p"/v1/serving/hosts?limit=2") |> json_response(200)
+
+    assert page["has_more"] == true
+
+    assert [
+             %{"kind" => "connected", "agent_id" => agent_id, "meta" => %{"version" => "0.1.0"}},
+             %{"kind" => "stale", "reason" => "no register for 47000ms"}
+           ] = page["events"]
+
+    assert agent_id == agent.id
+
+    rest =
+      conn
+      |> management()
+      |> get(~p"/v1/serving/hosts?since=#{page["next_since"]}")
+      |> json_response(200)
+
+    assert [%{"kind" => "recovered", "host_id" => "srv-host"}] = rest["events"]
+    assert rest["has_more"] == false
+
+    # A timestamp cursor works too, and excludes everything at or before it.
+    after_first = first.inserted_at |> NaiveDateTime.add(1, :second) |> NaiveDateTime.to_iso8601()
+
+    later =
+      conn
+      |> management()
+      |> get(~p"/v1/serving/hosts?since=#{after_first}")
+      |> json_response(200)
+
+    refute Enum.any?(later["events"], &(&1["kind"] == "connected"))
+  end
+
+  test "/v1/serving/hosts needs the management scope", %{conn: conn} do
+    conn
+    |> put_req_header("authorization", "Bearer " <> mint([:inference]))
+    |> get(~p"/v1/serving/hosts")
+    |> json_response(403)
+  end
+end

@@ -1,7 +1,20 @@
 # Sprint 25 — Agent lifecycle observability
 
-> **Status: planned.** Branch `sprint/25-agent-lifecycle-observability`. Airo
-> only — no `airo_agent` change, deployable to prod on its own.
+> **Status: complete (S25), merged to `main` 2026-09-03; prod acceptance
+> pending deploy.** 595 tests (+27), precommit green, `joby_kit.lint` 16 (was
+> 17). Airo only — no `airo_agent` change, deployable on its own.
+
+> **Decisions taken while building:** `Liveness.online?/1` is the one Presence
+> reader for core code, so `Airo.Serving` never touches `AiroWeb.Presence`.
+> Identity changes emit a single `[:airo, :agent, :changed]` telemetry event
+> with `field` in metadata, rather than one event name per field. The
+> per-deployment `agent_stale` health rows are **not** mirrored into the
+> operational log — the host-level `stale` line already says it once (same
+> reasoning S24 used for `loading`). LiveViews take a `disconnected` event as
+> the truth for that host's online flag instead of re-reading Presence, because
+> Presence untracks only after the channel process exits, which is after the
+> broadcast. The stale flag lives in a new `:airo_hosts` ETS table rather than
+> being mixed into `:airo_health`'s integer keys.
 
 Companion to
 [DESIGN-agent-lifecycle-and-roles.md](../design/DESIGN-agent-lifecycle-and-roles.md)

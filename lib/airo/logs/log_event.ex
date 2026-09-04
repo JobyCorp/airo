@@ -6,6 +6,8 @@ defmodule Airo.Logs.LogEvent do
 
     - `:route_prediction` — `predicted_class`, `scores`, `mode`, `applied`, `latency_ms`
     - `:health` — `status`, `source`, `reason`, `latency_ms`
+    - `:host` — `host_id`, `kind` (connected/disconnected/stale/recovered), `reason`,
+      plus the transition's meta (S25, `Airo.Agents.Lifecycle`)
 
   Correlate a request across surfaces via `trace_id`.
   """
@@ -14,7 +16,7 @@ defmodule Airo.Logs.LogEvent do
 
   alias Airo.Config.{Deployment, Provider}
 
-  @kinds [:route_prediction, :health]
+  @kinds [:route_prediction, :health, :host]
   @levels [:info, :warning, :error]
 
   @type t :: %__MODULE__{}

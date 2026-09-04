@@ -102,7 +102,11 @@ defmodule Airo.Health do
   # operator asked to reload reports `loading` on its way back up; that is
   # expected, and mirroring it made every reload write two to four lines into
   # the operational log.
-  @lifecycle_reasons ~w(loading)
+  #
+  # `agent_stale` is the per-deployment echo of a host going silent (S25); the
+  # host-level `stale` line already says it once, so the echoes stay in
+  # `health_events` only.
+  @lifecycle_reasons ~w(loading agent_stale)
 
   @doc "Persist one health event."
   def record_event(attrs) do

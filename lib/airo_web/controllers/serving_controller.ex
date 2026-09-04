@@ -8,6 +8,8 @@ defmodule AiroWeb.ServingController do
     - `GET /v1/serving/health?since=` — health *transitions*, so a consumer can
       record flaps rather than sampling current state and missing what happened
       between polls.
+    - `GET /v1/serving/hosts?since=` — host *lifecycle* events (S25): connect,
+      disconnect, stale, recovered, identity changes. Same cursor contract.
 
   Both require a client key scoped `management` (see
   `AiroWeb.Plugs.ClientKeyAuth`). `GET /v1/serving` is `ETag`-tagged: a poller
@@ -33,6 +35,16 @@ defmodule AiroWeb.ServingController do
     json(
       conn,
       Serving.health_transitions(
+        since: Serving.parse_since(params["since"]),
+        limit: params["limit"]
+      )
+    )
+  end
+
+  def hosts(conn, params) do
+    json(
+      conn,
+      Serving.host_transitions(
         since: Serving.parse_since(params["since"]),
         limit: params["limit"]
       )

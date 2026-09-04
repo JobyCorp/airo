@@ -23,4 +23,4 @@ Merge status: [`../sprints/STATUS.md`](../sprints/STATUS.md).
 | [`DESIGN-agent-provenance.md`](./DESIGN-agent-provenance.md) | S19 | Shipped |
 | [`DESIGN-slot-config.md`](./DESIGN-slot-config.md) | S20 | Shipped |
 | [`DESIGN-vram-validation.md`](./DESIGN-vram-validation.md) | S21 | Shipped |
-| [`DESIGN-agent-lifecycle-and-roles.md`](./DESIGN-agent-lifecycle-and-roles.md) | S25 / S26 | Planned |
+| [`DESIGN-agent-lifecycle-and-roles.md`](./DESIGN-agent-lifecycle-and-roles.md) | S25 / S26 | S25 shipped; S26 planned |

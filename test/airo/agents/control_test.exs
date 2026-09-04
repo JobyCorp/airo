@@ -38,6 +38,35 @@ defmodule Airo.Agents.ControlTest do
     end
   end
 
+  describe "telemetry span (S25)" do
+    test "wraps every control call with host_id, op and the response status" do
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:airo, :agent, :control, :start],
+          [:airo, :agent, :control, :stop]
+        ])
+
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.json(conn, %{"models" => []}) end)
+      assert {:ok, []} = Control.inventory(agent(), opts())
+
+      assert_received {[:airo, :agent, :control, :start], ^ref, _,
+                       %{host_id: "jobycorp", op: :inventory}}
+
+      assert_received {[:airo, :agent, :control, :stop], ^ref, %{duration: _},
+                       %{host_id: "jobycorp", op: :inventory, status: 200}}
+    end
+
+    test "names the load op and reports a refused connection as a transport error" do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:airo, :agent, :control, :stop]])
+
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+      assert {:error, {:transport_error, _}} = Control.load(agent(), 8081, "m", opts())
+
+      assert_received {[:airo, :agent, :control, :stop], ^ref, _,
+                       %{op: :load, status: :transport_error}}
+    end
+  end
+
   describe "load/4" do
     test "posts {model, slot} to /load and returns :accepted" do
       test_pid = self()

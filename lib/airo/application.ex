@@ -25,6 +25,9 @@ defmodule Airo.Application do
       # health prober that populates them.
       Airo.Runtime.Store,
       Airo.Health.Prober,
+      # Host liveness beyond Presence: stale (connected but silent) and lost
+      # (presence gone without a clean terminate). S25.
+      Airo.Agents.Liveness,
       # Off-path usage-record writes.
       {Task.Supervisor, name: Airo.Usage.TaskSupervisor},
       # Loads any configured local ONNX routing models into :persistent_term at

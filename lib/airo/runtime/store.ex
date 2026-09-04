@@ -8,6 +8,8 @@ defmodule Airo.Runtime.Store do
   - `:airo_routing` — round-robin counters per alias (`Airo.Routing`).
   - `:airo_slots` — per-slot resident-model state pushed by agents
     (`Airo.Agents.SlotState`); runtime, self-heals on agent re-register.
+  - `:airo_hosts` — per-host runtime flags, today the stale marker
+    (`Airo.Agents.Liveness`); must reset with the node, so never Postgres.
 
   Tables are `:public` with read/write concurrency so callers hit ETS directly
   without serializing through this process; the GenServer exists only to own the
@@ -18,10 +20,12 @@ defmodule Airo.Runtime.Store do
   @health :airo_health
   @routing :airo_routing
   @slots :airo_slots
+  @hosts :airo_hosts
 
   def health_table, do: @health
   def routing_table, do: @routing
   def slots_table, do: @slots
+  def hosts_table, do: @hosts
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -31,6 +35,7 @@ defmodule Airo.Runtime.Store do
     :ets.new(@health, opts)
     :ets.new(@routing, opts)
     :ets.new(@slots, opts)
+    :ets.new(@hosts, opts)
     {:ok, %{}}
   end
 end

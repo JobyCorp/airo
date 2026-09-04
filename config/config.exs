@@ -11,7 +11,7 @@ config :airo,
   ecto_repos: [Airo.Repo],
   generators: [timestamp_type: :utc_datetime]
 
-# Oban — housekeeping only (UsageRecord + LogEvent prune). Daily cron ~03:00.
+# Oban — housekeeping only (UsageRecord + LogEvent + HostEvent prune). Daily cron ~03:00.
 config :airo, Oban,
   repo: Airo.Repo,
   queues: [maintenance: 1],
@@ -19,7 +19,8 @@ config :airo, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"0 3 * * *", Airo.Usage.PruneWorker},
-       {"15 3 * * *", Airo.Logs.PruneWorker}
+       {"15 3 * * *", Airo.Logs.PruneWorker},
+       {"30 3 * * *", Airo.Agents.PruneWorker}
      ]}
   ]
 

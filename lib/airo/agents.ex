@@ -35,9 +35,13 @@ defmodule Airo.Agents do
       }
 
   Upserts the Agent (by `host_id`) and each slot as a managed Provider. Returns
-  `{:ok, %{agent: agent, providers: [...]}}` (providers that upserted cleanly).
+  `{:ok, %{agent: agent, providers: [...], changes: [...]}}` — providers that
+  upserted cleanly, and `{field, from, to}` for each identity field (`version`,
+  `control_url`) this register changed, so the caller can record the transition.
   """
   def register(host_id, payload) when is_binary(host_id) and is_map(payload) do
+    previous = Config.get_agent_by_host_id(host_id)
+
     with {:ok, agent} <- Config.upsert_agent(host_id, agent_attrs(payload)) do
       providers =
         payload
@@ -52,8 +56,25 @@ defmodule Airo.Agents do
             []
         end)
 
-      {:ok, %{agent: agent, providers: providers}}
+      {:ok, %{agent: agent, providers: providers, changes: changes(previous, agent)}}
     end
+  end
+
+  # Identity fields whose change is a lifecycle event (S25). A heartbeat that
+  # re-registers the same identity changes nothing and is not an event.
+  @identity_fields [:version, :control_url]
+
+  # Register is also the heartbeat, so the caller needs to know whether this one
+  # carried a *different* identity than the row held. A first registration has
+  # nothing to compare against — the `connected` event already covers it.
+  defp changes(nil, _agent), do: []
+
+  defp changes(%Agent{} = previous, %Agent{} = agent) do
+    for field <- @identity_fields,
+        from = Map.fetch!(previous, field),
+        to = Map.fetch!(agent, field),
+        from != to and not is_nil(to),
+        do: {field, from, to}
   end
 
   defp agent_attrs(payload) do

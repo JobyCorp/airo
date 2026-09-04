@@ -189,6 +189,20 @@ defmodule AiroWeb.ApiSpec do
             resp("HealthTransitions", "Health transitions, oldest first.")
           )
       },
+      "/v1/serving/hosts" => %PathItem{
+        get:
+          management_op(
+            "getServingHosts",
+            "Host lifecycle events",
+            "Agent host *lifecycle* changes: `connected`, `disconnected`, " <>
+              "`stale` (connected but no heartbeat within the stale window), " <>
+              "`recovered`, `version_changed`, `control_url_changed`. " <>
+              "Heartbeats are not events, so a quiet fleet is an empty page. " <>
+              "Same cursor contract as `/v1/serving/health`.",
+            [since_param(), limit_param()],
+            resp("HostEvents", "Host lifecycle events, oldest first.")
+          )
+      },
       "/v1/usage" => %PathItem{
         get:
           management_op(
@@ -652,6 +666,29 @@ defmodule AiroWeb.ApiSpec do
           generated_at: %Schema{type: :string, format: :"date-time"},
           events: %Schema{
             type: :array,
+            items: %Schema{type: :object, additionalProperties: true}
+          },
+          next_since: %Schema{
+            type: :integer,
+            nullable: true,
+            description: "Cursor for the next poll."
+          },
+          has_more: %Schema{
+            type: :boolean,
+            description: "More events beyond `limit`; poll again immediately."
+          }
+        }
+      },
+      "HostEvents" => %Schema{
+        type: :object,
+        properties: %{
+          generated_at: %Schema{type: :string, format: :"date-time"},
+          events: %Schema{
+            type: :array,
+            description:
+              "Each event: `id`, `at`, `host_id`, `agent_id`, `kind`, `reason`, " <>
+                "and a kind-specific `meta` (e.g. `silent_ms` on `stale`, " <>
+                "`from`/`to` on a change).",
             items: %Schema{type: :object, additionalProperties: true}
           },
           next_since: %Schema{

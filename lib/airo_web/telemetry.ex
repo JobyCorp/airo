@@ -52,6 +52,19 @@ defmodule AiroWeb.Telemetry do
         unit: {:native, :millisecond}
       ),
 
+      # Agent lifecycle (S25) — `Airo.Agents.Lifecycle`, `Ingest`, `Control`.
+      counter("airo.agent.join.count", tags: [:host_id]),
+      counter("airo.agent.leave.count", tags: [:host_id]),
+      counter("airo.agent.stale.count", tags: [:host_id]),
+      counter("airo.agent.recovered.count", tags: [:host_id]),
+      counter("airo.agent.register.count", tags: [:host_id]),
+      counter("airo.agent.slot.count", tags: [:host_id, :status]),
+      summary("airo.agent.control.stop.duration",
+        tags: [:op],
+        unit: {:native, :millisecond},
+        description: "Round trip of a call to an agent's control API"
+      ),
+
       # Database Metrics
       summary("airo.repo.query.total_time",
         unit: {:native, :millisecond},

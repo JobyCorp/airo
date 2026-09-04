@@ -5,9 +5,10 @@ defmodule AiroWeb.Admin.AgentLive do
   engine slots (Providers), pushes GPU telemetry + resident-slot state over its
   channel, and exposes a control API at `control_url`.
 
-  State flows by push (no polling): online/offline via `Presence`, resident model
-  per slot via `Airo.Agents.SlotState` — both delivered as subscriptions on the
-  `agent:<host_id>` topic. Control flows by request: load / unload / swap and
+  State flows by push (no polling): connect / drop / stale / recovered as
+  `{:agent_event, _}` on the fleet topic (`Airo.Agents.Lifecycle`, S25), resident
+  model per slot via `Airo.Agents.SlotState` on `agent_slots:<host_id>`. Control
+  flows by request: load / unload / swap and
   inventory browse go to the agent's `control_url` via `Airo.Agents.Control`, and
   only confirm acceptance — the slot transition arrives back as a push.
   """
@@ -18,7 +19,7 @@ defmodule AiroWeb.Admin.AgentLive do
   require Logger
 
   alias Airo.Agents
-  alias Airo.Agents.{Capacity, Control, Ingest, SlotState}
+  alias Airo.Agents.{Capacity, Control, Ingest, Lifecycle, Liveness, SlotState}
   alias Airo.Config
   alias Airo.Engines
   alias Airo.Repo
@@ -26,9 +27,12 @@ defmodule AiroWeb.Admin.AgentLive do
   alias AiroWeb.Presence
 
   # GPU telemetry and slot health are DB state written by the agent's channel
-  # pushes (`Agents.Ingest`); a light timer re-reads them without a manual reload.
-  # Online/offline is NOT on this timer — it's a Presence subscription (below).
-  @refresh_ms 10_000
+  # pushes (`Agents.Ingest`), and every lifecycle change arrives on the fleet
+  # topic, so the timer is only a safety net against drift — not the mechanism.
+  @refresh_ms 60_000
+
+  # Host events shown on the detail page — enough to see a day of flapping.
+  @timeline_limit 50
 
   # Launch-profile keys the config modal owns as first-class fields; everything
   # else a profile carries rides in the advanced-JSON editor verbatim.
@@ -36,14 +40,17 @@ defmodule AiroWeb.Admin.AgentLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Process.send_after(self(), :refresh, @refresh_ms)
+    if connected?(socket) do
+      Process.send_after(self(), :refresh, @refresh_ms)
+      Lifecycle.subscribe()
+    end
 
     {:ok,
      socket
      |> assign(page_title: "Agents", detail: nil, subscribed: MapSet.new())
      |> assign(config: nil, inventory: [], inventory_error: nil)
      |> assign_agents()
-     |> subscribe_presence()}
+     |> subscribe_slots()}
   end
 
   @impl true
@@ -56,36 +63,53 @@ defmodule AiroWeb.Admin.AgentLive do
     Process.send_after(self(), :refresh, @refresh_ms)
 
     # A periodic fallback that also picks up newly-registered agents (and
-    # subscribes to them). Slot/presence changes are push-driven; this is belt
-    # and suspenders for GPU telemetry and roster drift.
-    {:noreply, socket |> refresh() |> subscribe_presence()}
+    # subscribes to their slot topics). Everything else is push-driven; this is
+    # belt and suspenders for drift.
+    {:noreply, socket |> refresh() |> subscribe_slots()}
   end
 
-  # A host's Presence changed (connect/disconnect) — react immediately rather
-  # than waiting for the next tick. Presence is a subscription, not a poll.
+  # A host connected or dropped. The event is the truth for its online flag:
+  # Presence untracks only after the channel process exits, which is after this
+  # broadcast, so reading Presence here would race the disconnect. A first
+  # connect may also have created the row, so the roster is re-read.
   @impl true
-  def handle_info(
-        %Phoenix.Socket.Broadcast{event: "presence_diff", topic: "agent:" <> host_id},
-        socket
-      ) do
-    online = online?(host_id)
+  def handle_info({:agent_event, %{host_id: host_id, kind: kind}}, socket)
+      when kind in [:connected, :disconnected] do
+    online = kind == :connected
 
     socket =
       socket
+      |> refresh()
+      |> subscribe_slots()
       |> update(:online, &Map.put(&1, host_id, online))
       |> update_detail_online(host_id, online)
+      |> refresh_detail_events(host_id)
 
     {:noreply, socket}
   end
+
+  # Silence and its end: flip the stale flag, and the detail timeline if open.
+  def handle_info({:agent_event, %{host_id: host_id, kind: kind}}, socket)
+      when kind in [:stale, :recovered] do
+    stale = kind == :stale
+
+    socket =
+      socket
+      |> update(:stale, &Map.put(&1, host_id, stale))
+      |> update_detail_stale(host_id, stale)
+      |> refresh_detail_events(host_id)
+
+    {:noreply, socket}
+  end
+
+  # Identity changes only add a row to the host's timeline.
+  def handle_info({:agent_event, %{host_id: host_id}}, socket),
+    do: {:noreply, refresh_detail_events(socket, host_id)}
 
   # A slot's resident state changed (load/unload/swap reported by the agent, or a
   # host disconnect). Re-read from SlotState — push-driven, no poll.
   @impl true
   def handle_info({:agent_slots, _host_id}, socket), do: {:noreply, refresh(socket)}
-
-  # The agent topic also carries channel control messages (e.g. our own "resync"
-  # fanned out to the agent). We only act on presence diffs; ignore the rest.
-  def handle_info(%Phoenix.Socket.Broadcast{}, socket), do: {:noreply, socket}
 
   # Open the config modal for a model — Configure if it's resident in a slot,
   # otherwise Load into a target slot. Prefills the context window.
@@ -234,7 +258,7 @@ defmodule AiroWeb.Admin.AgentLive do
     socket
     |> put_flash(:info, "Forgot agent #{agent.host_id}.")
     |> assign_agents()
-    |> subscribe_presence()
+    |> subscribe_slots()
   end
 
   defp deleted(socket, agent, {:error, {:has_providers, count}}) do
@@ -532,21 +556,20 @@ defmodule AiroWeb.Admin.AgentLive do
 
   defp assign_agents(socket) do
     agents = list()
-    assign(socket, agents: agents, online: online_map(agents))
+    assign(socket, agents: agents, online: online_map(agents), stale: stale_map(agents))
   end
 
-  # Subscribe to each agent we aren't already watching: its Presence topic
-  # (`agent:<host_id>`, for connect/disconnect diffs) and its slot-state topic
-  # (`Ingest.slots_topic/1`, for load/unload/swap). Idempotent — `subscribed`
-  # tracks which hosts we hold, so re-listing never double-subscribes.
-  defp subscribe_presence(%{assigns: %{agents: agents, subscribed: subscribed}} = socket) do
+  # Subscribe to each agent's slot-state topic (`Ingest.slots_topic/1`, for
+  # load/unload/swap) if we aren't already. Lifecycle is fleet-wide (one
+  # subscription in `mount/3`), so only the per-host slot topics need tracking.
+  # Idempotent — `subscribed` records which hosts we hold.
+  defp subscribe_slots(%{assigns: %{agents: agents, subscribed: subscribed}} = socket) do
     if connected?(socket) do
       subscribed =
         Enum.reduce(agents, subscribed, fn agent, acc ->
           if MapSet.member?(acc, agent.host_id) do
             acc
           else
-            Phoenix.PubSub.subscribe(Airo.PubSub, "agent:#{agent.host_id}")
             Phoenix.PubSub.subscribe(Airo.PubSub, Ingest.slots_topic(agent.host_id))
             MapSet.put(acc, agent.host_id)
           end
@@ -567,6 +590,24 @@ defmodule AiroWeb.Admin.AgentLive do
 
   defp update_detail_online(socket, _host_id, _online), do: socket
 
+  defp update_detail_stale(
+         %{assigns: %{detail: %{agent: %{host_id: host_id}} = detail}} = socket,
+         host_id,
+         stale
+       ),
+       do: assign(socket, detail: %{detail | stale: stale})
+
+  defp update_detail_stale(socket, _host_id, _stale), do: socket
+
+  # Any lifecycle row for the open host lands on its timeline.
+  defp refresh_detail_events(
+         %{assigns: %{detail: %{agent: %{host_id: host_id}} = detail}} = socket,
+         host_id
+       ),
+       do: assign(socket, detail: %{detail | events: Lifecycle.recent(host_id, @timeline_limit)})
+
+  defp refresh_detail_events(socket, _host_id), do: socket
+
   defp list do
     Config.list_agents() |> Repo.preload(providers: :deployments)
   end
@@ -577,7 +618,9 @@ defmodule AiroWeb.Admin.AgentLive do
     %{
       agent: agent,
       online: online?(agent.host_id),
-      slots: Enum.map(agent.providers, &slot_view/1)
+      stale: Liveness.stale?(agent.host_id),
+      slots: Enum.map(agent.providers, &slot_view/1),
+      events: Lifecycle.recent(agent.host_id, @timeline_limit)
     }
   end
 
@@ -632,6 +675,7 @@ defmodule AiroWeb.Admin.AgentLive do
   defp describe(other), do: inspect(other)
 
   defp online_map(agents), do: Map.new(agents, &{&1.host_id, online?(&1.host_id)})
+  defp stale_map(agents), do: Map.new(agents, &{&1.host_id, Liveness.stale?(&1.host_id)})
 
   # Presence is the poll-free liveness signal: a connected agent tracks itself on
   # its own `agent:<host_id>` topic (see `AiroWeb.AgentChannel`). Reads local
@@ -662,7 +706,7 @@ defmodule AiroWeb.Admin.AgentLive do
             inventory_error={@inventory_error}
           />
         <% else %>
-          <.agent_table agents={@agents} online={@online} />
+          <.agent_table agents={@agents} online={@online} stale={@stale} />
         <% end %>
       </div>
     </Layouts.app>
@@ -674,6 +718,7 @@ defmodule AiroWeb.Admin.AgentLive do
 
   attr :agents, :list, required: true
   attr :online, :map, required: true
+  attr :stale, :map, required: true
 
   defp agent_table(assigns) do
     ~H"""
@@ -696,7 +741,7 @@ defmodule AiroWeb.Admin.AgentLive do
     >
       <:col :let={agent} label="Host">{agent.host_id}</:col>
       <:col :let={agent} label="Status">
-        <.presence_tag online={@online[agent.host_id]} />
+        <.presence_tag online={@online[agent.host_id]} stale={@stale[agent.host_id]} />
       </:col>
       <:col :let={agent} label="GPU / VRAM">{gpu_summary(agent.gpu)}</:col>
       <:col :let={agent} label="Util">{gpu_util(agent.gpu)}</:col>
@@ -798,7 +843,7 @@ defmodule AiroWeb.Admin.AgentLive do
     <div class="space-y-6">
       <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <CompositeComponents.stat_tile label="Status">
-          <.presence_tag online={@detail.online} />
+          <.presence_tag online={@detail.online} stale={@detail.stale} />
         </CompositeComponents.stat_tile>
         <CompositeComponents.stat_tile label="Slots">
           {length(@detail.slots)}
@@ -995,17 +1040,66 @@ defmodule AiroWeb.Admin.AgentLive do
           </div>
         </dl>
       </.card>
+      <.host_events events={@detail.events} />
     </div>
     """
   end
 
   attr :online, :boolean, required: true
+  attr :stale, :boolean, default: false
+
+  # Three states (S25): connected but silent past the stale window is "stale" —
+  # the socket is open, the heartbeats have stopped.
+  defp presence_tag(%{online: true, stale: true} = assigns),
+    do: ~H|<CompositeComponents.tag tone="warning">stale</CompositeComponents.tag>|
 
   defp presence_tag(%{online: true} = assigns),
     do: ~H|<CompositeComponents.tag tone="success">online</CompositeComponents.tag>|
 
   defp presence_tag(assigns),
     do: ~H|<CompositeComponents.tag tone="neutral">offline</CompositeComponents.tag>|
+
+  attr :events, :list, required: true
+
+  # The host's lifecycle timeline (S25): connects, drops, silences, identity
+  # changes — newest first. Heartbeats are not rows, so a quiet host is a short
+  # list, and a flapping one is obvious.
+  defp host_events(assigns) do
+    ~H"""
+    <.card variant="bordered">
+      <:title>Host events</:title>
+      <p :if={@events == []} class="mt-1 text-sm text-base-content/55">
+        No lifecycle events recorded for this host yet.
+      </p>
+      <.data_table :if={@events != []} id="agent-host-events" rows={@events}>
+        <:col :let={event} label="When">{format_at(event.inserted_at)}</:col>
+        <:col :let={event} label="Event">
+          <CompositeComponents.tag tone={host_event_tone(event.kind)}>
+            {event.kind}
+          </CompositeComponents.tag>
+        </:col>
+        <:col :let={event} label="Reason">{present(event.reason)}</:col>
+        <:col :let={event} label="Detail">
+          <span class="font-mono text-xs text-base-content/60">{host_event_detail(event)}</span>
+        </:col>
+      </.data_table>
+    </.card>
+    """
+  end
+
+  defp host_event_tone(kind) when kind in [:connected, :recovered], do: "success"
+  defp host_event_tone(kind) when kind in [:disconnected, :stale], do: "warning"
+  defp host_event_tone(_kind), do: "neutral"
+
+  defp host_event_detail(%{kind: kind, meta: %{"from" => from, "to" => to}})
+       when kind in [:version_changed, :control_url_changed],
+       do: "#{from} → #{to}"
+
+  defp host_event_detail(%{meta: %{"version" => version, "control_url" => url}}),
+    do: "agent #{version} · #{url}"
+
+  defp host_event_detail(%{meta: %{"silent_ms" => ms}}), do: "silent #{div(ms, 1000)}s"
+  defp host_event_detail(_event), do: "—"
 
   attr :status, :atom, required: true
 

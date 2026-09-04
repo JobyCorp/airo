@@ -47,6 +47,7 @@ defmodule AiroWeb.Router do
 
     get "/serving", ServingController, :index
     get "/serving/health", ServingController, :health
+    get "/serving/hosts", ServingController, :hosts
     get "/usage", UsageController, :index
   end
 

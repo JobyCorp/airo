@@ -94,7 +94,7 @@ defmodule Airo.Agents.Control do
        when not is_binary(url) or url == "",
        do: {:error, :no_control_url}
 
-  defp request(%Agent{control_url: url}, method, path, json, opts) do
+  defp request(%Agent{control_url: url, host_id: host_id}, method, path, json, opts) do
     req_opts =
       [
         method: method,
@@ -109,14 +109,31 @@ defmodule Airo.Agents.Control do
       |> Keyword.merge(default_req_options())
       |> Keyword.merge(Keyword.get(opts, :req_options, []))
 
-    case Req.request(req_opts) do
-      {:ok, %Req.Response{status: status, body: body, headers: headers}} ->
-        {:ok, %{status: status, body: body, headers: headers}}
+    # A span per control call (S25): `[:airo, :agent, :control, :start | :stop |
+    # :exception]` with `host_id` and `op`. Measurement only — this is what
+    # makes the cost of `Ingest.inventory_index/1`'s per-heartbeat `GET
+    # /inventory` visible, which nothing did before.
+    :telemetry.span([:airo, :agent, :control], %{host_id: host_id, op: op(method, path)}, fn ->
+      case Req.request(req_opts) do
+        {:ok, %Req.Response{status: status, body: body, headers: headers}} ->
+          {{:ok, %{status: status, body: body, headers: headers}},
+           %{host_id: host_id, op: op(method, path), status: status}}
 
-      {:error, reason} ->
-        {:error, {:transport_error, reason}}
-    end
+        {:error, reason} ->
+          {{:error, {:transport_error, reason}},
+           %{host_id: host_id, op: op(method, path), status: :transport_error}}
+      end
+    end)
   end
+
+  # The control API's verbs, as telemetry tags.
+  defp op(:post, "/load"), do: :load
+  defp op(:post, "/unload"), do: :unload
+  defp op(:post, "/inventory/refresh"), do: :refresh_inventory
+  defp op(:get, "/inventory"), do: :inventory
+  defp op(:get, "/slots"), do: :slots
+  defp op(:get, "/gpu"), do: :gpu
+  defp op(method, path), do: :"#{method} #{path}"
 
   defp maybe_put_json(req_opts, nil), do: req_opts
   defp maybe_put_json(req_opts, json), do: Keyword.put(req_opts, :json, json)

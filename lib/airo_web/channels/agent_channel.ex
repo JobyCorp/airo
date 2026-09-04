@@ -17,7 +17,7 @@ defmodule AiroWeb.AgentChannel do
   """
   use Phoenix.Channel
 
-  alias Airo.Agents.Ingest
+  alias Airo.Agents.{Ingest, Lifecycle}
   alias AiroWeb.Presence
 
   @impl true
@@ -32,8 +32,14 @@ defmodule AiroWeb.AgentChannel do
 
   @impl true
   def handle_info(:after_join, socket) do
-    {:ok, _ref} =
-      Presence.track(socket, socket.assigns.host_id, %{online_at: System.system_time(:second)})
+    host_id = socket.assigns.host_id
+
+    {:ok, _ref} = Presence.track(socket, host_id, %{online_at: System.system_time(:second)})
+
+    # The register that carries this connection's identity follows the join by a
+    # beat, so the event is stamped with what the row *held* — the first register
+    # then records a `version_changed`/`control_url_changed` if it differs (S25).
+    Lifecycle.transition(host_id, :connected, meta: identity(host_id))
 
     {:noreply, socket}
   end
@@ -50,8 +56,22 @@ defmodule AiroWeb.AgentChannel do
   end
 
   @impl true
-  def terminate(_reason, socket) do
-    Ingest.host_down(socket.assigns.host_id)
+  def terminate(reason, socket) do
+    host_id = socket.assigns.host_id
+
+    Lifecycle.transition(host_id, :disconnected,
+      reason: "agent_disconnected",
+      meta: %{exit: inspect(reason)}
+    )
+
+    Ingest.host_down(host_id)
     :ok
+  end
+
+  defp identity(host_id) do
+    case Airo.Config.get_agent_by_host_id(host_id) do
+      %{version: version, control_url: url} -> %{version: version, control_url: url}
+      nil -> %{}
+    end
   end
 end
