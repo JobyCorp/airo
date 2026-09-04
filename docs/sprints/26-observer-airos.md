@@ -240,6 +240,20 @@ model id, no alias) returned the expected text via `x-gateway-provider:
 pvegpu:8081`, deployment 21, no fallback, 2203 ms. An observer routes
 inference straight to the slot's `base_url`; the agent was never on the path.
 
+## Rollout — 2026-09-04
+
+| Host | Release | Prod pair (UTC) | Dev | Note |
+|---|---|---|---|---|
+| pvegpu | `ff8b4fa` (pilot) | 01:16 restart | observer, online | pilot; data path verified |
+| forge | `ad55707` | 08:53:01 → 08:53:04 | observer, online | busiest host; 3 s gap |
+| macmini | `ad55707` | 08:55:46 → 08:55:49 | observer, online | manual release, env carries both URLs |
+| jobycorp | `ad55707` | 08:57:37 → 08:57:38 | observer, online | 1 s gap |
+| sparky / sparky2 | — | — | — | in progress, done standalone by jody |
+
+Every prod pair carries `role: controller`; every dev row carries `observer`.
+Journals on forge and jobycorp show the two connects within 40 ms of each
+other, observer first.
+
 ## Acceptance
 
 - `pvegpu` deployed with both URLs. Its journal shows two `agent channel:
