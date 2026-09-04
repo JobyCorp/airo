@@ -239,7 +239,19 @@ idle socket 60 s after the last frame, so with a 45 s threshold stale is
 observable for at most ~15 s and a 15 s sweep can miss it — the sweep is now
 **5 s**; (2) the stale flag survived a disconnect, so the rejoin's register
 wrote a `recovered` after `connected` — `Ingest.host_down/1` now clears the
-flag. Rerun after the redeploy is recorded below when done.
+flag.
+
+**`kill -STOP` check, second run (after redeploy `9524cef`, 03:59:01 UTC,
+threshold 45 s, sweep 5 s):** prod recorded `stale` at 03:59:46 after 48.0 s
+of silence (inside the 45–50 s window), marked `pvegpu:8081`'s deployment
+`unknown` (`agent_stale`), and on `SIGCONT` at 03:59:47 recorded `recovered`
+at 03:59:48 with the deployment back to `up` — no disconnect at all. The three
+host lines were mirrored once each into `log_events` (info, warning, info).
+Bonus observation: Airo's own restart for the deploy wrote a `disconnected`
+with exit `{:shutdown, :draining}` for every host, then `connected` on
+rejoin — a prod restart is now legible from the host timeline too.
+
+**Acceptance: met.**
 
 ## Acceptance
 
