@@ -58,10 +58,11 @@ if [ "${REBUILD_IMAGE:-0}" = "1" ] || [ "${IMAGE_ARCH}" != "${PLATFORM}" ]; then
 fi
 
 # Stage source = exactly HEAD (git archive), then bring the host's already-fetched
-# deps/ in: joby_kit is a private GitHub dep and the container has no GitHub
-# credentials, so the host checkout (at the locked ref) is reused instead of
-# fetched. Host-compiled native artifacts are scrubbed so the container rebuilds
-# them against glibc 2.39 (esp. the ortex/onnxruntime and tokenizers NIFs).
+# deps/ in so the container's `mix deps.get` is a no-op against the lockfile
+# (every dep here is on hex.pm — this is a network/time saver, not a credential
+# workaround). Host-compiled native artifacts are scrubbed so the container
+# rebuilds them against glibc 2.39 (esp. the ortex/onnxruntime and tokenizers
+# NIFs).
 STAGE="$(mktemp -d)"
 OUT_DIR="$(mktemp -d)"
 trap 'rm -rf "${STAGE}" "${OUT_DIR}"' EXIT
