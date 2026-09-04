@@ -171,11 +171,11 @@ defmodule Airo.Serving do
       enabled: agent.enabled,
       last_seen_at: agent.last_seen_at,
       # Liveness beyond `last_seen_at` (S25): `online` is the open channel,
-      # `stale` is online-but-silent past the configured window. `role` is the
-      # S26 concept; every host is a controller until an agent says otherwise.
+      # `stale` is online-but-silent past the configured window. `role` (S26)
+      # is what this airo is to the host: controller or observer.
       online: Liveness.online?(agent.host_id),
       stale: Liveness.stale?(agent.host_id),
-      role: "controller",
+      role: to_string(agent.role || :controller),
       gpu: gpu(agent.gpu),
       inventory: inventory && Enum.map(inventory, &inventory_entry/1),
       slots: Enum.map(slots, &slot(&1, agent, activity, index, sole_resident?))

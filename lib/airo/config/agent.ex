@@ -8,6 +8,12 @@ defmodule Airo.Config.Agent do
   link back via `Provider.agent_id`. GPU telemetry and `last_seen_at` are
   refreshed from the agent's channel pushes — Airo uses them as load/evict
   policy input.
+
+  `role` (S26) is what *this* airo is to the host, as the agent reported it:
+  `:controller` may load and unload; `:observer` ingests everything the push
+  carries and may route to the slots, but commands nothing. One agent has
+  exactly one controller and any number of observers; the agent's own config
+  is where that is decided (`AIRO_SOCKET_URL` vs `AIRO_OBSERVER_SOCKET_URLS`).
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -23,6 +29,7 @@ defmodule Airo.Config.Agent do
     field :enabled, :boolean, default: true
     field :last_seen_at, :utc_datetime
     field :gpu, :map, default: %{}
+    field :role, Ecto.Enum, values: [:controller, :observer], default: :controller
 
     has_many :providers, Provider
 
@@ -31,7 +38,7 @@ defmodule Airo.Config.Agent do
 
   def changeset(agent, attrs) do
     agent
-    |> cast(attrs, [:host_id, :control_url, :version, :enabled, :last_seen_at, :gpu])
+    |> cast(attrs, [:host_id, :control_url, :version, :enabled, :last_seen_at, :gpu, :role])
     |> validate_required([:host_id, :control_url])
     |> validate_control_url()
     |> unique_constraint(:host_id)

@@ -26,6 +26,15 @@ defmodule Airo.Agents.Liveness do
   (`Airo.Runtime.Store`) — it must reset with the node, not persist. The
   GenServer only schedules; `sweep/0` is a plain function so tests drive it
   directly.
+
+  **Why the sweep is 5 s, not 15.** Phoenix closes a socket that has sent no
+  frame for 60 s. A frozen agent therefore stops being *stale* and becomes
+  *disconnected* at most 60 s after its last heartbeat, and its last heartbeat
+  was up to 10 s before it froze. With the default 45 s threshold the window in
+  which stale can be observed at all is 45–50 s of silence — a 15 s sweep
+  missed it outright on prod (2026-09-04 03:47 UTC); 5 s lands inside it every
+  time. An agent whose channel process is stuck but whose transport still
+  heartbeats never hits the 60 s close, and stale is the only signal for it.
   """
   use GenServer
 
@@ -35,7 +44,7 @@ defmodule Airo.Agents.Liveness do
   alias Airo.{Config, Health, Repo, Runtime.Store}
   alias AiroWeb.Presence
 
-  @default_interval_ms 15_000
+  @default_interval_ms 5_000
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -59,6 +68,17 @@ defmodule Airo.Agents.Liveness do
   @doc "Whether `host_id` is currently flagged stale."
   @spec stale?(String.t()) :: boolean()
   def stale?(host_id), do: :ets.member(Store.hosts_table(), {:stale, host_id})
+
+  @doc """
+  Forget a host's stale flag without recording anything. The disconnect path
+  calls this: a host that drops while stale has left, not recovered, and the
+  register on its rejoin must not write a `recovered` that never happened.
+  """
+  @spec clear(String.t()) :: :ok
+  def clear(host_id) do
+    :ets.delete(Store.hosts_table(), {:stale, host_id})
+    :ok
+  end
 
   @doc "Every host currently flagged stale."
   @spec stale_hosts() :: [String.t()]

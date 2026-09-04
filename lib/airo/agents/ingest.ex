@@ -76,6 +76,10 @@ defmodule Airo.Agents.Ingest do
 
   @doc "The agent's socket dropped — mark its deployments down and forget slot state."
   def host_down(host_id) do
+    # Disconnect supersedes stale (S25): the rejoin's register must not read a
+    # surviving flag as a recovery.
+    Liveness.clear(host_id)
+
     case Config.get_agent_by_host_id(host_id) do
       %{} = agent ->
         providers = agent |> Repo.preload(providers: :deployments) |> Map.fetch!(:providers)

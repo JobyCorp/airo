@@ -47,7 +47,10 @@ nothing distinguishes *an airo that may look* from *the airo that may command*.
 - **Stale is a state, derived from two signals.** *Connected* = Presence has
   the host (`Liveness.online?/1` is the one reader core code uses). *Stale* =
   connected **and** `last_seen_at` older than `agent_stale_after_ms`. A
-  `Liveness` sweeper evaluates every host on a 15 s tick;
+  `Liveness` sweeper evaluates every host on a **5 s** tick (15 s missed the
+  window on prod on 2026-09-04: Phoenix closes an idle socket 60 s after its
+  last frame, so a frozen agent is observably stale only for ~45–50 s of
+  silence before it becomes a disconnect);
   entering stale writes `stale`, the next register writes `recovered`. Stale
   also marks the host's deployments `:unknown` through the existing
   `Health.mark_deployment/4` path (`source: :agent, reason: "agent_stale"`),

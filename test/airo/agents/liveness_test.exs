@@ -132,6 +132,25 @@ defmodule Airo.Agents.LivenessTest do
     assert kinds("dropped") == [:stale]
   end
 
+  test "a disconnect while stale clears the flag, so the rejoin is not a recovery" do
+    host("flapper", 60)
+    AgentControl.mark_online("flapper")
+    Liveness.sweep()
+    assert Liveness.stale?("flapper")
+
+    # The channel's terminate path.
+    Ingest.host_down("flapper")
+    refute Liveness.stale?("flapper")
+
+    Ingest.register("flapper", %{
+      "agent" => %{"control_url" => "http://flapper:4400"},
+      "slots" => []
+    })
+
+    assert kinds("flapper") == [:stale]
+    refute_receive {:agent_event, %{host_id: "flapper", kind: :recovered}}
+  end
+
   test "the threshold is a validated site setting" do
     assert {:error, changeset} = Config.update_site_setting(%{agent_stale_after_ms: 5_000})
     assert %{agent_stale_after_ms: [_]} = errors_on(changeset)

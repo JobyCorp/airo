@@ -586,7 +586,14 @@ defmodule AiroWeb.Admin.AgentLive do
          host_id,
          online
        ),
-       do: assign(socket, detail: %{detail | online: online})
+       do:
+         assign(socket,
+           detail: %{
+             detail
+             | online: online,
+               controls?: online and detail.agent.role != :observer
+           }
+         )
 
   defp update_detail_online(socket, _host_id, _online), do: socket
 
@@ -615,10 +622,15 @@ defmodule AiroWeb.Admin.AgentLive do
   defp detail(id) do
     agent = Config.get_agent!(id) |> Repo.preload(providers: :deployments)
 
+    online = online?(agent.host_id)
+
     %{
       agent: agent,
-      online: online?(agent.host_id),
+      online: online,
       stale: Liveness.stale?(agent.host_id),
+      # Load/Configure/Unload need both: a host we can reach *and* the right to
+      # command it (S26). Resync and Refresh only need the former.
+      controls?: online and agent.role != :observer,
       slots: Enum.map(agent.providers, &slot_view/1),
       events: Lifecycle.recent(agent.host_id, @timeline_limit)
     }
@@ -664,7 +676,19 @@ defmodule AiroWeb.Admin.AgentLive do
     assign_agents(socket)
   end
 
+  # Why the slot controls are disabled: unreachable, or not ours to command (S26).
+  defp controls_note(%{online: false}), do: "Controls are disabled while the host is offline."
+
+  defp controls_note(_observer),
+    do:
+      "This airo observes this host. Its controller loads and unloads models; here you " <>
+        "can watch, resync, and route to what is resident."
+
   defp describe(:no_control_url), do: "no control URL configured for this agent"
+
+  defp describe(:observer_role),
+    do: "this airo only observes the host — its controller loads and unloads models"
+
   defp describe({:unknown_model, id}), do: "the host doesn't have #{id}"
 
   defp describe({:rejected, status, reason}),
@@ -742,6 +766,7 @@ defmodule AiroWeb.Admin.AgentLive do
       <:col :let={agent} label="Host">{agent.host_id}</:col>
       <:col :let={agent} label="Status">
         <.presence_tag online={@online[agent.host_id]} stale={@stale[agent.host_id]} />
+        <.role_tag role={agent.role} />
       </:col>
       <:col :let={agent} label="GPU / VRAM">{gpu_summary(agent.gpu)}</:col>
       <:col :let={agent} label="Util">{gpu_util(agent.gpu)}</:col>
@@ -844,6 +869,7 @@ defmodule AiroWeb.Admin.AgentLive do
       <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <CompositeComponents.stat_tile label="Status">
           <.presence_tag online={@detail.online} stale={@detail.stale} />
+          <.role_tag role={@detail.agent.role} />
         </CompositeComponents.stat_tile>
         <CompositeComponents.stat_tile label="Slots">
           {length(@detail.slots)}
@@ -891,8 +917,8 @@ defmodule AiroWeb.Admin.AgentLive do
 
       <.card variant="bordered">
         <:title>Managed slots</:title>
-        <p :if={!@detail.online} class="mb-3 text-xs text-base-content/55">
-          Controls are disabled while the host is offline.
+        <p :if={!@detail.controls?} class="mb-3 text-xs text-base-content/55">
+          {controls_note(@detail)}
         </p>
         <CompositeComponents.empty_state
           :if={@detail.slots == []}
@@ -928,7 +954,7 @@ defmodule AiroWeb.Admin.AgentLive do
               size="sm"
               phx-click="open_config"
               phx-value-model={slot.resident_model}
-              disabled={!@detail.online or slot.status == :loading}
+              disabled={!@detail.controls? or slot.status == :loading}
             >
               Configure
             </.button>
@@ -939,7 +965,7 @@ defmodule AiroWeb.Admin.AgentLive do
               class="btn-soft"
               phx-click="unload"
               phx-value-port={slot.port}
-              disabled={!@detail.online}
+              disabled={!@detail.controls?}
               data-confirm={"Unload #{slot.resident_model} from #{slot.provider.name}? In-flight requests to it will be interrupted."}
             >
               Unload
@@ -1013,7 +1039,7 @@ defmodule AiroWeb.Admin.AgentLive do
               variant={if model.resident?, do: "soft", else: "primary"}
               phx-click="open_config"
               phx-value-model={model["id"]}
-              disabled={!@detail.online}
+              disabled={!@detail.controls?}
             >
               {if model.resident?, do: "Configure", else: "Load"}
             </.button>
@@ -1044,6 +1070,15 @@ defmodule AiroWeb.Admin.AgentLive do
     </div>
     """
   end
+
+  attr :role, :atom, required: true
+
+  # Only the exception is labelled: every host was a controller before S26, and
+  # a chip on all of them would say nothing.
+  defp role_tag(%{role: :observer} = assigns),
+    do: ~H|<CompositeComponents.tag tone="primary">observer</CompositeComponents.tag>|
+
+  defp role_tag(assigns), do: ~H||
 
   attr :online, :boolean, required: true
   attr :stale, :boolean, default: false

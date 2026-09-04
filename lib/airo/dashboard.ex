@@ -51,6 +51,7 @@ defmodule Airo.Dashboard do
     %{
       id: agent.id,
       host_id: agent.host_id,
+      role: agent.role || :controller,
       slots: length(agent.providers),
       telemetry?: gpu_val(gpu, :available) == true,
       rings: [

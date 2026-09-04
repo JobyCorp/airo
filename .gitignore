@@ -54,3 +54,6 @@ npm-debug.log
 
 # macOS Finder metadata.
 .DS_Store
+
+# Per-workstation dev overrides (LAN bind for the observer setup, etc.).
+/config/dev.local.exs

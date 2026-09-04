@@ -41,7 +41,8 @@ defmodule Airo.Agents.Lifecycle do
     stale: :stale,
     recovered: :recovered,
     version_changed: :changed,
-    control_url_changed: :changed
+    control_url_changed: :changed,
+    role_changed: :changed
   }
 
   @doc "The fleet-wide PubSub topic. Message: `{:agent_event, %{host_id: id, kind: kind}}`."
@@ -73,7 +74,8 @@ defmodule Airo.Agents.Lifecycle do
                :stale,
                :recovered,
                :version_changed,
-               :control_url_changed
+               :control_url_changed,
+               :role_changed
              ] do
     agent = Keyword.get_lazy(opts, :agent, fn -> Config.get_agent_by_host_id(host_id) end)
     meta = stringify(opts[:meta] || %{})

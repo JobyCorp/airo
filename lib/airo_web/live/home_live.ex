@@ -361,6 +361,9 @@ defmodule AiroWeb.HomeLive do
           <span class="font-mono text-xs text-base-content/55">
             {@agent.slots} {if @agent.slots == 1, do: "slot", else: "slots"}
           </span>
+          <CompositeComponents.tag :if={@agent.role == :observer} tone="primary">
+            observer
+          </CompositeComponents.tag>
         </div>
       </div>
 

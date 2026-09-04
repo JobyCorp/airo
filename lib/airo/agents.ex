@@ -62,7 +62,7 @@ defmodule Airo.Agents do
 
   # Identity fields whose change is a lifecycle event (S25). A heartbeat that
   # re-registers the same identity changes nothing and is not an event.
-  @identity_fields [:version, :control_url]
+  @identity_fields [:version, :control_url, :role]
 
   # Register is also the heartbeat, so the caller needs to know whether this one
   # carried a *different* identity than the row held. A first registration has
@@ -85,6 +85,9 @@ defmodule Airo.Agents do
       control_url: info["control_url"],
       version: info["version"],
       gpu: info["gpu"],
+      # S26. A pre-S26 agent sends no role and keeps whatever the row holds
+      # (the column default is controller), so nothing changes for it.
+      role: info["role"],
       last_seen_at: DateTime.utc_now() |> DateTime.truncate(:second)
     }
     |> Map.reject(fn {_k, v} -> is_nil(v) end)

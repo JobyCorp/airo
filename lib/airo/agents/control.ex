@@ -12,6 +12,14 @@ defmodule Airo.Agents.Control do
   Auth reuses the shared bearer (`:airo, :agent_token`) — the same token the
   agent uses to join the channel. Calls are short-timeout: they are quick acks,
   not the (slow) model load itself, which the agent runs after replying.
+
+  **Observer guard (S26).** When this airo is an *observer* of the host
+  (`agent.role == :observer`), `load/4` and `unload/3` return
+  `{:error, :observer_role}` without making a request. Reads, the resync
+  broadcast and `refresh_inventory/2` (an idempotent rescan) are allowed. The
+  guard lives here, not in the LiveView, so `iex` and any future caller get
+  the same answer. Enforcement is airo-side for now — the agent cannot yet tell
+  callers apart — which keeps a dev airo honest, not a hostile one.
   """
 
   alias Airo.Config.Agent
@@ -57,7 +65,13 @@ defmodule Airo.Agents.Control do
   slot transition arrives by push.
   """
   @spec load(Agent.t(), pos_integer(), String.t(), keyword()) :: :accepted | {:error, term()}
-  def load(%Agent{} = agent, port, model_id, opts \\ [])
+  def load(agent, port, model_id, opts \\ [])
+
+  def load(%Agent{role: :observer}, port, model_id, _opts)
+      when is_integer(port) and is_binary(model_id),
+      do: {:error, :observer_role}
+
+  def load(%Agent{} = agent, port, model_id, opts)
       when is_integer(port) and is_binary(model_id) do
     body = %{model: model_id, slot: port} |> put_profile(opts[:profile])
 
@@ -71,7 +85,12 @@ defmodule Airo.Agents.Control do
 
   @doc "Free the slot at `port` (unload its resident model). Returns `:accepted`."
   @spec unload(Agent.t(), pos_integer(), keyword()) :: :accepted | {:error, term()}
-  def unload(%Agent{} = agent, port, opts \\ []) when is_integer(port) do
+  def unload(agent, port, opts \\ [])
+
+  def unload(%Agent{role: :observer}, port, _opts) when is_integer(port),
+    do: {:error, :observer_role}
+
+  def unload(%Agent{} = agent, port, opts) when is_integer(port) do
     case request(agent, :post, "/unload", %{slot: port}, opts) do
       {:ok, %{status: s}} when s in 200..299 -> :accepted
       {:ok, %{status: s, body: body}} -> {:error, {:rejected, s, reason(body)}}

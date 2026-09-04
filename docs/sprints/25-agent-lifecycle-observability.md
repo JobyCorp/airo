@@ -222,6 +222,25 @@ newest first, kind + reason + meta summary, rendered through
   60 s tick stays as a net; the acceptance step below checks the page updates
   on a real disconnect without it.
 
+## Prod result — 2026-09-04
+
+Deployed to prod (`f108b05`) at 02:04:32 UTC by claude via `bin/deploy-docker.sh`
+from the Apple Silicon workstation; both migrations applied. All six agents
+reconnected at 02:04:41 UTC and wrote the first `host_events` rows. The agent
+restart on `pvegpu` at 02:47:08 UTC (systemd `Stopping` → `Started`) produced
+exactly the expected pair on prod, two seconds apart — `disconnected`
+(`agent_disconnected`, exit `{:shutdown, :peer_closed}`) then `connected` —
+each mirrored once into `log_events` (warning, then info).
+
+**`kill -STOP` check, first run (03:46:56 UTC, 51 s pause):** dev recorded
+`stale` at 47.9 s of silence; prod recorded only `disconnected`/`connected` at
+03:47:48–49. Two findings, both fixed before merge: (1) Phoenix closes an
+idle socket 60 s after the last frame, so with a 45 s threshold stale is
+observable for at most ~15 s and a 15 s sweep can miss it — the sweep is now
+**5 s**; (2) the stale flag survived a disconnect, so the rejoin's register
+wrote a `recovered` after `connected` — `Ingest.host_down/1` now clears the
+flag. Rerun after the redeploy is recorded below when done.
+
 ## Acceptance
 
 - Deployed to prod. Restart the agent on `pvegpu`: `/admin/agents/:id` shows a

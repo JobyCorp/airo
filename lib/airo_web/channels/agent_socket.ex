@@ -6,7 +6,13 @@ defmodule AiroWeb.AgentSocket do
   is the server. Each serving host opens one connection and joins `agent:<host_id>`.
   Auth is a shared bearer token (`:airo, :agent_token`); when none is configured
   the socket accepts any connection (loopback/dev — auth is a deferred sprint).
+
+  `role` (S26) is optional on connect — `controller` (default, and what every
+  pre-S26 agent is) or `observer`. Anything else is refused: a typo in a host's
+  env must not silently make it a controller.
   """
+
+  @roles %{"controller" => :controller, "observer" => :observer}
   use Phoenix.Socket
 
   channel "agent:*", AiroWeb.AgentChannel
@@ -14,8 +20,9 @@ defmodule AiroWeb.AgentSocket do
   @impl true
   def connect(params, socket, _connect_info) do
     with host_id when is_binary(host_id) and host_id != "" <- params["host_id"],
-         true <- valid_token?(params["token"]) do
-      {:ok, assign(socket, :host_id, host_id)}
+         true <- valid_token?(params["token"]),
+         {:ok, role} <- Map.fetch(@roles, params["role"] || "controller") do
+      {:ok, socket |> assign(:host_id, host_id) |> assign(:role, role)}
     else
       _ -> :error
     end

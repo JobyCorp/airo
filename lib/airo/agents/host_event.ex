@@ -9,8 +9,8 @@ defmodule Airo.Agents.HostEvent do
     * `:connected` / `:disconnected` — the agent's channel joined or left.
     * `:stale` / `:recovered` — connected but silent past the configured
       threshold, and the register that ended the silence.
-    * `:version_changed` / `:control_url_changed` — a register carried a
-      different agent identity than the row held.
+    * `:version_changed` / `:control_url_changed` / `:role_changed` — a
+      register carried a different agent identity than the row held.
 
   `meta` carries kind-specific detail (`version`, `control_url`, `from`/`to`
   for a change, `silent_ms` for stale). Heartbeats are **not** events: a
@@ -21,7 +21,15 @@ defmodule Airo.Agents.HostEvent do
 
   alias Airo.Config.Agent
 
-  @kinds [:connected, :disconnected, :stale, :recovered, :version_changed, :control_url_changed]
+  @kinds [
+    :connected,
+    :disconnected,
+    :stale,
+    :recovered,
+    :version_changed,
+    :control_url_changed,
+    :role_changed
+  ]
 
   @type t :: %__MODULE__{}
 

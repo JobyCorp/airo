@@ -47,6 +47,36 @@ defmodule AiroWeb.AgentLiveOnlineTest do
     {agent, provider}
   end
 
+  describe "observer role (S26)" do
+    test "shows the chip, disables Load/Configure/Unload, keeps Resync and Refresh", %{conn: conn} do
+      {agent, provider} = online_agent("observed-host")
+      {:ok, agent} = Config.update_agent(agent, %{role: :observer})
+      SlotState.put(provider.id, %{resident_model: "qwen3-30b", status: :up, ctx: 8192})
+      stub_inventory([model("qwen3-30b"), model("bge-m3")])
+
+      {:ok, view, html} = live(conn, ~p"/admin/agents/#{agent.id}")
+
+      assert html =~ "observer"
+      assert html =~ "This airo observes this host."
+      assert has_element?(view, "#agent-slots button[phx-click=unload][disabled]")
+      assert has_element?(view, "#agent-slots button[phx-click=open_config][disabled]")
+      assert has_element?(view, "#inventory button[phx-click=open_config][disabled]")
+      refute has_element?(view, "button[phx-click=resync][disabled]")
+      refute has_element?(view, "button[phx-click=refresh_inventory][disabled]")
+    end
+
+    test "a controller renders no chip and live controls", %{conn: conn} do
+      {agent, provider} = online_agent("controlling-host")
+      SlotState.put(provider.id, %{resident_model: "qwen3-30b", status: :up, ctx: 8192})
+      stub_inventory([model("qwen3-30b")])
+
+      {:ok, view, html} = live(conn, ~p"/admin/agents/#{agent.id}")
+
+      refute html =~ ">observer<"
+      refute has_element?(view, "#agent-slots button[phx-click=unload][disabled]")
+    end
+  end
+
   describe "loadable models" do
     test "lists the host's inventory with a Load action", %{conn: conn} do
       {agent, _} = online_agent("inv-host")

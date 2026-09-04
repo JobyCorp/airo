@@ -67,6 +67,35 @@ defmodule Airo.Agents.ControlTest do
     end
   end
 
+  describe "observer guard (S26)" do
+    test "load and unload are refused for an observer without touching the network" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        send(test_pid, {:req, conn.request_path})
+        Req.Test.json(conn, %{})
+      end)
+
+      observer = agent(role: :observer)
+
+      assert {:error, :observer_role} = Control.load(observer, 8081, "m", opts())
+      assert {:error, :observer_role} = Control.unload(observer, 8081, opts())
+      refute_received {:req, _}
+
+      # Reads and the idempotent rescan still go through.
+      assert {:ok, _} = Control.inventory(observer, opts())
+      assert {:ok, _} = Control.refresh_inventory(observer, opts())
+      assert_received {:req, "/inventory"}
+      assert_received {:req, "/inventory/refresh"}
+    end
+
+    test "a controller is unaffected" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.json(conn, %{"port" => 8081}) end)
+      assert :accepted = Control.load(agent(role: :controller), 8081, "m", opts())
+      assert :accepted = Control.unload(agent(), 8081, opts())
+    end
+  end
+
   describe "load/4" do
     test "posts {model, slot} to /load and returns :accepted" do
       test_pid = self()

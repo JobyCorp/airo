@@ -34,12 +34,16 @@ defmodule AiroWeb.AgentChannel do
   def handle_info(:after_join, socket) do
     host_id = socket.assigns.host_id
 
-    {:ok, _ref} = Presence.track(socket, host_id, %{online_at: System.system_time(:second)})
+    role = socket.assigns.role
+
+    {:ok, _ref} =
+      Presence.track(socket, host_id, %{online_at: System.system_time(:second), role: role})
 
     # The register that carries this connection's identity follows the join by a
     # beat, so the event is stamped with what the row *held* — the first register
     # then records a `version_changed`/`control_url_changed` if it differs (S25).
-    Lifecycle.transition(host_id, :connected, meta: identity(host_id))
+    # The role is the connection's own (S26), so it is exact.
+    Lifecycle.transition(host_id, :connected, meta: Map.put(identity(host_id), :role, role))
 
     {:noreply, socket}
   end
@@ -61,7 +65,7 @@ defmodule AiroWeb.AgentChannel do
 
     Lifecycle.transition(host_id, :disconnected,
       reason: "agent_disconnected",
-      meta: %{exit: inspect(reason)}
+      meta: %{exit: inspect(reason), role: socket.assigns.role}
     )
 
     Ingest.host_down(host_id)

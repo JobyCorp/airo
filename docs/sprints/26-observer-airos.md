@@ -1,8 +1,20 @@
 # Sprint 26 — Observer airos (one controller, N observers per agent)
 
-> **Status: planned.** Branches `sprint/26-observer-airos` in **both** `airo`
-> and `airo_agent`. Depends on S25 (its acceptance uses S25's host events to
-> prove prod was not disturbed).
+> **Status: complete (S26), merged to `main` in both repos 2026-09-04; pilot
+> proven on `pvegpu`, rollout to the remaining hosts pending.** airo: 603
+> tests (+8 over S25), precommit green, `joby_kit.lint` 16. airo_agent: 168
+> tests green on macOS (the `vllm-slot` wrapper was made bash 3.2 safe along
+> the way).
+
+> **Decisions taken while building:** `role` is a third identity field beside
+> `version` and `control_url`, so a role flip is a `role_changed` host event
+> through the same S25 path. A pre-S26 agent sends no role and the row keeps
+> whatever it holds. The socket refuses an unknown role outright rather than
+> defaulting it — a typo must not silently mint a controller. Channel clients
+> are named in a `Registry` by URI and `publish/1` fans out over
+> `Registry.select`, so tests can start several without the supervisor. The
+> observer-tooltip "controller is …" from the plan was dropped: the agent does
+> not report its controller's host, and a wrong guess is worse than none.
 
 Companion to
 [DESIGN-agent-lifecycle-and-roles.md](../design/DESIGN-agent-lifecycle-and-roles.md)
@@ -194,6 +206,39 @@ Companion to
   host in `register`. v1 reports the role only; the tooltip falls back to
   "unknown". Adding `controller_host` to the payload is a one-line follow-up
   if it turns out to matter.
+
+## Pilot result — pvegpu, 2026-09-04
+
+Release `airo_agent-20260903-181552-ff8b4fa` deployed by jody with
+`AIRO_OBSERVER_SOCKET_URLS=ws://jobybook.local.joby.gg:4004/agent` alongside the
+prod controller URL. Verified:
+
+- **Journal:** two connect lines one second apart — `llm.local.joby.gg:443 as
+  controller` at 01:16:03 UTC, `jobybook.local.joby.gg:4004 as observer` at
+  01:16:04 UTC. No `POST /load` or `/unload` since.
+- **Dev airo:** `agents.role = :observer`, online, not stale, GPU telemetry live
+  (16376 MB total, 2 MB used), slot `pvegpu:8081` empty, one `connected` host
+  event carrying `role: observer`. `/v1/serving` reports `role: "observer"`.
+- **Guard:** `Control.load/4` and `Control.unload/3` from dev return
+  `{:error, :observer_role}`; `Control.inventory/1` still reads.
+- **Prod:** `last_seen_at` continuous (2 s old when read, 28 min after the
+  restart); zero `health_events` for `pvegpu:8081` in the window — nothing was
+  resident, so nothing had a transition to record. Prod's `host_events` could
+  not be checked: **S25 is not yet deployed to prod**, so the "only the
+  restart's pair" assertion below waits for that deploy.
+
+The `Load`/`Configure`/`Unload` disabled state and the observer chip were
+confirmed on `/admin/agents` by jody. Remaining hosts follow in the order below
+now that S25 is on prod (deployed 2026-09-04 02:04 UTC).
+
+**Data path (2026-09-04 ~02:55 UTC):** jody loaded `QuantTrio/Qwen3.5-9B-AWQ:awq`
+into `pvegpu:8081` and created a dev deployment for it. The observer airo
+reconciled it from the push alone — `SlotState` `up`, ctx 29696, provenance
+model `pvegpu_QuantTrio/Qwen3.5-9B-AWQ:awq_8081`, deployment 21 health `:up` —
+and a chat completion through dev's gateway (`/v1/chat/completions`, concrete
+model id, no alias) returned the expected text via `x-gateway-provider:
+pvegpu:8081`, deployment 21, no fallback, 2203 ms. An observer routes
+inference straight to the slot's `base_url`; the agent was never on the path.
 
 ## Acceptance
 

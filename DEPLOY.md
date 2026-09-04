@@ -200,3 +200,38 @@ ssh airo 'sudo -u airo env $(sudo grep -v "^#" /etc/airo.env | xargs -d "\n") \
 - Don't run `mix ecto.migrate` against `airo_prod` from your laptop — migrate
   through `bin/migrate` on the VM so the release env is loaded.
 - Don't commit `*.env`, `*.tar.gz`, or `_build/`.
+
+## Dev airo as a fleet observer (S26)
+
+A dev airo on the workstation can watch the real fleet without being able to
+command it. The agent decides: `AIRO_SOCKET_URL` is its one **controller**
+(prod), `AIRO_OBSERVER_SOCKET_URLS` (CSV) lists **observers**. An observer airo
+ingests everything the push carries — slots, GPU, provenance, health — and may
+route inference to the slots, but `Load`/`Configure`/`Unload` are refused
+(`Airo.Agents.Control` returns `{:error, :observer_role}`).
+
+1. The agents must reach the workstation: `jobybook.local.joby.gg` is a static
+   Pi-hole A record for its reserved address (verified 2026-09-03).
+2. Bind dev to the LAN — loopback is the default. Either per start:
+
+   ```sh
+   AIRO_DEV_BIND=lan mix phx.server
+   ```
+
+   or once, for this workstation, in the gitignored `config/dev.local.exs`:
+
+   ```elixir
+   import Config
+   config :airo, AiroWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
+   ```
+
+3. On a host, add the observer URL and redeploy (a redeploy drains that host's
+   engines — pilot on an idle box):
+
+   ```sh
+   # deploy/hosts/pvegpu.env
+   AIRO_OBSERVER_SOCKET_URLS=ws://jobybook.local.joby.gg:4004/agent
+   ```
+
+Design and decisions: `docs/design/DESIGN-agent-lifecycle-and-roles.md` §2.
+

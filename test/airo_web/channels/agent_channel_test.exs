@@ -180,6 +180,44 @@ defmodule AiroWeb.AgentChannelTest do
                     %{host_id: @host, port: @port, status: "up"}}
   end
 
+  describe "roles (S26)" do
+    test "connect accepts controller and observer, defaults to controller, refuses anything else" do
+      assert {:ok, socket} = connect(AgentSocket, %{"host_id" => @host})
+      assert socket.assigns.role == :controller
+
+      assert {:ok, socket} = connect(AgentSocket, %{"host_id" => @host, "role" => "observer"})
+      assert socket.assigns.role == :observer
+
+      assert :error = connect(AgentSocket, %{"host_id" => @host, "role" => "admin"})
+    end
+
+    test "the connected event and Presence carry the connection's role" do
+      Phoenix.PubSub.subscribe(Airo.PubSub, Airo.Agents.Lifecycle.topic())
+      {:ok, socket} = connect(AgentSocket, %{"host_id" => @host, "role" => "observer"})
+      {:ok, _reply, _socket} = subscribe_and_join(socket, "agent:#{@host}", %{})
+
+      assert_receive {:agent_event, %{host_id: @host, kind: :connected}}
+      assert [%{kind: :connected, meta: %{"role" => "observer"}}] = host_events()
+      assert %{@host => %{metas: [%{role: :observer}]}} = AiroWeb.Presence.list("agent:#{@host}")
+    end
+
+    test "register persists the reported role; a change is a role_changed event" do
+      socket = join_host()
+      push_sync(socket, "register", put_in(register_payload(), ["agent", "role"], "observer"))
+      assert Config.get_agent_by_host_id(@host).role == :observer
+
+      # A pre-S26 agent sends no role and leaves it alone.
+      push_sync(socket, "register", register_payload())
+      assert Config.get_agent_by_host_id(@host).role == :observer
+
+      push_sync(socket, "register", put_in(register_payload(), ["agent", "role"], "controller"))
+      assert Config.get_agent_by_host_id(@host).role == :controller
+
+      assert [%{kind: :connected}, %{kind: :role_changed} = event] = host_events()
+      assert event.meta == %{"field" => "role", "from" => "observer", "to" => "controller"}
+    end
+  end
+
   test "disconnect marks the agent's deployments down" do
     socket = join_host()
     push_sync(socket, "register", register_payload())

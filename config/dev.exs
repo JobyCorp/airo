@@ -27,10 +27,22 @@ config :airo, Airo.Vault,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
+# Loopback by default. `AIRO_DEV_BIND=lan` binds every interface so the fleet's
+# agents can reach a dev airo as an *observer* (S26,
+# DESIGN-agent-lifecycle-and-roles.md §2) — they then use the workstation's LAN
+# name as an `AIRO_OBSERVER_SOCKET_URLS` entry. Opt-in, never the default: a dev
+# airo on the LAN has no socket token, same as prod today. For a workstation
+# that should always bind the LAN, put the override in the gitignored
+# `config/dev.local.exs` (imported at the bottom of this file) instead of
+# remembering the env var on every restart.
+dev_bind =
+  case System.get_env("AIRO_DEV_BIND") do
+    "lan" -> {0, 0, 0, 0}
+    _loopback -> {127, 0, 0, 1}
+  end
+
 config :airo, AiroWeb.Endpoint,
-  # Binding to loopback ipv4 address prevents access from other machines.
-  # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
-  http: [ip: {127, 0, 0, 1}],
+  http: [ip: dev_bind],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
@@ -104,3 +116,10 @@ config :swoosh, :api_client, false
 
 # The local ONNX routing classifier (S15) loads at boot in every environment —
 # see `config :airo, Airo.Routing.LocalClassifier` in config/config.exs.
+
+# Per-workstation overrides, gitignored — e.g. the LAN bind above:
+#
+#     config :airo, AiroWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
+#
+# Imported last so it wins over everything in this file.
+if File.exists?(Path.expand("dev.local.exs", __DIR__)), do: import_config("dev.local.exs")

@@ -505,8 +505,11 @@ defmodule AiroWeb.ServingControllerHostsTest do
     |> Enum.find(&(&1["host_id"] == "srv-host"))
   end
 
-  test "the snapshot carries online, stale and role per host", %{conn: conn} do
+  test "the snapshot carries online, stale and role per host", %{conn: conn, agent: agent} do
     assert %{"online" => false, "stale" => false, "role" => "controller"} = host(conn)
+
+    {:ok, _} = Config.update_agent(agent, %{role: :observer})
+    assert %{"role" => "observer"} = host(conn)
 
     AgentControl.mark_online("srv-host")
     assert %{"online" => true, "stale" => false} = host(conn)
