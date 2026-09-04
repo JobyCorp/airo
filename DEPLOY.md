@@ -37,11 +37,33 @@ prior release).
 ### deploy-docker.sh flags
 
 ```bash
-bin/deploy-docker.sh                  # build + ship + migrate + restart
+bin/deploy-docker.sh                  # build + verify + ship + migrate + restart
+BUILD_ONLY=1 bin/deploy-docker.sh     # build + verify the artifact, don't ship
 SKIP_MIGRATE=1 bin/deploy-docker.sh   # skip the migration step
 SSH_HOST=other bin/deploy-docker.sh   # override the SSH alias
 REBUILD_IMAGE=1 bin/deploy-docker.sh  # force-rebuild the builder image
 ```
+
+### Building from macOS (Apple Silicon) — arch, Rosetta
+
+**The workstation is an Apple Silicon Mac since 2026-09-03.** The VM is
+**linux/amd64**; a macOS host can never build for it natively (no glibc, wrong
+OS), and an *unpinned* docker build on Apple Silicon produces **aarch64**
+binaries the VM can't execute — which, because the script stops the service
+before extracting, would take prod down. So the docker path pins
+`--platform linux/amd64` end-to-end: the `docker build`, the `docker create`, a
+`FROM --platform=linux/amd64` in the Dockerfile, a `uname -m == x86_64`
+assertion inside the build container, an arch check of the cached builder image
+(rebuilt on mismatch), and a post-build verification that `beam.smp` and every
+native NIF are x86-64 ELF with no glibc symbol newer than 2.39. Run
+`BUILD_ONLY=1` first on a new machine.
+
+Enable Rosetta in the container runtime (colima: `--vz-rosetta`; Docker
+Desktop: "Use Rosetta for x86_64/amd64 emulation") or the build crawls under
+QEMU. The builder image pulls a **precompiled** amd64 OTP via mise and sets
+`ERL_FLAGS="+JMsingle true"` because the BEAM x86_64 JIT segfaults under
+Rosetta with its default dual-mapped code pages — build-container-only; the VM
+runs the JIT normally.
 
 Rebuild the image (`REBUILD_IMAGE=1`) whenever you change the toolchain in
 `bin/docker-build/Dockerfile` — the script otherwise reuses the cached image
@@ -80,8 +102,10 @@ Airo to the public internet** (a tunnel, a port-forward) without first gating
 
 ## Prerequisites (verify before deploying)
 
-1. **You're on Linux.** The release binary must match the VM target
-   (Linux x86_64). `bin/deploy.sh` enforces `uname -s == Linux`.
+1. **A container runtime with amd64 support.** The release must match the VM
+   target (Linux x86_64); from macOS only `bin/deploy-docker.sh` can produce
+   it (see "Building from macOS" above). `bin/deploy.sh` enforces
+   `uname -s == Linux` and is the legacy native path.
 2. **SSH alias `airo` works** and allows passwordless sudo:
    `ssh airo true` exits 0; `ssh airo sudo -n true` exits 0.
 3. **`mise`/`.tool-versions` runtimes match the VM** (Erlang/Elixir/OTP).
