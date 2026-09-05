@@ -7,8 +7,19 @@ defmodule Airo.Adapters.OpenAICompatible do
 
   Implements `chat/2` (non-streaming) and `stream/4`. Since these upstreams
   already emit OpenAI-shaped SSE deltas, streaming is near-passthrough — the
-  Transport parses the SSE and we forward each chunk unchanged. The remaining
-  capabilities land in later sprints.
+  Transport parses the SSE and we forward each chunk, normalised only for the
+  reasoning key (below). The remaining capabilities land in later sprints.
+
+  ## Reasoning key
+
+  Airo's own translators (Anthropic, Codex) surface model thinking as
+  `message.reasoning_content` / `delta.reasoning_content`. Newer vLLM builds
+  (0.25+ — the DeepSeek and Qwen slots in this fleet) emit it as `reasoning`
+  instead, and offer no server-side flag to rename it, so a consumer reading
+  `reasoning_content` got nothing from any vLLM route. `normalize_reasoning/1`
+  **mirrors** `reasoning` into `reasoning_content` when the latter is absent —
+  a copy, not a rename, so clients written against the newer key keep working.
+  Applied to every choice's `message` (non-streaming) and `delta` (streaming).
   """
   @behaviour Airo.Adapter
 
@@ -22,18 +33,54 @@ defmodule Airo.Adapters.OpenAICompatible do
     |> put_model(ctx.deployment)
     |> then(&Transport.post(ctx, "/chat/completions", &1))
     |> handle_response()
+    |> normalize_chat()
   end
 
   @impl Airo.Adapter
   def stream(params, %Context{} = ctx, acc, reducer) when is_map(params) do
+    # Each upstream delta is normalised before the caller's reducer sees it.
+    normalizing = fn chunk, current -> reducer.(normalize_reasoning(chunk), current) end
+
     params
     |> put_model(ctx.deployment)
     |> Map.put("stream", true)
     # Usage attribution: without this the upstream's stream carries no token
     # counts at all. A client's own stream_options wins.
     |> Map.put_new("stream_options", %{"include_usage" => true})
-    |> then(&Transport.stream(ctx, "/chat/completions", &1, acc, reducer))
+    |> then(&Transport.stream(ctx, "/chat/completions", &1, acc, normalizing))
   end
+
+  @doc """
+  Mirror a vLLM-style `reasoning` into the `reasoning_content` Airo's other
+  adapters emit, on every choice's `message` or `delta`. No-op when the body
+  has no choices, when a choice already carries `reasoning_content`, or when
+  `reasoning` is empty. Public so the gateway's other paths can reuse it.
+  """
+  @spec normalize_reasoning(term()) :: term()
+  def normalize_reasoning(%{"choices" => choices} = body) when is_list(choices),
+    do: %{body | "choices" => Enum.map(choices, &normalize_choice/1)}
+
+  def normalize_reasoning(body), do: body
+
+  defp normalize_choice(%{"message" => %{} = message} = choice),
+    do: %{choice | "message" => mirror_reasoning(message)}
+
+  defp normalize_choice(%{"delta" => %{} = delta} = choice),
+    do: %{choice | "delta" => mirror_reasoning(delta)}
+
+  defp normalize_choice(choice), do: choice
+
+  defp mirror_reasoning(%{"reasoning_content" => present} = part) when present not in [nil, ""],
+    do: part
+
+  defp mirror_reasoning(%{"reasoning" => reasoning} = part)
+       when is_binary(reasoning) and reasoning != "",
+       do: Map.put(part, "reasoning_content", reasoning)
+
+  defp mirror_reasoning(part), do: part
+
+  defp normalize_chat({:ok, body}), do: {:ok, normalize_reasoning(body)}
+  defp normalize_chat(other), do: other
 
   @impl Airo.Adapter
   def embed(params, %Context{} = ctx) when is_map(params) do

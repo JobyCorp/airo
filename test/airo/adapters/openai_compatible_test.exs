@@ -76,6 +76,65 @@ defmodule Airo.Adapters.OpenAICompatibleTest do
     end
   end
 
+  describe "chat/2 — reasoning key" do
+    # Newer vLLM emits `reasoning`; Airo's other adapters emit `reasoning_content`.
+    test "mirrors a vLLM `reasoning` into `reasoning_content`, keeping the original" do
+      upstream =
+        put_in(@completion, ["choices", Access.at(0), "message"], %{
+          "role" => "assistant",
+          "content" => "5",
+          "reasoning" => "Ball is 5 cents."
+        })
+
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.json(conn, upstream) end)
+
+      assert {:ok, body} = OpenAICompatible.chat(%{"messages" => []}, context(__MODULE__))
+      message = body["choices"] |> hd() |> Map.fetch!("message")
+
+      assert message["reasoning_content"] == "Ball is 5 cents."
+      assert message["reasoning"] == "Ball is 5 cents."
+      assert message["content"] == "5"
+    end
+
+    test "leaves a message alone when reasoning is null, empty, or already normalised" do
+      for reasoning <- [nil, ""] do
+        upstream =
+          put_in(@completion, ["choices", Access.at(0), "message"], %{
+            "role" => "assistant",
+            "content" => "5",
+            "reasoning" => reasoning
+          })
+
+        Req.Test.stub(__MODULE__, fn conn -> Req.Test.json(conn, upstream) end)
+        assert {:ok, body} = OpenAICompatible.chat(%{"messages" => []}, context(__MODULE__))
+
+        refute body["choices"]
+               |> hd()
+               |> Map.fetch!("message")
+               |> Map.has_key?("reasoning_content")
+      end
+
+      upstream =
+        put_in(@completion, ["choices", Access.at(0), "message"], %{
+          "role" => "assistant",
+          "content" => "5",
+          "reasoning" => "newer",
+          "reasoning_content" => "already here"
+        })
+
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.json(conn, upstream) end)
+      assert {:ok, body} = OpenAICompatible.chat(%{"messages" => []}, context(__MODULE__))
+
+      assert get_in(body, ["choices", Access.at(0), "message", "reasoning_content"]) ==
+               "already here"
+    end
+
+    test "a body without choices (embeddings, errors) passes through untouched" do
+      assert OpenAICompatible.normalize_reasoning(%{"data" => [1]}) == %{"data" => [1]}
+      assert OpenAICompatible.normalize_reasoning("raw") == "raw"
+    end
+  end
+
   describe "chat/2 — auth" do
     test "injects a Bearer token from the provider credential" do
       test_pid = self()
@@ -169,6 +228,40 @@ defmodule Airo.Adapters.OpenAICompatibleTest do
         |> Enum.join()
 
       assert content == "Hello"
+    end
+
+    @reasoning_sse """
+    data: {"choices":[{"index":0,"delta":{"role":"assistant"}}]}
+
+    data: {"choices":[{"index":0,"delta":{"reasoning":"Think"}}]}
+
+    data: {"choices":[{"index":0,"delta":{"reasoning":"ing."}}]}
+
+    data: {"choices":[{"index":0,"delta":{"content":"5"},"finish_reason":"stop"}]}
+
+    data: [DONE]
+
+    """
+
+    test "mirrors `reasoning` deltas into `reasoning_content` before the reducer sees them" do
+      Req.Test.stub(__MODULE__, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(200, @reasoning_sse)
+      end)
+
+      assert {:ok, chunks} =
+               OpenAICompatible.stream(%{"messages" => []}, context(__MODULE__), [], fn chunk,
+                                                                                        acc ->
+                 acc ++ [chunk]
+               end)
+
+      deltas = Enum.map(chunks, &get_in(&1, ["choices", Access.at(0), "delta"]))
+
+      assert Enum.map_join(deltas, &(&1["reasoning_content"] || "")) == "Thinking."
+      # The newer key is kept alongside, and content deltas gain nothing.
+      assert Enum.map_join(deltas, &(&1["reasoning"] || "")) == "Thinking."
+      refute List.last(deltas) |> Map.has_key?("reasoning_content")
     end
 
     test "sets stream:true on the upstream request body" do
