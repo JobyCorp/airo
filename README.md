@@ -98,7 +98,7 @@ the release builder image alike).
 
 ### Host agent (`airo_agent`)
 
-GPU serving hosts run [`airo_agent`](../airo_agent), a small OTP release that
+GPU serving hosts run [`airo_agent`](https://github.com/JobyCorp/airo_agent), a small OTP release that
 **controls** engines (llama.cpp, vLLM) and never sits on the inference path:
 it loads, swaps and unloads models in fixed serving slots, scans the local
 Hugging Face cache for provenance, and pushes host and slot state to Airo.
@@ -155,7 +155,7 @@ Five apps depend on it today: incogito, orchester, mem_pal, joby and media_assis
 - [`docs/sprints/`](./docs/sprints/) — how the project is built, and what shipped when
 - [`DEPLOY.md`](./DEPLOY.md) — releases and deployment
 - [`airo_client`](https://github.com/JobyCorp/airo_client) — Elixir client SDK
-- [`airo_agent`](../airo_agent) — the host-side control plane for GPU serving hosts
+- [`airo_agent`](https://github.com/JobyCorp/airo_agent) — the host-side control plane for GPU serving hosts
 
 ## License
 
