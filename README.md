@@ -147,7 +147,7 @@ dependency on `main`**, not from Hex, so pushing `main` there is a release:
   `api_key`, `receive_timeout`), overridable per call. `model` may be an alias
   or a concrete deployment id; Airo resolves both.
 
-Four apps depend on it today: incogito, orchester, mem_pal and media_assist.
+Five apps depend on it today: incogito, orchester, mem_pal, joby and media_assist.
 
 ## Docs
 
