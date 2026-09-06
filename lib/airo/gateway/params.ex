@@ -19,11 +19,32 @@ defmodule Airo.Gateway.Params do
   field-by-field rather than wholesale-replacing.
 
   Gateway-only extension keys are stripped before dispatch: `route` (routing
-  intent, consumed upstream of here) and `provider_params` (folded in raw).
-  Every other key — known or unknown — passes through untouched.
+  intent, consumed upstream of here), `provider_params` (folded in raw) and
+  `reasoning_effort_levels` (the clamp below). Every other key — known or
+  unknown — passes through untouched.
+
+  ## The effort clamp
+
+  Clients speak one graded vocabulary for `reasoning_effort`; each backend's
+  chat template accepts its own subset and spelling, and vLLM 400s on a value
+  it does not know (Qwen3.8's template takes only `low`, `medium`, `xhigh`
+  and rejects `high` and `max`; GLM 5.3's takes `max`). airo owns the
+  spelling, so a deployment (or provider, or alias — same layering) can
+  declare what its template accepts in its request defaults:
+
+      "reasoning_effort_levels": ["low", "medium", "xhigh"]
+
+  A requested effort that is on the list passes through. One that is not is
+  clamped to the highest listed level at or below it on the ladder
+  `none < minimal < low < medium < high < xhigh < max`, else to the lowest
+  listed level — never above what was asked. A spelling not on the ladder
+  is left alone (the operator wrote it on purpose). The key itself never
+  reaches the backend.
   """
 
-  @gateway_only_keys ~w(route provider_params)
+  @gateway_only_keys ~w(route provider_params reasoning_effort_levels)
+  @effort_ladder ~w(none minimal low medium high xhigh max)
+  @effort_rank @effort_ladder |> Enum.with_index() |> Map.new()
 
   @doc """
   Build the upstream request body from the client `params` and the resolved
@@ -42,7 +63,49 @@ defmodule Airo.Gateway.Params do
     |> deep_merge(alias_params(layers[:alias]))
     |> deep_merge(request)
     |> deep_merge(provider_params)
+    |> clamp_effort()
   end
+
+  @doc """
+  The effort clamp on its own (see the moduledoc): `levels` is what the
+  template accepts, `effort` what was asked. Returns the value to send.
+  """
+  @spec clamp(String.t(), [String.t()]) :: String.t()
+  def clamp(effort, levels) when is_binary(effort) and is_list(levels) and levels != [] do
+    cond do
+      effort in levels ->
+        effort
+
+      not Map.has_key?(@effort_rank, effort) ->
+        effort
+
+      true ->
+        ranked =
+          levels
+          |> Enum.filter(&Map.has_key?(@effort_rank, &1))
+          |> Enum.sort_by(&@effort_rank[&1])
+
+        at_or_below = Enum.filter(ranked, &(@effort_rank[&1] <= @effort_rank[effort]))
+        List.last(at_or_below) || List.first(ranked) || effort
+    end
+  end
+
+  def clamp(effort, _levels), do: effort
+
+  defp clamp_effort(%{"reasoning_effort_levels" => levels} = params) do
+    params = Map.delete(params, "reasoning_effort_levels")
+
+    case params do
+      %{"reasoning_effort" => effort}
+      when is_binary(effort) and is_list(levels) and levels != [] ->
+        Map.put(params, "reasoning_effort", clamp(effort, levels))
+
+      _ ->
+        params
+    end
+  end
+
+  defp clamp_effort(params), do: params
 
   # The alias param-layer is absent when resolving a concrete deployment model.
   defp alias_params(nil), do: %{}

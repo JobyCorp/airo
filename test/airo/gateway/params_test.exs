@@ -30,6 +30,51 @@ defmodule Airo.Gateway.ParamsTest do
     assert %{"a" => 1, "b" => 2, "c" => 3} = out
   end
 
+  describe "the effort clamp (reasoning_effort_levels)" do
+    test "a listed effort passes through; the key never reaches the backend" do
+      layers = layers(deployment: %{"reasoning_effort_levels" => ["low", "medium", "xhigh"]})
+      out = Params.normalize(%{"messages" => [], "reasoning_effort" => "medium"}, layers)
+      assert out["reasoning_effort"] == "medium"
+      refute Map.has_key?(out, "reasoning_effort_levels")
+    end
+
+    test "an unlisted effort clamps to the highest listed level at or below it" do
+      levels = ["low", "medium", "xhigh"]
+      # Qwen3.8's template: max and high are not words it knows
+      assert Params.clamp("max", levels) == "xhigh"
+      assert Params.clamp("high", levels) == "medium"
+      assert Params.clamp("none", levels) == "low"
+      # GLM 5.3's template: max is real
+      assert Params.clamp("max", ["low", "medium", "high", "max"]) == "max"
+      assert Params.clamp("xhigh", ["low", "medium", "high", "max"]) == "high"
+    end
+
+    test "a spelling off the ladder is left alone, and no list means no clamp" do
+      assert Params.clamp("turbo", ["low", "xhigh"]) == "turbo"
+      assert Params.clamp("max", []) == "max"
+      out = Params.normalize(%{"messages" => [], "reasoning_effort" => "max"}, layers())
+      assert out["reasoning_effort"] == "max"
+    end
+
+    test "the list layers like any default: alias over deployment, request can override" do
+      layers =
+        layers(
+          deployment: %{"reasoning_effort_levels" => ["low"]},
+          alias: %{"reasoning_effort_levels" => ["low", "xhigh"]}
+        )
+
+      out = Params.normalize(%{"messages" => [], "reasoning_effort" => "max"}, layers)
+      assert out["reasoning_effort"] == "xhigh"
+    end
+
+    test "a request without an effort is untouched by the list" do
+      layers = layers(deployment: %{"reasoning_effort_levels" => ["low", "xhigh"]})
+      out = Params.normalize(%{"messages" => []}, layers)
+      refute Map.has_key?(out, "reasoning_effort")
+      refute Map.has_key?(out, "reasoning_effort_levels")
+    end
+  end
+
   test "unknown keys pass through untouched" do
     out = Params.normalize(%{"messages" => [], "x_custom_flag" => true}, layers())
     assert out["x_custom_flag"] == true
