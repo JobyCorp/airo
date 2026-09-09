@@ -1,11 +1,10 @@
 # Sprint 27 — Speculative-decode observability
 
-> **Status: deliverables 1, 2, 3 and 5 implemented on branch
-> `feat/spec-decode-observability`; deliverable 4 (a management-scoped key for
-> helm) is unstarted and waiting on jody, because it is a prod credential
-> change.** Not deployed. The investigation section below is the handoff from
-> **2026-09-09**; every number in it was measured that day against the live
-> `sparky:8081` slot and is reproducible with the commands quoted here.
+> **Status: deliverables 1, 2, 3 and 5 shipped to prod on 2026-09-09 as commit
+> `de8ac94`; deliverable 4 (a management-scoped key for helm) is jody's to mint,
+> now that the deploy has landed.** The investigation section below is the
+> handoff from **2026-09-09**; every number in it was measured that day against
+> the live `sparky:8081` slot and is reproducible with the commands quoted here.
 
 > **Findings that change the premise** (read before planning anything):
 > acceptance rate is **already available, unauthenticated, today** — the report
@@ -200,9 +199,10 @@ says so), and it is what the scrape filters on now.
    `enabled`, the three `_total` counters, `acceptance_rate`,
    `accepted_per_draft`, `tokens_per_step`, and `accepted_at_position_ratio`
    labelled by `position`.
-4. **Open, sequenced after the deploy.** jody decided on 2026-09-09 to mint a
-   new management-scoped key for helm rather than widen `helm-prod` /
-   `helm-dev`, and to do it once this branch is on prod. Not done.
+4. **Open — jody's to mint, and now unblocked.** jody decided on 2026-09-09 to
+   mint a new management-scoped key for helm rather than widen `helm-prod` /
+   `helm-dev`, and to do it once this branch was on prod. The deploy landed the
+   same day, so the only thing left is the key.
 5. **Done.** A paragraph in the README's host-agent build-details section, and a
    note in `docs/design/DESIGN.md` §10 that engine-internal metrics are
    management-scoped by design.
@@ -277,6 +277,14 @@ All written and passing; the full suite is green (636 tests, 3 doctests).
 - Both slots were scraped through `Airo.Serving.snapshot(speculative: true)`
   despite being `adapter_type: :openai`, which is what proves the engine-based
   filter above.
+
+**Deployed 2026-09-09.** `bin/deploy-docker.sh` shipped commit `de8ac94` to VM
+302 (`phx2`); `airo.service` came up at 15:55:48 UTC and all six agents —
+forge, jobycorp, macmini, pvegpu, sparky, sparky2 — reconnected by 15:56:05.
+No migrations. `Elixir.Airo.Speculative.beam` is present in the installed
+release, and `GET /v1/serving?speculative=1` answers `401` without a key, so the
+route is live and still scoped. The prod payload itself has not been read back:
+that needs a management key, which is deliverable 4.
 - helm can read it with its key, and its rows carry a real rate instead of
   `acceptance_reported: false` — or, if the scope decision goes the other way,
   helm deltas the engine directly and the sprint drops deliverable 4.
