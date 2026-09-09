@@ -89,5 +89,6 @@ Ordered — each depends on prior merged sprints unless noted in the sprint file
 - [x] [S24 — Site settings & health flap suppression](./24-site-settings-and-health-hysteresis.md)
 - [x] [S25 — Agent lifecycle observability](./25-agent-lifecycle-observability.md) — airo only; prod acceptance pending deploy
 - [x] [S26 — Observer airos (one controller, N observers per agent)](./26-observer-airos.md) — airo + airo_agent; pilot on pvegpu, fleet rollout pending
+- [ ] [S27 — Speculative-decode observability](./27-speculative-decode-observability.md) — investigation done 2026-09-09; acceptance rate is available, per-request is not
 
 See [`STATUS.md`](./STATUS.md) for merge history.
