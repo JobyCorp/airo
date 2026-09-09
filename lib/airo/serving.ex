@@ -48,12 +48,19 @@ defmodule Airo.Serving do
   alias Airo.Config.Provider
   alias Airo.Agents.{HostEvent, Liveness}
   alias Airo.Health.HealthEvent
+  alias Airo.Adapter.Context
+  alias Airo.Adapters.VLLM
   alias Airo.Usage.UsageRecord
-  alias Airo.{Config, Health, Repo}
+  alias Airo.{Config, Engines, Health, Repo, Speculative}
 
   # Per-host control-API budget when `inventory: true`. Inventory is an outbound
   # HTTP call per host, so it stays opt-in and never blocks the snapshot for long.
   @inventory_timeout_ms 4_000
+
+  # Same shape of budget for the `speculative: true` scrape: one `GET /metrics`
+  # per vLLM slot, concurrent, and a slot that does not answer degrades to a
+  # "not speculating" block rather than holding up the snapshot.
+  @speculative_timeout_ms 4_000
 
   @default_limit 500
   @max_limit 5_000
@@ -71,6 +78,18 @@ defmodule Airo.Serving do
       models it holds **on disk** (not just what's loaded) and use the reported
       `size_bytes` to fill in per-slot capacity math. Off by default: it is one
       outbound HTTP call per host.
+    - `:speculative` — when true, scrape each vLLM slot's own `/metrics` and
+      attach a derived `Airo.Speculative` block to its deployments. Off by
+      default: it is one outbound HTTP call per vLLM slot. The block is `nil`
+      on every deployment when the option is off, and on any deployment whose
+      provider is not a vLLM engine.
+
+  > #### The speculative block is cumulative {: .warning}
+  >
+  > Its counters run since engine start, across every caller — they are not
+  > attributable to a request. See `Airo.Speculative`. This also makes the
+  > snapshot change on almost every call, so `GET /v1/serving`'s `ETag` will
+  > rarely match while `?speculative=1` is set; leave it off for tight polling.
   """
   @spec snapshot(keyword()) :: map()
   def snapshot(opts \\ []) do
@@ -91,15 +110,17 @@ defmodule Airo.Serving do
 
     activity = deployment_activity()
     inventories = if opts[:inventory], do: inventories(agents), else: %{}
+    speculative = if opts[:speculative], do: speculative_scrapes(agents, external), else: %{}
 
-    hosts = Enum.map(agents, &host(&1, activity, Map.get(inventories, &1.id)))
+    hosts =
+      Enum.map(agents, &host(&1, activity, Map.get(inventories, &1.id), speculative))
 
     %{
       generated_at: now(),
       staleness_ms: Health.staleness_ms(),
       hosts: hosts,
       clusters: clusters(hosts),
-      external_providers: Enum.map(external, &external_provider(&1, activity)),
+      external_providers: Enum.map(external, &external_provider(&1, activity, speculative)),
       aliases: Enum.map(aliases, &alias_entry/1)
     }
   end
@@ -156,7 +177,7 @@ defmodule Airo.Serving do
 
   defp complete?(_members, _tp_size), do: true
 
-  defp host(agent, activity, inventory) do
+  defp host(agent, activity, inventory, speculative) do
     index = inventory_index(inventory)
     slots = sort_by_name(agent.providers)
 
@@ -178,7 +199,7 @@ defmodule Airo.Serving do
       role: to_string(agent.role || :controller),
       gpu: gpu(agent.gpu),
       inventory: inventory && Enum.map(inventory, &inventory_entry/1),
-      slots: Enum.map(slots, &slot(&1, agent, activity, index, sole_resident?))
+      slots: Enum.map(slots, &slot(&1, agent, activity, index, sole_resident?, speculative))
     }
   end
 
@@ -217,13 +238,13 @@ defmodule Airo.Serving do
   defp gpu_field(raw, key) when is_map(raw), do: Map.get(raw, key) || Map.get(raw, to_string(key))
   defp gpu_field(_raw, _key), do: nil
 
-  defp slot(provider, agent, activity, index, sole_resident?) do
+  defp slot(provider, agent, activity, index, sole_resident?, speculative) do
     state = SlotState.get(provider.id)
 
     deployments =
       provider.deployments
       |> sort_by_model()
-      |> Enum.map(&deployment(&1, provider, activity))
+      |> Enum.map(&deployment(&1, provider, activity, speculative))
 
     %{
       provider: provider.name,
@@ -327,9 +348,12 @@ defmodule Airo.Serving do
     end)
   end
 
-  defp external_provider(provider, activity) do
+  defp external_provider(provider, activity, speculative) do
     deployments =
-      Enum.map(sort_by_model(provider.deployments), &deployment(&1, provider, activity))
+      Enum.map(
+        sort_by_model(provider.deployments),
+        &deployment(&1, provider, activity, speculative)
+      )
 
     %{
       provider: provider.name,
@@ -352,7 +376,7 @@ defmodule Airo.Serving do
     |> Enum.min_by(&status_rank(&1.status))
   end
 
-  defp deployment(deployment, provider, activity) do
+  defp deployment(deployment, provider, activity, speculative) do
     status = Health.status(deployment.id)
     eligible = deployment.enabled and provider.enabled
     seen = Map.get(activity, deployment.id, %{})
@@ -375,7 +399,8 @@ defmodule Airo.Serving do
       routable_reason: routable_reason(deployment, provider, status),
       last_success_at: seen[:last_success_at],
       last_error_at: seen[:last_error_at],
-      last_error_code: seen[:last_error_code]
+      last_error_code: seen[:last_error_code],
+      speculative: speculative_block(speculative, provider, deployment)
     }
   end
 
@@ -798,6 +823,77 @@ defmodule Airo.Serving do
       {:exit, _reason} -> []
     end)
     |> Map.new()
+  end
+
+  ## ------------------------------------------------------------------
+  ## Speculative decoding
+  ## ------------------------------------------------------------------
+
+  # One `GET /metrics` per vLLM slot, concurrently and with a hard deadline —
+  # the same contract as `inventories/1`. A slot that errors or times out still
+  # gets an entry, holding an "absent" block: a scrape that failed must read as
+  # "no speculative data", never as a slot that stopped speculating.
+  defp speculative_scrapes(agents, external) do
+    providers =
+      (Enum.flat_map(agents, & &1.providers) ++ external)
+      |> Enum.filter(&scrapable?/1)
+
+    providers
+    |> Task.async_stream(&{&1.id, scrape_speculative(&1)},
+      timeout: @speculative_timeout_ms + 1_000,
+      on_timeout: :kill_task,
+      # Ordered, unlike `inventories/1`: a killed task yields no provider id, so
+      # position is the only thing left to attribute the timeout by.
+      ordered: true
+    )
+    |> Enum.zip(providers)
+    |> Enum.map(fn
+      {{:ok, entry}, _provider} -> entry
+      {{:exit, _reason}, provider} -> {provider.id, %{metrics: %{}, scraped_at: nil}}
+    end)
+    |> Map.new()
+  end
+
+  # An agent-managed slot is `adapter_type: :openai` whatever engine it actually
+  # runs — the engine is recorded on the *model*, not the provider. Filtering on
+  # `adapter_type` alone would therefore skip every real vLLM slot in the fleet
+  # and only ever find an external vLLM upstream. `Airo.Engines` is the same
+  # mapping the Model Shelf uses to reach a managed slot's `/metrics`.
+  defp scrapable?(%{enabled: false}), do: false
+  defp scrapable?(%{adapter_type: :vllm}), do: true
+
+  defp scrapable?(provider) do
+    Enum.any?(provider.deployments, fn deployment ->
+      deployment.model && Engines.local_provider(deployment.model.engine) == VLLM
+    end)
+  end
+
+  defp scrape_speculative(provider) do
+    ctx =
+      provider
+      |> Repo.preload(:credential)
+      |> Context.new(opts: [req_options: [receive_timeout: @speculative_timeout_ms]])
+
+    case VLLM.metrics(ctx) do
+      {:ok, metrics} -> %{metrics: metrics, scraped_at: now()}
+      {:error, _reason} -> %{metrics: %{}, scraped_at: nil}
+    end
+  end
+
+  # `nil` when the slot was never scraped — the option was off, or the provider
+  # is not a vLLM engine. That is a different fact from `enabled: false`, which
+  # means the engine was asked and reported no speculative family under this
+  # model's name. A slot with several deployments configured against it reports
+  # counters only for the one actually resident, so the rest read `enabled:
+  # false` — they are not being served, so there is nothing to accept.
+  defp speculative_block(scrapes, provider, deployment) do
+    case Map.fetch(scrapes, provider.id) do
+      {:ok, %{metrics: metrics, scraped_at: scraped_at}} ->
+        Speculative.from_metrics(metrics[deployment.model_name], scraped_at)
+
+      :error ->
+        nil
+    end
   end
 
   defp inventory_index(nil), do: %{}

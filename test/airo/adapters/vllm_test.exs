@@ -62,6 +62,28 @@ defmodule Airo.Adapters.VLLMTest do
     """
   end
 
+  # A trimmed capture of the real exposition from the speculating GLM slot on
+  # sparky:8081 (2026-09-09), counters intact. `_created` lines are timestamps,
+  # not readings, and are here to prove they are ignored. The per-position
+  # samples sum to the accepted total, as they do on the wire.
+  defp speculative_metrics_body do
+    """
+    # HELP vllm:spec_decode_num_drafts_total Number of speculative draft rounds.
+    # TYPE vllm:spec_decode_num_drafts_total counter
+    vllm:spec_decode_num_drafts_total{engine="0",model_name="glm-5.3-flash"} 11325.0
+    vllm:spec_decode_num_drafts_created{engine="0",model_name="glm-5.3-flash"} 1.7573e+09
+    vllm:spec_decode_num_draft_tokens_total{engine="0",model_name="glm-5.3-flash"} 78806.0
+    vllm:spec_decode_num_accepted_tokens_total{engine="0",model_name="glm-5.3-flash"} 29746.0
+    vllm:spec_decode_num_accepted_tokens_per_pos_total{engine="0",model_name="glm-5.3-flash",position="0"} 8856.0
+    vllm:spec_decode_num_accepted_tokens_per_pos_total{engine="0",model_name="glm-5.3-flash",position="1"} 6387.0
+    vllm:spec_decode_num_accepted_tokens_per_pos_total{engine="0",model_name="glm-5.3-flash",position="2"} 4677.0
+    vllm:spec_decode_num_accepted_tokens_per_pos_total{engine="0",model_name="glm-5.3-flash",position="3"} 3480.0
+    vllm:spec_decode_num_accepted_tokens_per_pos_total{engine="0",model_name="glm-5.3-flash",position="4"} 2608.0
+    vllm:spec_decode_num_accepted_tokens_per_pos_total{engine="0",model_name="glm-5.3-flash",position="5"} 2073.0
+    vllm:spec_decode_num_accepted_tokens_per_pos_total{engine="0",model_name="glm-5.3-flash",position="6"} 1665.0
+    """
+  end
+
   describe "inference delegation" do
     test "chat still uses the OpenAI-compatible /v1 surface" do
       test_pid = self()
@@ -133,6 +155,63 @@ defmodule Airo.Adapters.VLLMTest do
       assert metrics["num_requests_waiting"] == 2.0
       assert metrics["kv_cache_usage_perc"] == 0.42
       assert metrics["request_success_total_by_reason"] == %{"stop" => 9.0, "length" => 1.0}
+    end
+
+    test "reports the speculative family, with the per-position samples kept apart" do
+      Req.Test.stub(__MODULE__, fn
+        %{request_path: "/v1/models"} = conn ->
+          Req.Test.json(conn, models_payload())
+
+        %{request_path: "/metrics"} = conn ->
+          Req.Test.text(conn, speculative_metrics_body())
+      end)
+
+      assert {:ok, %{metrics: %{"glm-5.3-flash" => metrics}}} =
+               VLLM.runtime_info(context(__MODULE__))
+
+      assert metrics["spec_decode_num_drafts_total"] == 11_325.0
+      assert metrics["spec_decode_num_draft_tokens_total"] == 78_806.0
+      assert metrics["spec_decode_num_accepted_tokens_total"] == 29_746.0
+
+      assert metrics["spec_decode_accepted_tokens_by_position"] == %{
+               0 => 8856.0,
+               1 => 6387.0,
+               2 => 4677.0,
+               3 => 3480.0,
+               4 => 2608.0,
+               5 => 2073.0,
+               6 => 1665.0
+             }
+    end
+
+    test "keeps no scalar for the per-position family, whose last sample means nothing" do
+      Req.Test.stub(__MODULE__, fn
+        %{request_path: "/v1/models"} = conn ->
+          Req.Test.json(conn, models_payload())
+
+        %{request_path: "/metrics"} = conn ->
+          Req.Test.text(conn, speculative_metrics_body())
+      end)
+
+      assert {:ok, %{metrics: %{"glm-5.3-flash" => metrics}}} =
+               VLLM.runtime_info(context(__MODULE__))
+
+      refute Map.has_key?(metrics, "spec_decode_num_accepted_tokens_per_pos_total")
+    end
+
+    test "a slot serving without --speculative-config reports no speculative keys" do
+      Req.Test.stub(__MODULE__, fn
+        %{request_path: "/v1/models"} = conn ->
+          Req.Test.json(conn, models_payload())
+
+        %{request_path: "/metrics"} = conn ->
+          Req.Test.text(conn, metrics_body())
+      end)
+
+      assert {:ok, %{metrics: %{"qwen3.5-9b" => metrics}}} =
+               VLLM.runtime_info(context(__MODULE__))
+
+      assert Enum.all?(Map.keys(metrics), &(not String.starts_with?(&1, "spec_decode")))
     end
   end
 end
