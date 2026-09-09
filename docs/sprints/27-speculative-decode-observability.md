@@ -200,9 +200,9 @@ says so), and it is what the scrape filters on now.
    `enabled`, the three `_total` counters, `acceptance_rate`,
    `accepted_per_draft`, `tokens_per_step`, and `accepted_at_position_ratio`
    labelled by `position`.
-4. **Not started — jody's call.** A management-scoped key for helm (or the
-   scope added to `helm-prod` / `helm-dev`). It is a prod credential change, so
-   it is not being made unilaterally. See the open question below.
+4. **Open, sequenced after the deploy.** jody decided on 2026-09-09 to mint a
+   new management-scoped key for helm rather than widen `helm-prod` /
+   `helm-dev`, and to do it once this branch is on prod. Not done.
 5. **Done.** A paragraph in the README's host-agent build-details section, and a
    note in `docs/design/DESIGN.md` §10 that engine-internal metrics are
    management-scoped by design.
@@ -283,10 +283,11 @@ All written and passing; the full suite is green (636 tests, 3 doctests).
 
 ## Open questions for jody
 
-1. **Scope — still open, and the only thing blocking deliverable 4.** Give helm
-   a management key, or leave helm scraping engines directly and keep Airo's
-   copy for the admin UI only? The second is less coupling; the first is the
-   single-source-of-truth story. Nothing was changed on prod either way.
+1. **Scope — decided by jody on 2026-09-09: mint a management key for helm,
+   after the new Airo is deployed.** A new key rather than widening the existing
+   `helm-prod` / `helm-dev`, and jody mints it. So the order is: deploy this
+   branch to prod, then mint. Deliverable 4 stays open until both have
+   happened; nothing on prod has been changed yet.
 2. **Per-position in v1? — decided: shipped.** The parser work was the same
    either way once the `position` label had to be handled at all, and it is the
    only signal that answers "is `num_speculative_tokens: 7` too high". Exposed
