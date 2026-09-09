@@ -14,6 +14,10 @@ defmodule Airo.Adapters.VLLM do
   alias Airo.Adapters.OpenAICompatible
   alias Airo.Transport
 
+  # The per-position family is one sample per draft position, so it is the only
+  # name here whose scalar is meaningless on its own — see `put_flat/4`.
+  @per_position_metric "spec_decode_num_accepted_tokens_per_pos_total"
+
   @metric_names [
     "vllm:num_requests_running",
     "vllm:num_requests_waiting",
@@ -21,7 +25,14 @@ defmodule Airo.Adapters.VLLM do
     "vllm:prompt_tokens_total",
     "vllm:generation_tokens_total",
     "vllm:num_preemptions_total",
-    "vllm:request_success_total"
+    "vllm:request_success_total",
+    # Speculative decoding. Absent entirely on a slot launched without
+    # `--speculative-config`, which is how `Airo.Speculative` tells "not
+    # speculating" apart from "speculating and accepting nothing".
+    "vllm:spec_decode_num_drafts_total",
+    "vllm:spec_decode_num_draft_tokens_total",
+    "vllm:spec_decode_num_accepted_tokens_total",
+    "vllm:#{@per_position_metric}"
   ]
 
   @impl Airo.Adapter
@@ -135,7 +146,15 @@ defmodule Airo.Adapters.VLLM do
     end
   end
 
-  defp metrics(ctx) do
+  @doc """
+  The engine's `/metrics` exposition, filtered to `@metric_names` and keyed by
+  `model_name`.
+
+  Public because `Airo.Serving` scrapes it directly for the speculative-decode
+  block: `runtime_info/1` would pay for a `/v1/models` call it does not need.
+  """
+  @spec metrics(Context.t()) :: {:ok, map()} | {:error, term()}
+  def metrics(%Context{} = ctx) do
     ctx
     |> native_get("/metrics")
     |> case do
@@ -184,11 +203,20 @@ defmodule Airo.Adapters.VLLM do
     metric = name |> String.replace("vllm:", "") |> String.replace(":", "_")
 
     acc
-    |> Map.update(model_name, %{metric => value}, &Map.put(&1, metric, value))
+    |> put_flat(model_name, metric, value)
     |> put_labeled_metric(model_name, metric, labels, value)
   end
 
   defp put_metric(acc, _name, _labels, _value), do: acc
+
+  # A flat key would hold whichever draft position happened to be parsed last,
+  # which is not a reading of anything. Only the by-position map below is
+  # meaningful — but the model's map still has to exist for `update_in/3`.
+  defp put_flat(acc, model_name, @per_position_metric, _value),
+    do: Map.put_new(acc, model_name, %{})
+
+  defp put_flat(acc, model_name, metric, value),
+    do: Map.update(acc, model_name, %{metric => value}, &Map.put(&1, metric, value))
 
   defp put_labeled_metric(
          acc,
@@ -201,6 +229,22 @@ defmodule Airo.Adapters.VLLM do
       nil -> %{reason => value}
       reasons -> Map.put(reasons, reason, value)
     end)
+  end
+
+  # Keyed by integer position so a consumer can order the decay curve without
+  # re-parsing label strings; a non-numeric position is dropped rather than
+  # sorted into the middle of the curve.
+  defp put_labeled_metric(acc, model_name, @per_position_metric, %{"position" => position}, value) do
+    case Integer.parse(position) do
+      {position, ""} ->
+        update_in(acc, [model_name, "spec_decode_accepted_tokens_by_position"], fn
+          nil -> %{position => value}
+          positions -> Map.put(positions, position, value)
+        end)
+
+      _ ->
+        acc
+    end
   end
 
   defp put_labeled_metric(acc, _model_name, _metric, _labels, _value), do: acc

@@ -57,6 +57,92 @@ defmodule AiroWeb.ServingControllerTest do
     deployment
   end
 
+  # A vLLM slot answering `GET /metrics` with a speculating engine's exposition.
+  # The scrape runs in a `Task`, so the stub has to be shared rather than owned
+  # by the test process — safe because this module is `async: false`.
+  defp stub_engine_metrics(body) do
+    Req.Test.set_req_test_to_shared()
+
+    Req.Test.stub(Airo.TestStub, fn
+      %{request_path: "/metrics"} = conn -> Req.Test.text(conn, body)
+      conn -> conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{"error" => "not stubbed"})
+    end)
+  end
+
+  defp stub_engine_metrics_error do
+    Req.Test.set_req_test_to_shared()
+    Req.Test.stub(Airo.TestStub, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+  end
+
+  # The deployment entry for `id`, from wherever in the topology it landed.
+  defp deployment_json(body, id) do
+    entries =
+      for host <- body["hosts"],
+          slot <- host["slots"],
+          entry <- slot["deployments"],
+          entry["id"] == id,
+          do: entry
+
+    List.first(entries)
+  end
+
+  defp speculating_metrics(model_name) do
+    """
+    vllm:spec_decode_num_drafts_total{model_name="#{model_name}"} 11325.0
+    vllm:spec_decode_num_draft_tokens_total{model_name="#{model_name}"} 78806.0
+    vllm:spec_decode_num_accepted_tokens_total{model_name="#{model_name}"} 29746.0
+    vllm:spec_decode_num_accepted_tokens_per_pos_total{model_name="#{model_name}",position="0"} 8856.0
+    vllm:spec_decode_num_accepted_tokens_per_pos_total{model_name="#{model_name}",position="1"} 6387.0
+    """
+  end
+
+  defp quiet_metrics(model_name) do
+    """
+    vllm:num_requests_running{model_name="#{model_name}"} 0.0
+    vllm:generation_tokens_total{model_name="#{model_name}"} 250.0
+    """
+  end
+
+  # How the fleet actually looks: an agent-managed slot is `adapter_type:
+  # :openai` whatever engine it runs, and the engine is recorded on the model.
+  defp managed_vllm_slot(host_id, model_name) do
+    {:ok, agent} =
+      Config.create_agent(%{host_id: host_id, control_url: "http://#{host_id}:4400"})
+
+    slot =
+      provider(%{
+        agent_id: agent.id,
+        name: "#{host_id}:8081",
+        adapter_type: :openai,
+        base_url: "http://#{host_id}:8081/v1"
+      })
+
+    {:ok, model} =
+      Config.create_model(%{
+        upstream_model_id: "#{host_id}/#{model_name}",
+        display_name: model_name,
+        engine: "vllm"
+      })
+
+    {slot, deployment(slot, %{model_name: model_name, model_id: model.id})}
+  end
+
+  # A vLLM slot on a host, serving `model_name`.
+  defp vllm_slot(host_id, model_name) do
+    {:ok, agent} =
+      Config.create_agent(%{host_id: host_id, control_url: "http://#{host_id}:4400"})
+
+    slot =
+      provider(%{
+        agent_id: agent.id,
+        name: "#{host_id}:8081",
+        adapter_type: :vllm,
+        base_url: "http://#{host_id}:8081/v1"
+      })
+
+    {slot, deployment(slot, %{model_name: model_name})}
+  end
+
   describe "authorization" do
     test "rejects a request with no client key", %{conn: conn} do
       assert conn |> get(~p"/v1/serving") |> json_response(401)
@@ -204,6 +290,120 @@ defmodule AiroWeb.ServingControllerTest do
       [changed] = build_conn() |> authed(key) |> get(~p"/v1/serving") |> get_resp_header("etag")
 
       refute before == changed
+    end
+  end
+
+  describe "GET /v1/serving?speculative=1" do
+    test "reports the derived block for a speculating slot", %{conn: conn} do
+      {_slot, served} = vllm_slot("sparky", "glm-5.3-flash")
+      stub_engine_metrics(speculating_metrics("glm-5.3-flash"))
+
+      body = conn |> management() |> get(~p"/v1/serving?speculative=1") |> json_response(200)
+
+      assert %{"speculative" => spec} = deployment_json(body, served.id)
+      assert spec["enabled"] == true
+      assert spec["drafts"] == 11_325
+      assert spec["draft_tokens"] == 78_806
+      assert spec["accepted_tokens"] == 29_746
+      assert spec["acceptance_rate"] == 0.3775
+      assert spec["accepted_per_draft"] == 2.63
+      assert spec["tokens_per_step"] == 3.63
+      assert spec["per_position"] == [0.782, 0.564]
+      assert spec["cumulative_since"] == "engine_start"
+      assert spec["scraped_at"]
+    end
+
+    test "a non-speculating slot reads as disabled, not as zero acceptance", %{conn: conn} do
+      {_slot, served} = vllm_slot("pvegpu", "qwen3.8-32b")
+      stub_engine_metrics(quiet_metrics("qwen3.8-32b"))
+
+      body = conn |> management() |> get(~p"/v1/serving?speculative=1") |> json_response(200)
+
+      assert %{"speculative" => spec} = deployment_json(body, served.id)
+      assert spec["enabled"] == false
+      assert spec["acceptance_rate"] == nil
+      assert spec["drafts"] == nil
+    end
+
+    test "does not scrape engines unless asked", %{conn: conn} do
+      {_slot, served} = vllm_slot("sparky", "glm-5.3-flash")
+
+      # No stub installed: any scrape here would raise inside the task rather
+      # than return, so a null block is proof the call was never made.
+      body = conn |> management() |> get(~p"/v1/serving") |> json_response(200)
+
+      assert deployment_json(body, served.id)["speculative"] == nil
+    end
+
+    test "a non-vLLM provider is never scraped, and reports no block", %{conn: conn} do
+      served = deployment(provider(%{adapter_type: :ollama}))
+      stub_engine_metrics(speculating_metrics("anything"))
+
+      body = conn |> management() |> get(~p"/v1/serving?speculative=1") |> json_response(200)
+
+      entry =
+        body["external_providers"]
+        |> Enum.flat_map(& &1["deployments"])
+        |> Enum.find(&(&1["id"] == served.id))
+
+      assert entry["speculative"] == nil
+    end
+
+    test "an unreachable engine degrades to a disabled block instead of failing", %{conn: conn} do
+      {_slot, served} = vllm_slot("gone", "glm-5.3-flash")
+
+      stub_engine_metrics_error()
+
+      body = conn |> management() |> get(~p"/v1/serving?speculative=1") |> json_response(200)
+
+      assert %{"speculative" => spec} = deployment_json(body, served.id)
+      assert spec["enabled"] == false
+      assert spec["scraped_at"] == nil
+    end
+
+    test "scrapes an agent-managed slot, whose adapter_type is openai", %{conn: conn} do
+      {_slot, served} = managed_vllm_slot("sparky", "Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw:exl3")
+      stub_engine_metrics(speculating_metrics("Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw:exl3"))
+
+      body = conn |> management() |> get(~p"/v1/serving?speculative=1") |> json_response(200)
+
+      assert %{"speculative" => spec} = deployment_json(body, served.id)
+      assert spec["enabled"] == true
+      assert spec["acceptance_rate"] == 0.3775
+    end
+
+    test "a deployment the slot is not currently serving reads as disabled", %{conn: conn} do
+      {slot, _resident} = managed_vllm_slot("sparky", "glm-5.3-flash")
+      idle = deployment(slot, %{model_name: "qwen3.8-flash-next"})
+      stub_engine_metrics(speculating_metrics("glm-5.3-flash"))
+
+      body = conn |> management() |> get(~p"/v1/serving?speculative=1") |> json_response(200)
+
+      assert deployment_json(body, idle.id)["speculative"]["enabled"] == false
+    end
+
+    test "a managed llama.cpp slot is never scraped", %{conn: conn} do
+      {:ok, agent} = Config.create_agent(%{host_id: "macmini", control_url: "http://m:4400"})
+      slot = provider(%{agent_id: agent.id, name: "macmini:8081", base_url: "http://m:8081/v1"})
+
+      {:ok, model} =
+        Config.create_model(%{
+          upstream_model_id: "macmini/qwen3.5-9b.gguf",
+          display_name: "qwen3.5-9b.gguf",
+          engine: "llama_cpp"
+        })
+
+      served = deployment(slot, %{model_name: "qwen3.5-9b.gguf", model_id: model.id})
+
+      body = conn |> management() |> get(~p"/v1/serving?speculative=1") |> json_response(200)
+
+      assert deployment_json(body, served.id)["speculative"] == nil
+    end
+
+    test "still requires a management-scoped key", %{conn: conn} do
+      key = mint([:inference])
+
+      assert conn |> authed(key) |> get(~p"/v1/serving?speculative=1") |> json_response(403)
     end
   end
 
@@ -358,6 +558,51 @@ defmodule AiroWeb.ServingControllerTest do
       assert body =~ ~s(model_name="Qwen3.6-35B",deployment_id="#{served.id}",status="up"} 1)
       assert body =~ ~s(model_name="Qwen3.6-35B",deployment_id="#{served.id}",status="down"} 0)
       assert body =~ "airo_deployment_routable"
+    end
+
+    test "exposes speculative-decode gauges for a speculating slot", %{conn: conn} do
+      {_slot, served} = vllm_slot("sparky", "glm-5.3-flash")
+      stub_engine_metrics(speculating_metrics("glm-5.3-flash"))
+
+      body = conn |> management() |> get("/metrics") |> response(200)
+
+      labels =
+        ~s(host_id="sparky",provider="sparky:8081",model_name="glm-5.3-flash",deployment_id="#{served.id}")
+
+      assert body =~ ~s(airo_spec_decode_enabled{#{labels}} 1)
+      assert body =~ ~s(airo_spec_decode_drafts_total{#{labels}} 11325)
+      assert body =~ ~s(airo_spec_decode_draft_tokens_total{#{labels}} 78806)
+      assert body =~ ~s(airo_spec_decode_accepted_tokens_total{#{labels}} 29746)
+      assert body =~ ~s(airo_spec_decode_acceptance_rate{#{labels}} 0.3775)
+      assert body =~ ~s(airo_spec_decode_accepted_per_draft{#{labels}} 2.63)
+      assert body =~ ~s(airo_spec_decode_tokens_per_step{#{labels}} 3.63)
+      assert body =~ ~s(airo_spec_decode_accepted_at_position_ratio{#{labels},position="0"} 0.782)
+      assert body =~ ~s(airo_spec_decode_accepted_at_position_ratio{#{labels},position="1"} 0.564)
+      assert body =~ "# TYPE airo_spec_decode_drafts_total counter"
+      assert body =~ "# TYPE airo_spec_decode_acceptance_rate gauge"
+    end
+
+    test "a non-speculating slot reports enabled 0 and no rate series at all", %{conn: conn} do
+      {_slot, served} = vllm_slot("pvegpu", "qwen3.8-32b")
+      stub_engine_metrics(quiet_metrics("qwen3.8-32b"))
+
+      body = conn |> management() |> get("/metrics") |> response(200)
+
+      assert body =~
+               ~s(airo_spec_decode_enabled{host_id="pvegpu",provider="pvegpu:8081",model_name="qwen3.8-32b",deployment_id="#{served.id}"} 0)
+
+      refute body =~ "airo_spec_decode_acceptance_rate"
+      refute body =~ "airo_spec_decode_drafts_total"
+    end
+
+    test "a slot Airo cannot scrape emits no speculative series", %{conn: conn} do
+      {_slot, _served} = vllm_slot("gone", "glm-5.3-flash")
+      stub_engine_metrics_error()
+
+      body = conn |> management() |> get("/metrics") |> response(200)
+
+      assert body =~ ~s(airo_spec_decode_enabled{host_id="gone")
+      refute body =~ "airo_spec_decode_acceptance_rate"
     end
 
     test "omits vram series for a host with no telemetry rather than reporting zero", %{

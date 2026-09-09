@@ -23,6 +23,21 @@ defmodule AiroWeb.MetricsController do
   behind it. `airo_host_last_seen_timestamp_seconds` is the raw signal both are
   derived from.
 
+  ## Speculative decoding
+
+  `airo_spec_decode_*` is scraped live from each vLLM engine on every request to
+  this endpoint, and is **cumulative since that engine started** — not since
+  Airo started, and not attributable to any one caller. A slot reload zeroes it,
+  which Prometheus reads correctly as a counter reset. `airo_spec_decode_enabled`
+  is `0` for a slot serving without `--speculative-config`; the other series are
+  absent there rather than zero, so `acceptance_rate` never reads as a slot that
+  accepts nothing.
+
+  These series carry a `deployment_id` label, but the counters behind them are
+  **per engine**. Two deployments pointed at one slot report the same underlying
+  numbers, so `sum()` across deployments double-counts — aggregate by `provider`
+  instead.
+
   **Counter caveat:** the `_total` counters are derived from `usage_records`,
   which `Airo.Usage.PruneWorker` trims on a retention window. A prune makes them
   decrease, which Prometheus reads as a counter reset — `rate()` over a prune
@@ -36,7 +51,10 @@ defmodule AiroWeb.MetricsController do
   @content_type "text/plain; version=0.0.4; charset=utf-8"
 
   def index(conn, _params) do
-    snapshot = Serving.snapshot()
+    # `speculative: true` costs one `GET /metrics` per vLLM slot, concurrently
+    # and time-boxed. That is the right trade for a scrape endpoint, and this
+    # is not the inference path.
+    snapshot = Serving.snapshot(speculative: true)
     usage = Serving.usage_rollup(group_by: :deployment, limit: 5_000)
 
     body =
@@ -45,6 +63,7 @@ defmodule AiroWeb.MetricsController do
         slot_metrics(snapshot.hosts),
         cluster_metrics(snapshot.clusters),
         deployment_metrics(snapshot),
+        spec_decode_metrics(snapshot),
         alias_metrics(snapshot.aliases),
         usage_metrics(usage.rows)
       ]
@@ -259,9 +278,9 @@ defmodule AiroWeb.MetricsController do
 
   @health_statuses [:up, :down, :unknown]
 
-  defp deployment_metrics(snapshot) do
-    # Managed slots and external providers are the same thing to a monitor; the
-    # host_id label is empty for an upstream Airo doesn't manage.
+  # Managed slots and external providers are the same thing to a monitor; the
+  # host_id label is empty for an upstream Airo doesn't manage.
+  defp deployment_entries(snapshot) do
     managed =
       for host <- snapshot.hosts,
           slot <- host.slots,
@@ -273,7 +292,11 @@ defmodule AiroWeb.MetricsController do
           deployment <- provider.deployments,
           do: {"", provider.provider, deployment}
 
-    all = managed ++ external
+    managed ++ external
+  end
+
+  defp deployment_metrics(snapshot) do
+    all = deployment_entries(snapshot)
 
     [
       metric(
@@ -329,6 +352,105 @@ defmodule AiroWeb.MetricsController do
       model_name: deployment.model_name,
       deployment_id: deployment.id
     ]
+  end
+
+  ## Speculative decoding
+
+  defp spec_decode_metrics(snapshot) do
+    # A `nil` block means the slot was never scraped — not a vLLM engine, or the
+    # scrape failed. Only a scraped slot gets to say whether it speculates.
+    scraped =
+      for {host_id, provider, deployment} <- deployment_entries(snapshot),
+          deployment.speculative,
+          do: {host_id, provider, deployment}
+
+    speculating = Enum.filter(scraped, fn {_h, _p, d} -> d.speculative.enabled end)
+
+    [
+      spec_gauge(
+        "airo_spec_decode_enabled",
+        "1 when the slot serving this deployment is running speculative decoding.",
+        scraped,
+        &bool(&1.enabled)
+      ),
+      spec_counter(
+        "airo_spec_decode_drafts_total",
+        "Draft rounds the engine has run since it started.",
+        speculating,
+        & &1.drafts
+      ),
+      spec_counter(
+        "airo_spec_decode_draft_tokens_total",
+        "Tokens drafted since the engine started.",
+        speculating,
+        & &1.draft_tokens
+      ),
+      spec_counter(
+        "airo_spec_decode_accepted_tokens_total",
+        "Drafted tokens the target model accepted since the engine started.",
+        speculating,
+        & &1.accepted_tokens
+      ),
+      spec_ratio(
+        "airo_spec_decode_acceptance_rate",
+        "Accepted draft tokens as a share of tokens drafted, cumulative since engine start.",
+        speculating,
+        & &1.acceptance_rate
+      ),
+      spec_ratio(
+        "airo_spec_decode_accepted_per_draft",
+        "Mean accepted tokens per draft round, cumulative since engine start.",
+        speculating,
+        & &1.accepted_per_draft
+      ),
+      spec_ratio(
+        "airo_spec_decode_tokens_per_step",
+        "Mean tokens emitted per decode step, the target's own token plus the accepted prefix.",
+        speculating,
+        & &1.tokens_per_step
+      ),
+      spec_position_metrics(speculating)
+    ]
+  end
+
+  # The decay curve: the share of draft rounds whose token at this position was
+  # accepted. Watch the tail — positions that rarely land are `num_speculative_
+  # tokens` set higher than the draft model can earn.
+  defp spec_position_metrics(speculating) do
+    samples =
+      for {host_id, provider, deployment} <- speculating,
+          positions = deployment.speculative.per_position,
+          {ratio, position} <- Enum.with_index(positions || []),
+          do: {host_id, provider, deployment, position, ratio}
+
+    metric(
+      "airo_spec_decode_accepted_at_position_ratio",
+      :gauge,
+      "Share of draft rounds whose token at this draft position was accepted.",
+      samples,
+      fn {host_id, provider, deployment, position, ratio} ->
+        {labels(host_id, provider, deployment) ++ [position: position], ratio}
+      end
+    )
+  end
+
+  defp spec_counter(name, help, entries, value_fun),
+    do: spec_metric(name, :counter, help, entries, value_fun)
+
+  defp spec_ratio(name, help, entries, value_fun),
+    do: spec_metric(name, :gauge, help, entries, value_fun)
+
+  defp spec_gauge(name, help, entries, value_fun),
+    do: spec_metric(name, :gauge, help, entries, value_fun)
+
+  # A ratio is `nil` on a slot that has drafted nothing yet. Emitting no series
+  # is the honest reading: it has no acceptance rate, rather than one of zero.
+  defp spec_metric(name, type, help, entries, value_fun) do
+    entries = Enum.filter(entries, fn {_h, _p, d} -> value_fun.(d.speculative) != nil end)
+
+    metric(name, type, help, entries, fn {host_id, provider, deployment} ->
+      {labels(host_id, provider, deployment), value_fun.(deployment.speculative)}
+    end)
   end
 
   ## Aliases

@@ -119,6 +119,16 @@ Hugging Face cache for provenance, and pushes host and slot state to Airo.
   Presence, calls a connected host **stale** when its heartbeat has been silent
   past the configurable window (default 45 s), and records every transition in
   `host_events`, on the agent page, and in Prometheus gauges.
+- **Speculative decode is reported, not attributed** (S27). A vLLM slot started
+  with `--speculative-config` exposes four acceptance counters on its own
+  `/metrics`. Airo scrapes them per slot on `GET /metrics`, and on
+  `GET /v1/serving?speculative=1`, and derives the ratios that matter:
+  acceptance rate, accepted tokens per draft, tokens per decode step, and the
+  per-position decay curve that says whether `num_speculative_tokens` is set
+  too high. They are **cumulative since the engine started and engine-wide** —
+  to measure one request or one benchmark arm, read the counters before and
+  after it and divide the deltas. A slot serving without speculation reports
+  `enabled: false` rather than zeros.
 - **Build and deploy** live in the agent repo: a multi-arch container build
   (x86 and arm64 DGX Spark hosts), one host at a time, because restarting an
   agent drains every engine it owns. The vLLM slot wrapper is bash 3.2 safe so

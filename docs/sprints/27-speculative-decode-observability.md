@@ -1,9 +1,11 @@
 # Sprint 27 — Speculative-decode observability
 
-> **Status: planned.** Nothing implemented. This file is the handoff from the
-> investigation session of **2026-09-09**; every number below was measured that
-> day against the live `sparky:8081` slot and is reproducible with the commands
-> quoted here.
+> **Status: deliverables 1, 2, 3 and 5 implemented on branch
+> `feat/spec-decode-observability`; deliverable 4 (a management-scoped key for
+> helm) is unstarted and waiting on jody, because it is a prod credential
+> change.** Not deployed. The investigation section below is the handoff from
+> **2026-09-09**; every number in it was measured that day against the live
+> `sparky:8081` slot and is reproducible with the commands quoted here.
 
 > **Findings that change the premise** (read before planning anything):
 > acceptance rate is **already available, unauthenticated, today** — the report
@@ -117,12 +119,28 @@ the pairing item noted against the helm power sprint — real, but label it
 accurately: **helm needs a management key for Airo topology and Prometheus
 data. It does not need one for acceptance rate.**
 
-## Design (proposed — not yet agreed)
+## A second premise correction, found while building (2026-09-09)
 
-1. **Widen the allowlist.** Add the three counters (and optionally the
-   per-position family) to `@metric_names`. `put_metric/4` currently keys on
-   `model_name`; the per-position series needs `position` retained, so either
-   keep it as a map keyed by position or skip it in v1.
+**Every agent-managed slot in the fleet is `adapter_type: :openai`, including
+the vLLM ones.** Checked against both the dev database and prod: `forge:8081`,
+`jobycorp:8081`, `macmini:8081`, `pvegpu:8081`, `sparky:8081` and
+`sparky2:8081` are all `openai`. The engine is recorded on the **model**
+(`models.engine`, `vllm` or `llama_cpp`), not on the provider.
+
+So the obvious filter — scrape providers where `adapter_type == :vllm` — finds
+**nothing in the fleet**. It would only ever match an external vLLM upstream,
+of which there are none. `Airo.Engines.local_provider/1` is the mapping that
+already exists for exactly this (the Model Shelf hit it first; its moduledoc
+says so), and it is what the scrape filters on now.
+
+## Design (as built)
+
+1. **Widen the allowlist.** All four counters are in `@metric_names`. The
+   per-position family keeps its `position` label, folded into
+   `spec_decode_accepted_tokens_by_position` — a map keyed by **integer**
+   position, so the curve orders without re-parsing label strings. It is the
+   one name with no flat scalar: a flat key would hold whichever position was
+   parsed last, which reads like a total and is not one.
 
 2. **Derive, don't just relay.** A raw counter is not the signal. Expose a
    computed block per deployment so a consumer never divides wrong:
@@ -135,50 +153,86 @@ data. It does not need one for acceptance rate.**
      accepted_per_draft: 2.63,
      tokens_per_step: 3.63,
      per_position: [0.782, 0.564, 0.413, 0.307, 0.230, 0.183, 0.147],
-     cumulative_since: "engine start",   # NOT per-request
+     cumulative_since: "engine_start",   # NOT per-request
      scraped_at: <timestamp>
    }
    ```
 
    `enabled: false` when the engine reports no speculative family, so absence
-   reads as "not speculating", never as zero acceptance.
+   reads as "not speculating", never as zero acceptance. Built as
+   `Airo.Speculative`, with three states rather than two: `nil` means the slot
+   was never scraped (option off, or not a vLLM engine), `enabled: false` means
+   it was asked and does not speculate, and `enabled: true` with `nil` ratios
+   means it speculates but has drafted nothing yet.
 
 3. **Surface in `/v1/serving`, and as gauges in `/metrics`.** Both are
    management-scoped, which is the right home for engine internals — and is
    exactly why the scope item below has to land with it or the whole thing is
-   invisible to helm.
+   invisible to helm. On `/v1/serving` it is opt-in behind `?speculative=1`,
+   matching `?inventory=1`; on `/metrics` it is always on, because a scrape
+   endpoint is what it is for.
 
-4. **Say "cumulative" in the field names or the docs.** The single largest
-   footgun here is a consumer reading `acceptance_rate` as belonging to its own
-   request. It does not. It is engine-wide since start. The harness must delta.
+   **`?speculative=1` defeats the `ETag`.** The counters climb on every request
+   the engine serves, so the snapshot differs almost every call and the `304`
+   path stops firing. Poll topology without it and ask for the numbers
+   separately. Documented on the controller.
+
+4. **Say "cumulative" in the field names and the docs.** Shipped as a
+   `cumulative_since: "engine_start"` field in the payload, the first section of
+   the `Airo.Speculative` moduledoc, and a paragraph on the `/metrics`
+   controller. The single largest footgun here is a consumer reading
+   `acceptance_rate` as belonging to its own request. It does not. It is
+   engine-wide since start. The harness must delta.
 
 5. **Do not put it on the inference path.** `/v1/serving` scrapes on demand;
    do not add a per-request engine call to the gateway hot path.
 
 ## Deliverables
 
-1. Speculative counters in `Airo.Adapters.VLLM`'s allowlist + parser, with the
-   `position` label preserved.
-2. A derived `speculative` block per deployment in `Airo.Serving.snapshot/1`,
-   `enabled: false` when absent.
-3. `airo_spec_decode_*` gauges in `AiroWeb.MetricsController`.
-4. A management-scoped key for helm (or the scope added to `helm-prod` /
-   `helm-dev`), **decided with jody** — it is a prod credential change.
-5. Docs: a line in the README's build-details section, and a note in
-   `DESIGN.md` that engine-internal metrics are management-scoped by design.
+1. **Done.** Speculative counters in `Airo.Adapters.VLLM`'s allowlist + parser,
+   with the `position` label preserved. `metrics/1` is now public, so `Serving`
+   can scrape without paying for the `/v1/models` call `runtime_info/1` makes.
+2. **Done.** A derived `speculative` block per deployment in
+   `Airo.Serving.snapshot/1`, behind `speculative: true`, `enabled: false` when
+   absent. One `GET /metrics` per vLLM slot, concurrent, 4 s budget, ordered so
+   a killed task is attributed to the right slot.
+3. **Done.** `airo_spec_decode_*` gauges in `AiroWeb.MetricsController`:
+   `enabled`, the three `_total` counters, `acceptance_rate`,
+   `accepted_per_draft`, `tokens_per_step`, and `accepted_at_position_ratio`
+   labelled by `position`.
+4. **Not started — jody's call.** A management-scoped key for helm (or the
+   scope added to `helm-prod` / `helm-dev`). It is a prod credential change, so
+   it is not being made unilaterally. See the open question below.
+5. **Done.** A paragraph in the README's host-agent build-details section, and a
+   note in `docs/design/DESIGN.md` §10 that engine-internal metrics are
+   management-scoped by design.
 
 ## Tests
 
-- Parser: a fixture of real `/metrics` text (capture from sparky) yields the
-  three counters and the per-position map; a fixture **without** the family
-  yields `enabled: false`, not zeros.
-- Derivation: acceptance rate, accepted-per-draft and tokens-per-step against
-  the measured numbers above (37.75%, 2.63, 3.63) — these are the regression
-  values.
-- Division guard: zero drafts must not raise or produce `NaN`.
-- `/v1/serving` includes the block for a speculating deployment and omits it
-  for a non-speculating one; management scope still enforced (403 for an
-  inference key).
+All written and passing; the full suite is green (636 tests, 3 doctests).
+
+- **Parser** (`test/airo/adapters/vllm_test.exs`): a fixture of the real
+  exposition from sparky yields the three counters and the per-position map,
+  keeps no meaningless scalar for the per-position family, ignores `_created`
+  timestamp lines, and yields no `spec_decode` keys at all for a slot serving
+  without speculation.
+- **Derivation** (`test/airo/speculative_test.exs`): acceptance rate,
+  accepted-per-draft and tokens-per-step against the measured numbers above
+  (37.75%, 2.63, 3.63), and the per-position curve (0.782 … 0.147) — these are
+  the regression values. Also: a gap in the reported positions pads rather than
+  shifting the curve, and a partial family degrades to `enabled: false` rather
+  than to a wrong ratio.
+- **Division guard**: zero drafts yields `nil` ratios, not `NaN`, not zero, and
+  does not raise.
+- **`/v1/serving`** (`test/airo_web/controllers/serving_controller_test.exs`):
+  the block appears for a speculating deployment, reads `enabled: false` for a
+  non-speculating one, is `null` when `?speculative=1` is absent (proved by
+  leaving the engine unstubbed, so any scrape would raise), is `null` for a
+  non-vLLM provider, degrades to a disabled block when the engine is
+  unreachable, and still 403s for an inference key.
+- **`/metrics`**: the gauge names, values and label sets above, including the
+  `position` label; a non-speculating slot emits `enabled 0` and no rate series
+  at all.
 
 ## Non-goals
 
@@ -207,29 +261,48 @@ data. It does not need one for acceptance rate.**
 
 - `/v1/serving` on prod shows a `speculative` block for the GLM slot whose
   `acceptance_rate` matches a hand-computed ratio from the engine's own
-  `/metrics` at the same moment, within rounding.
+  `/metrics` at the same moment, within rounding. **Verified against the live
+  `sparky:8081` engine from the dev app on 2026-09-09**, not on prod (nothing
+  was deployed). Scraping the engine at 15:48:40 UTC and deriving from it gave
+  `acceptance_rate: 0.3721`, `accepted_per_draft: 2.59`, `tokens_per_step:
+  3.59`, `per_position: [0.781, 0.561, 0.407, 0.3, 0.223, 0.177, 0.141]` — and
+  the same 0.3721 / 2.59 hand-computed from the raw counters in the same
+  scrape. The rate has drifted down from the 37.75% measured earlier that day
+  because the counters keep climbing with new traffic; that drift is the point
+  of `cumulative_since`.
 - A non-speculating slot (any Qwen slot, `pvegpu:8081`) reports
-  `enabled: false`.
+  `enabled: false`. **Verified live**: `pvegpu:8081` exposes zero `spec_decode`
+  lines, and its `model_name` label matches its Airo deployment exactly, so the
+  `false` is a true negative rather than a name mismatch.
+- Both slots were scraped through `Airo.Serving.snapshot(speculative: true)`
+  despite being `adapter_type: :openai`, which is what proves the engine-based
+  filter above.
 - helm can read it with its key, and its rows carry a real rate instead of
   `acceptance_reported: false` — or, if the scope decision goes the other way,
   helm deltas the engine directly and the sprint drops deliverable 4.
 
 ## Open questions for jody
 
-1. **Scope.** Give helm a management key, or leave helm scraping engines
-   directly and keep Airo's copy for the admin UI only? The second is less
-   coupling; the first is the single-source-of-truth story.
-2. **Per-position in v1?** It is the most useful tuning signal and the most
-   awkward shape (a labelled array). Ship it, or defer it to a follow-up?
+1. **Scope — still open, and the only thing blocking deliverable 4.** Give helm
+   a management key, or leave helm scraping engines directly and keep Airo's
+   copy for the admin UI only? The second is less coupling; the first is the
+   single-source-of-truth story. Nothing was changed on prod either way.
+2. **Per-position in v1? — decided: shipped.** The parser work was the same
+   either way once the `position` label had to be handled at all, and it is the
+   only signal that answers "is `num_speculative_tokens: 7` too high". Exposed
+   as an ordered array on `/v1/serving` and as a `position`-labelled gauge on
+   `/metrics`.
 
 ## Session note (2026-09-09)
 
-MemPal was unreachable from that session (`ConnectionRefused` at session start;
-the service itself was up and `claude mcp list` reported it connected — the
-session's MCP client had bound to the failed state and does not rebind without
-a restart). **Nothing from this investigation reached memory.** That is why
-this file exists. Worth storing on restart:
+MemPal was unreachable from the investigation session (`ConnectionRefused` at
+session start; the service itself was up and `claude mcp list` reported it
+connected — the session's MCP client had bound to the failed state and does not
+rebind without a restart). Nothing from that investigation reached memory, which
+is why this file exists.
 
-- the two-`/metrics` correction, since the wrong version caused a real dead end
-- the delta method as the way to measure acceptance per arm
-- that per-request acceptance is absent from this build's wire format
+**Resolved.** MemPal reconnected in the build session later the same day, and
+four facts were stored against the `airo` peer: the two-`/metrics` correction,
+the delta method for per-arm acceptance, the absence of per-request acceptance
+from this build's wire format, and the `adapter_type: :openai` finding above.
+The build itself is recorded as an `episodic_event`.

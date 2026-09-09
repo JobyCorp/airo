@@ -15,13 +15,31 @@ defmodule AiroWeb.ServingController do
   `AiroWeb.Plugs.ClientKeyAuth`). `GET /v1/serving` is `ETag`-tagged: a poller
   that sends `If-None-Match` gets a `304` while topology is unchanged, so a tight
   poll interval costs almost nothing.
+
+  ## Query parameters on `GET /v1/serving`
+
+    - `inventory=1` — also report what each host holds on disk.
+    - `speculative=1` — also scrape each vLLM slot's own `/metrics` and report
+      a derived speculative-decode block per deployment. Both cost one outbound
+      call per host (or per vLLM slot), so both are off by default.
+
+  `speculative=1` defeats the `ETag`: the counters climb on every request the
+  engine serves, so the snapshot almost always differs and a `304` almost never
+  fires. Poll topology without it, and ask for it only when you want the
+  numbers. And read `Airo.Speculative` before using them — they are cumulative
+  since engine start, not per request.
   """
   use AiroWeb, :controller
 
   alias Airo.Serving
 
   def index(conn, params) do
-    snapshot = Serving.snapshot(inventory: truthy?(params["inventory"]))
+    snapshot =
+      Serving.snapshot(
+        inventory: truthy?(params["inventory"]),
+        speculative: truthy?(params["speculative"])
+      )
+
     etag = etag(etag_basis(snapshot))
 
     if etag in get_req_header(conn, "if-none-match") do

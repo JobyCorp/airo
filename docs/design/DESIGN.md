@@ -339,6 +339,20 @@ shadow-first). Local on-CPU engine: [`DESIGN-local-classifier.md`](./DESIGN-loca
   `/api/ps` for speech/transcription task, language, voice, sample-rate, and
   loaded-model metadata. Cloud providers remain catalog-only/backlog for model
   management.
+- **Engine internals are management-scoped, by design** (S27): Airo's own
+  `/metrics` and `/v1/serving` require a `management` client key, and that is
+  where anything scraped out of a serving engine belongs — speculative-decode
+  acceptance, KV-cache pressure, queue depth. An inference key buys inference.
+  A caller that only wants the raw counters can reach the vLLM engine's own
+  `/metrics` directly; Airo's copy exists to join them to topology (which host,
+  which slot, which deployment), not to gate them.
+
+  The counters themselves are **cumulative since engine start and engine-wide**.
+  They carry no client-key, alias or request labels, and this vLLM build reports
+  no per-request acceptance on the wire at all, so per-caller attribution is not
+  a feature Airo is withholding — it does not exist upstream. Measuring one
+  request or one benchmark arm means differencing the counters around it. See
+  `Airo.Speculative`.
 - **Transparency**: `x-gateway-*` headers + SSE trailing event (see §5.1).
 - **Logs & traceability**: a persisted operational event log (`log_events`) — routing
   predictions and health transitions, captured off the hot path — surfaced at
