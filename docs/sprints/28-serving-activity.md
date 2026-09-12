@@ -1,8 +1,9 @@
 # Sprint 28 — Serving activity: loaded, max concurrency, available concurrency
 
-> **Status: built 2026-09-12 on branch `feat/serving-activity`; not merged,
-> not deployed.** 672 tests (+36 over S27), `mix precommit` green,
-> `joby_kit.lint` 16 (unchanged). Scope set by jody on 2026-09-12 after a
+> **Status: merged to `main` as `9ba4bb8` and deployed to prod on 2026-09-12;
+> `airo.service` on VM 302 (`phx2`) came up at 17:55:30 UTC, no migrations.**
+> 672 tests (+36 over S27), `mix precommit` green, `joby_kit.lint` 16
+> (unchanged). Scope set by jody on 2026-09-12 after a
 > review of four proposed airo additions for agent orchestration: memory
 > pressure is **not** a measure of availability for agents; the signals the
 > harness will act on are **Model Loaded**, **Max Concurrency** and
@@ -267,8 +268,10 @@ observers reconnected.
 - **Suite**: 672 tests + 3 doctests green, `mix precommit` green,
   `joby_kit.lint` 16 warnings (unchanged from S26/S27).
 
-**Not done:** merge to `main`, deploy to prod, and reading the payload from
-helm with its key. The first two are jody's call; the third follows the deploy.
+**Deployed 2026-09-12.** jody asked for merge and deploy in the same session;
+`bin/deploy-docker.sh` shipped merge commit `9ba4bb8` at 17:52–17:55 UTC. See
+the prod check below. Reading the payload from helm with its own key is the
+harness's next step, not this sprint's.
 
 ## Open questions for jody (resolved — see the decisions block at the top)
 
