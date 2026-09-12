@@ -55,6 +55,7 @@ defmodule AiroWeb.MetricsController do
     # and time-boxed. That is the right trade for a scrape endpoint, and this
     # is not the inference path.
     snapshot = Serving.snapshot(speculative: true)
+    activity = Serving.activity()
     usage = Serving.usage_rollup(group_by: :deployment, limit: 5_000)
 
     body =
@@ -63,6 +64,7 @@ defmodule AiroWeb.MetricsController do
         slot_metrics(snapshot.hosts),
         cluster_metrics(snapshot.clusters),
         deployment_metrics(snapshot),
+        activity_metrics(activity),
         spec_decode_metrics(snapshot),
         alias_metrics(snapshot.aliases),
         usage_metrics(usage.rows)
@@ -352,6 +354,52 @@ defmodule AiroWeb.MetricsController do
       model_name: deployment.model_name,
       deployment_id: deployment.id
     ]
+  end
+
+  ## Activity (S28)
+
+  # `loaded` and the concurrency trio come from `Serving.activity/1` rather than
+  # the snapshot so the in-flight count is read once, here, from the Registry.
+  # Memory is not an input to any of these on purpose: on a vLLM slot the
+  # memory reading is the engine's KV preallocation, not headroom.
+  defp activity_metrics(activity) do
+    entries = activity.deployments
+    with_max = Enum.filter(entries, & &1.max_concurrency)
+
+    [
+      activity_gauge(
+        "airo_deployment_loaded",
+        "1 when the slot serving this deployment reports up with this deployment's " <>
+          "model resident (for an external upstream: when its probe health is up).",
+        entries,
+        &bool(&1.loaded)
+      ),
+      activity_gauge(
+        "airo_deployment_max_concurrency",
+        "Concurrent sequences the slot's engine was launched with " <>
+          "(--max-num-seqs on vLLM, --parallel on llama.cpp). Absent when unknown.",
+        with_max,
+        & &1.max_concurrency
+      ),
+      activity_gauge(
+        "airo_deployment_in_flight",
+        "Requests currently passing through Airo to this deployment, realtime sessions included.",
+        entries,
+        & &1.in_flight
+      ),
+      activity_gauge(
+        "airo_deployment_available_concurrency",
+        "max_concurrency minus in_flight, floored at 0. Absent when max is unknown.",
+        with_max,
+        & &1.available_concurrency
+      )
+    ]
+  end
+
+  defp activity_gauge(name, help, entries, value_fun) do
+    metric(name, :gauge, help, entries, fn entry ->
+      {labels(entry.host_id || "", entry.provider, entry), value_fun.(entry)}
+    end)
   end
 
   ## Speculative decoding

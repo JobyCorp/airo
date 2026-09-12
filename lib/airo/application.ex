@@ -24,6 +24,9 @@ defmodule Airo.Application do
       # Runtime ETS tables (health snapshots, round-robin counters), then the
       # health prober that populates them.
       Airo.Runtime.Store,
+      # In-flight request registry (S28): entries are owned by the request
+      # process, so a client hangup or crash releases its slot automatically.
+      Airo.Gateway.InFlight,
       Airo.Health.Prober,
       # Host liveness beyond Presence: stale (connected but silent) and lost
       # (presence gone without a clean terminate). S25.

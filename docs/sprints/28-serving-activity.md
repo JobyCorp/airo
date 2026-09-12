@@ -1,12 +1,25 @@
 # Sprint 28 — Serving activity: loaded, max concurrency, available concurrency
 
-> **Status: planned 2026-09-12, not started.** Scope set by jody on 2026-09-12
-> after a review of four proposed airo additions for agent orchestration:
-> memory pressure is **not** a measure of availability for agents; the signals
-> the harness will act on are **Model Loaded**, **Max Concurrency** and
+> **Status: built 2026-09-12 on branch `feat/serving-activity`; not merged,
+> not deployed.** 672 tests (+36 over S27), `mix precommit` green,
+> `joby_kit.lint` 16 (unchanged). Scope set by jody on 2026-09-12 after a
+> review of four proposed airo additions for agent orchestration: memory
+> pressure is **not** a measure of availability for agents; the signals the
+> harness will act on are **Model Loaded**, **Max Concurrency** and
 > **Available Concurrency**. helm holds a management-scoped key as of the same
 > day, so S27 deliverable 4 is closed and every `/v1/serving*` route is
 > readable from the harness.
+
+> **Decisions taken while building.** The two open questions below were
+> resolved the recommended way: queue depth is reported as `engine.waiting`
+> and not subtracted from availability, and there is no per-key split of
+> `in_flight` in v1. `slot_status` gained an eighth value, `peer_rank`, for a
+> tensor-parallel rank that serves no API — `sparky2:8081` is the case in the
+> fleet. The topology snapshot carries `loaded`, `slot_status` and
+> `max_concurrency` on every deployment; only `in_flight` and
+> `available_concurrency` are confined to the activity endpoint. The S27
+> speculative scrape and the S28 engine scrape share one code path
+> (`engine_scrapes/1`), so a slot is never scraped twice for one call.
 
 > **Goal (one sentence):** give an orchestrating harness three per-deployment
 > facts it can act on — is the model loaded, how many requests can it take, how
@@ -116,7 +129,9 @@ the S27 note about `?speculative=1` "defeating" it was protecting nothing.
    Target: single-digit milliseconds without `engine=1`.
 6. **Repair the topology `ETag`.** Drop `last_seen_at` and the whole `gpu`
    map from `etag_basis/1`; `online` and `stale` stay, because they are the
-   liveness facts. `/metrics` keeps carrying the raw telemetry. `loaded` and
+   liveness facts. Probe latency (`health.latency_ms`) also stays: it is a
+   reading of state, and it moves at most once per prober round (30 s), which
+   is churn a poller can live with. `/metrics` keeps carrying the raw telemetry. `loaded` and
    `max_concurrency` are stable enough to ride the base snapshot too, so add
    them there; `in_flight` and `available_concurrency` do **not** go on it.
 7. **`/metrics` gauges** — `airo_deployment_loaded`,
@@ -220,7 +235,42 @@ the S27 note about `?speculative=1` "defeating" it was protecting nothing.
   while nothing but heartbeats and telemetry has changed.
 - Both suites green; `mix precommit` and `mix joby_kit.lint` clean.
 
-## Open questions for jody
+## Acceptance — verified 2026-09-12 against the dev observer airo
+
+The dev server was restarted at 17:36 UTC (new supervision child), and every
+check below was run from the dev app against the live fleet after the six
+observers reconnected.
+
+- **`Serving.activity/1`**: 9 ms without `engine: true`, 49 ms with it. The
+  three dev deployments read: the external `gpt-5.6-sol` `loaded: true,
+  slot_status: "external", max_concurrency: nil`; `pvegpu:8081`'s Qwen3.5-9B
+  deployment `loaded: false, slot_status: "not_resident", max_concurrency: 4`
+  (gemma-4-12B is resident there — a true negative); `sparky:8081`'s
+  DeepSeek-V4 deployment `loaded: true, slot_status: "up", max_concurrency: 4,
+  available_concurrency: 4`. With `engine: true` sparky's block read
+  `running: 0, waiting: 0, kv_cache_pct: 0.0`, `source: "gateway"`.
+- **In flight under a real request**: a 16-token chat to the DeepSeek
+  deployment through dev's gateway completed in 377 ms; `InFlight.count/1`
+  sampled every 100 ms read `1` for three samples during it and `0`
+  immediately after. An earlier attempt whose evaluating process was killed
+  mid-request left the Registry empty — the crash-release path, observed
+  rather than assumed.
+- **Topology `ETag`**: with `last_seen_at` and `gpu` out of the basis, three
+  6-second rounds against the live snapshot gave equal tags in two and a
+  differing tag in one, where the only moving field was the external
+  provider's `health.latency_ms` (133 → 231 ms) from a prober round. Probe
+  latency is real state and stays in the tag, so the `304` now holds between
+  probes (30 s) instead of never.
+- **UI**: `HomeLive` ring cards show "0 in flight" under the slot count for all
+  six hosts; `/admin/agents/7` (sparky) has the new "In flight" column reading
+  `0 / 4`.
+- **Suite**: 672 tests + 3 doctests green, `mix precommit` green,
+  `joby_kit.lint` 16 warnings (unchanged from S26/S27).
+
+**Not done:** merge to `main`, deploy to prod, and reading the payload from
+helm with its key. The first two are jody's call; the third follows the deploy.
+
+## Open questions for jody (resolved — see the decisions block at the top)
 
 1. **Queue depth.** With `engine=1`, should `waiting > 0` drive
    `available_concurrency` to 0 even when `running < max`? Recommended: no —

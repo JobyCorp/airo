@@ -7,6 +7,7 @@ defmodule Airo.Dashboard do
   deeper admin surfaces without becoming another configuration plane.
   """
 
+  alias Airo.Gateway.InFlight
   alias Airo.{Config, Health, ModelShelf, Repo, Usage}
 
   @usage_filters %{"range" => "24h"}
@@ -40,7 +41,7 @@ defmodule Airo.Dashboard do
   # (Presence lives there); here we only shape the telemetry the agent pushed.
   defp agents do
     Config.list_agents()
-    |> Repo.preload(:providers)
+    |> Repo.preload(providers: :deployments)
     |> Enum.map(&agent_gauge/1)
     |> Enum.sort_by(& &1.host_id)
   end
@@ -53,6 +54,11 @@ defmodule Airo.Dashboard do
       host_id: agent.host_id,
       role: agent.role || :controller,
       slots: length(agent.providers),
+      # Requests through Airo to any deployment on this host right now (S28).
+      in_flight:
+        Enum.reduce(agent.providers, 0, fn provider, acc ->
+          Enum.reduce(provider.deployments, acc, &(InFlight.count(&1.id) + &2))
+        end),
       telemetry?: gpu_val(gpu, :available) == true,
       rings: [
         vram_ring(gpu),

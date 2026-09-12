@@ -135,6 +135,23 @@ defmodule AiroWeb.RealtimeProxyTest do
              Repo.all(UsageRecord)
   end
 
+  test "a live session counts as one in-flight request on its deployment (S28)" do
+    alias Airo.Gateway.InFlight
+    deployment_id = System.unique_integer([:positive]) + 2_000_000
+    state = initial_state()
+    target = %{state.target | deployment: %Deployment{id: deployment_id, model_name: "echo"}}
+
+    assert InFlight.count(deployment_id) == 0
+    assert {:ok, state} = RealtimeProxy.init(%{state | target: target})
+    assert InFlight.count(deployment_id) == 1
+
+    # No release on close: the session *is* the process, and this test process
+    # outlives it, so let go explicitly here.
+    assert :ok = RealtimeProxy.terminate(:remote, state)
+    InFlight.release(deployment_id)
+    assert InFlight.count(deployment_id) == 0
+  end
+
   test "client hangup on a live session records a served :realtime session" do
     assert {:ok, state} = RealtimeProxy.init(initial_state())
     state = pump_until_open(state)

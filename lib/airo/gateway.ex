@@ -20,6 +20,7 @@ defmodule Airo.Gateway do
   alias Airo.Adapter.Context
   alias Airo.Config
   alias Airo.Config.{Alias, ClientKey, Deployment, Provider}
+  alias Airo.Gateway.InFlight
   alias Airo.Gateway.Params
   alias Airo.Gateway.Vision
   alias Airo.Health
@@ -123,7 +124,9 @@ defmodule Airo.Gateway do
   defp run_attempts([attempt | rest], capability, fallback_used) do
     log_attempt(:info, "gateway.attempt.started", attempt, capability, fallback_used)
 
-    case apply(attempt.adapter, capability, [attempt.body, attempt.context]) do
+    case tracked(attempt, capability, fn ->
+           apply(attempt.adapter, capability, [attempt.body, attempt.context])
+         end) do
       {:ok, body} ->
         mark_health(attempt, :ok)
         log_attempt(:info, "gateway.attempt.succeeded", attempt, capability, fallback_used)
@@ -159,7 +162,9 @@ defmodule Airo.Gateway do
   defp stream_attempts([attempt | rest], acc, reducer, committed?, fallback_used) do
     log_attempt(:info, "gateway.stream_attempt.started", attempt, :stream, fallback_used)
 
-    case attempt.adapter.stream(attempt.body, attempt.context, acc, reducer) do
+    case tracked(attempt, :stream, fn ->
+           attempt.adapter.stream(attempt.body, attempt.context, acc, reducer)
+         end) do
       {:ok, acc} ->
         log_attempt(:info, "gateway.stream_attempt.succeeded", attempt, :stream, fallback_used)
         {:ok, acc, %{served: attempt, fallback_used: fallback_used}}
@@ -197,6 +202,21 @@ defmodule Airo.Gateway do
               do: stream_attempts(rest, acc, reducer, committed?, true),
               else: {:error, reason, acc}
         end
+    end
+  end
+
+  # One in-flight entry for exactly the span of the upstream call (S28). The
+  # release runs in `after` so an adapter that raises still lets go before the
+  # exception reaches the controller; and it runs *before* a failover moves on
+  # to the next attempt, so a fallback is still one request, not two. A process
+  # that dies mid-call releases by construction — see `Airo.Gateway.InFlight`.
+  defp tracked(%{deployment: deployment}, capability, fun) do
+    InFlight.track(deployment.id, %{capability: capability})
+
+    try do
+      fun.()
+    after
+      InFlight.release(deployment.id)
     end
   end
 

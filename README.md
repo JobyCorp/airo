@@ -129,6 +129,16 @@ Hugging Face cache for provenance, and pushes host and slot state to Airo.
   to measure one request or one benchmark arm, read the counters before and
   after it and divide the deltas. A slot serving without speculation reports
   `enabled: false` rather than zeros.
+- **Loaded and concurrency are first-class; memory is not** (S28). Every
+  request through the gateway is counted in flight against its deployment,
+  and `GET /v1/serving/activity` reports, per deployment, `loaded` (with a
+  `slot_status` saying why not), `max_concurrency` (the slot's
+  `--max-num-seqs` or `--parallel`), `in_flight` and `available_concurrency`.
+  That is what an orchestrator polls before it dispatches. Memory is not an
+  input: on a vLLM slot the memory reading is the engine's KV preallocation,
+  not headroom. The gateway only sees its own callers — `?engine=1` adds the
+  vLLM engine's own running and waiting counts, and availability follows
+  whichever is larger.
 - **Build and deploy** live in the agent repo: a multi-arch container build
   (x86 and arm64 DGX Spark hosts), one host at a time, because restarting an
   agent drains every engine it owns. The vLLM slot wrapper is bash 3.2 safe so

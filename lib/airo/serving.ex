@@ -40,13 +40,22 @@ defmodule Airo.Serving do
   is copied across hosts. `Airo.Agents.Provenance` therefore keys Airo's
   canonical `Model` by a host/slot-qualified `upstream_model_id`. Resident
   models expose both, and `upstream_model_id` is the id to join on.
+
+  ## Loaded and concurrency (S28)
+
+  Every deployment reports `loaded`, `slot_status` and `max_concurrency` on the
+  topology snapshot, and `activity/1` adds the live pair `in_flight` /
+  `available_concurrency`. Memory is deliberately **not** an input to any of
+  them: on a vLLM slot the memory reading is the engine's KV preallocation and
+  says nothing about whether another request would be served.
   """
 
   import Ecto.Query, warn: false
 
   alias Airo.Agents.{Capacity, Control, SlotState}
-  alias Airo.Config.Provider
+  alias Airo.Config.{Deployment, Provider}
   alias Airo.Agents.{HostEvent, Liveness}
+  alias Airo.Gateway.InFlight
   alias Airo.Health.HealthEvent
   alias Airo.Adapter.Context
   alias Airo.Adapters.VLLM
@@ -110,7 +119,11 @@ defmodule Airo.Serving do
 
     activity = deployment_activity()
     inventories = if opts[:inventory], do: inventories(agents), else: %{}
-    speculative = if opts[:speculative], do: speculative_scrapes(agents, external), else: %{}
+
+    speculative =
+      if opts[:speculative],
+        do: engine_scrapes(Enum.flat_map(agents, & &1.providers) ++ external),
+        else: %{}
 
     hosts =
       Enum.map(agents, &host(&1, activity, Map.get(inventories, &1.id), speculative))
@@ -240,11 +253,12 @@ defmodule Airo.Serving do
 
   defp slot(provider, agent, activity, index, sole_resident?, speculative) do
     state = SlotState.get(provider.id)
+    residency = %{state: state, stale?: Liveness.stale?(agent.host_id)}
 
     deployments =
       provider.deployments
       |> sort_by_model()
-      |> Enum.map(&deployment(&1, provider, activity, speculative))
+      |> Enum.map(&deployment(&1, provider, activity, speculative, residency))
 
     %{
       provider: provider.name,
@@ -352,7 +366,7 @@ defmodule Airo.Serving do
     deployments =
       Enum.map(
         sort_by_model(provider.deployments),
-        &deployment(&1, provider, activity, speculative)
+        &deployment(&1, provider, activity, speculative, :external)
       )
 
     %{
@@ -376,10 +390,11 @@ defmodule Airo.Serving do
     |> Enum.min_by(&status_rank(&1.status))
   end
 
-  defp deployment(deployment, provider, activity, speculative) do
+  defp deployment(deployment, provider, activity, speculative, residency) do
     status = Health.status(deployment.id)
     eligible = deployment.enabled and provider.enabled
     seen = Map.get(activity, deployment.id, %{})
+    {loaded, slot_status} = loaded(deployment, residency)
 
     %{
       id: deployment.id,
@@ -397,12 +412,171 @@ defmodule Airo.Serving do
       eligible: eligible,
       routable: eligible and status == :up,
       routable_reason: routable_reason(deployment, provider, status),
+      loaded: loaded,
+      slot_status: slot_status,
+      max_concurrency: max_concurrency(residency),
       last_success_at: seen[:last_success_at],
       last_error_at: seen[:last_error_at],
       last_error_code: seen[:last_error_code],
       speculative: speculative_block(speculative, provider, deployment)
     }
   end
+
+  ## ------------------------------------------------------------------
+  ## Loaded / concurrency (S28)
+  ## ------------------------------------------------------------------
+
+  # Whether the slot is a managed one (with its pushed state and its host's
+  # liveness) or an external upstream Airo only probes.
+  defp residency(%{agent: nil}), do: :external
+
+  defp residency(%{agent: agent} = provider),
+    do: %{state: SlotState.get(provider.id), stale?: Liveness.stale?(agent.host_id)}
+
+  # `loaded` is the S19 identity rule `Ingest.mark_deployments/4` marks health
+  # with: the deployment linked to the resident Model takes the slot's status,
+  # every other deployment on the slot is not resident. `slot_status` says *why*
+  # a deployment is not loaded, because a bare `false` is five different
+  # situations to an orchestrator — and only one of them ("loading") is worth
+  # waiting on.
+  @doc false
+  def loaded(deployment, :external), do: {Health.status(deployment.id) == :up, "external"}
+  def loaded(_deployment, %{stale?: true}), do: {false, "stale"}
+  def loaded(_deployment, %{state: nil}), do: {false, "empty"}
+
+  def loaded(deployment, %{state: state}) do
+    cond do
+      not SlotState.head?(state) -> {false, "peer_rank"}
+      state.status != :up -> {false, to_string(state.status)}
+      is_integer(state.model_id) and state.model_id == deployment.model_id -> {true, "up"}
+      true -> {false, "not_resident"}
+    end
+  end
+
+  # The engine's own concurrency cap, as the agent reported it: `--max-num-seqs`
+  # on vLLM, `--parallel` on llama.cpp. Only the rank that serves the API has
+  # one; an external upstream never says.
+  @doc false
+  def max_concurrency(%{state: %{parallel: parallel} = state})
+      when is_integer(parallel) and parallel > 0 do
+    if SlotState.head?(state), do: parallel, else: nil
+  end
+
+  def max_concurrency(_residency), do: nil
+
+  @doc """
+  The live activity view: per deployment, `loaded`, `max_concurrency`,
+  `in_flight` and `available_concurrency`, built for a harness that polls
+  before it dispatches. One query plus ETS and Registry reads; no inventory
+  call, no usage-table scan.
+
+  Options:
+
+    - `:engine` — when true, also scrape each vLLM slot's `/metrics` and attach
+      `engine: %{running, waiting, kv_cache_pct, scraped_at}`. Off by default
+      (one outbound call per vLLM slot, same budget as `:speculative`). The
+      block is `nil` when the option is off, when the provider is not a vLLM
+      engine, when the scrape fails, or when the engine reports no series under
+      this deployment's model name.
+
+  `in_flight` is what passed through Airo. A caller that hits an engine's port
+  directly is invisible here and visible to the engine, so with `:engine` the
+  availability arithmetic uses whichever of the two counts is larger and
+  `source` names it. Queue depth (`engine.waiting`) is reported beside it and
+  **not** folded into `available_concurrency`: a non-empty queue with free
+  sequences is a transient scheduler state, not missing capacity.
+  """
+  @spec activity(keyword()) :: map()
+  def activity(opts \\ []) do
+    deployments =
+      Deployment
+      |> preload([:model, provider: :agent])
+      |> Repo.all()
+      |> Enum.sort_by(&{&1.provider.name, &1.model_name})
+
+    counts = InFlight.snapshot()
+
+    engine =
+      if opts[:engine], do: engine_scrapes(providers_with_deployments(deployments)), else: %{}
+
+    %{
+      generated_at: now(),
+      deployments: Enum.map(deployments, &activity_entry(&1, counts, engine))
+    }
+  end
+
+  # `scrapable?/1` decides by the models behind each provider, so hand it the
+  # providers with their deployments re-attached rather than a second query.
+  defp providers_with_deployments(deployments) do
+    deployments
+    |> Enum.group_by(& &1.provider_id)
+    |> Enum.map(fn {_id, [first | _] = group} -> %{first.provider | deployments: group} end)
+  end
+
+  defp activity_entry(deployment, counts, engine) do
+    provider = deployment.provider
+    residency = residency(provider)
+    status = Health.status(deployment.id)
+    eligible = deployment.enabled and provider.enabled
+    {loaded, slot_status} = loaded(deployment, residency)
+    max = max_concurrency(residency)
+    in_flight = Map.get(counts, deployment.id, 0)
+    engine_block = engine_block(engine, provider, deployment)
+    {effective, source} = effective_in_flight(in_flight, engine_block)
+
+    %{
+      id: deployment.id,
+      model_name: deployment.model_name,
+      upstream_model_id: deployment.model && deployment.model.upstream_model_id,
+      display_name: deployment.model && deployment.model.display_name,
+      provider: provider.name,
+      host_id: provider.agent && provider.agent.host_id,
+      capabilities: deployment.capabilities,
+      class: deployment.class,
+      tool_use: deployment.tool_use,
+      context_window: deployment.context_window,
+      eligible: eligible,
+      routable: eligible and status == :up,
+      loaded: loaded,
+      slot_status: slot_status,
+      max_concurrency: max,
+      in_flight: in_flight,
+      available_concurrency: available(max, effective),
+      source: source,
+      engine: engine_block
+    }
+  end
+
+  # The engine sees every caller; Airo sees its own. When the engine reports
+  # more, it is right, and the payload says so.
+  defp effective_in_flight(in_flight, %{running: running}) when running > in_flight,
+    do: {running, "engine"}
+
+  defp effective_in_flight(in_flight, _engine), do: {in_flight, "gateway"}
+
+  defp available(max, in_flight) when is_integer(max), do: Kernel.max(max - in_flight, 0)
+  defp available(_max, _in_flight), do: nil
+
+  # Absent rather than zero on every failure path: a scrape that did not answer,
+  # a non-vLLM engine, or an engine that has no series under this model name
+  # (it is serving something else) must never read as "nothing running".
+  defp engine_block(scrapes, provider, deployment) do
+    with {:ok, %{metrics: metrics, scraped_at: scraped_at}} <- Map.fetch(scrapes, provider.id),
+         %{"num_requests_running" => running} = series <- metrics[deployment.model_name] do
+      %{
+        running: trunc(running),
+        waiting: trunc(series["num_requests_waiting"] || 0),
+        kv_cache_pct: kv_cache_pct(series["kv_cache_usage_perc"]),
+        scraped_at: scraped_at
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  # vLLM reports the KV gauge as a 0–1 fraction despite the `_perc` name.
+  defp kv_cache_pct(fraction) when is_number(fraction), do: Float.round(fraction * 100 / 1, 1)
+  defp kv_cache_pct(_fraction), do: nil
 
   defp routable_reason(%{enabled: false}, _provider, _status), do: "deployment_disabled"
   defp routable_reason(_deployment, %{enabled: false}, _status), do: "provider_disabled"
@@ -826,17 +1000,15 @@ defmodule Airo.Serving do
   end
 
   ## ------------------------------------------------------------------
-  ## Speculative decoding
+  ## Engine scrapes (speculative decoding, request counters)
   ## ------------------------------------------------------------------
 
   # One `GET /metrics` per vLLM slot, concurrently and with a hard deadline —
   # the same contract as `inventories/1`. A slot that errors or times out still
   # gets an entry, holding an "absent" block: a scrape that failed must read as
-  # "no speculative data", never as a slot that stopped speculating.
-  defp speculative_scrapes(agents, external) do
-    providers =
-      (Enum.flat_map(agents, & &1.providers) ++ external)
-      |> Enum.filter(&scrapable?/1)
+  # "no data", never as a slot that stopped speculating or has nothing running.
+  defp engine_scrapes(candidates) do
+    providers = Enum.filter(candidates, &scrapable?/1)
 
     providers
     |> Task.async_stream(&{&1.id, scrape_speculative(&1)},
