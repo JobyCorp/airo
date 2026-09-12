@@ -339,6 +339,19 @@ shadow-first). Local on-CPU engine: [`DESIGN-local-classifier.md`](./DESIGN-loca
   `/api/ps` for speech/transcription task, language, voice, sample-rate, and
   loaded-model metadata. Cloud providers remain catalog-only/backlog for model
   management.
+- **Availability for an orchestrator is loaded + concurrency, never memory**
+  (S28, jody's decision 2026-09-12). `Airo.Gateway.InFlight` registers the
+  request process under its deployment for the span of the upstream call — a
+  Registry, not a counter, so a client hangup or crash releases the sequence
+  with no cleanup path. `GET /v1/serving/activity` joins that count to the
+  slot's `parallel` (`--max-num-seqs` / `--parallel`) and the S19 residency
+  identity, and reports `loaded`, `slot_status`, `max_concurrency`,
+  `in_flight` and `available_concurrency`. It carries no `ETag` because it
+  changes on every request; the topology snapshot keeps its `ETag`, and since
+  S28 that tag ignores heartbeat time and GPU telemetry, which had been
+  changing it on every call. Memory headroom stays advisory for *loading a
+  model* (S18/S21); it says nothing about whether a resident model would
+  serve one more request, because on vLLM the reading is the KV preallocation.
 - **Engine internals are management-scoped, by design** (S27): Airo's own
   `/metrics` and `/v1/serving` require a `management` client key, and that is
   where anything scraped out of a serving engine belongs — speculative-decode

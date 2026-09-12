@@ -23,12 +23,17 @@ defmodule AiroWeb.RealtimeProxy do
 
   require Logger
 
+  alias Airo.Gateway.InFlight
   alias Airo.Usage
 
   @impl true
   def init(state) do
     case connect(state.target) do
       {:ok, conn, ref} ->
+        # A realtime session holds one of the deployment's sequences for its
+        # whole life. This process *is* the session, so the entry dies with it
+        # (S28) — there is no release call on any close path on purpose.
+        InFlight.track(state.target.deployment.id, %{capability: :realtime})
         {:ok, %{state | conn: conn, ref: ref, status: :connecting, pending: []}}
 
       {:error, reason} ->

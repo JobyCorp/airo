@@ -203,6 +203,33 @@ defmodule AiroWeb.ApiSpec do
             resp("HostEvents", "Host lifecycle events, oldest first.")
           )
       },
+      "/v1/serving/activity" => %PathItem{
+        get:
+          management_op(
+            "getServingActivity",
+            "Serving activity",
+            "The live view for an orchestrator: per deployment, whether its " <>
+              "model is `loaded` (and `slot_status` saying why not), the " <>
+              "slot's `max_concurrency`, the requests `in_flight` through " <>
+              "Airo, and `available_concurrency` = max - in_flight, floored at " <>
+              "0 and null when max is unknown. Memory is not an input to any " <>
+              "of these. Changes on every request start and end, so there is " <>
+              "no `ETag` and the response is `no-store`.",
+            [
+              param(
+                "engine",
+                "Also scrape each vLLM slot's own `/metrics` and attach " <>
+                  "`engine: {running, waiting, kv_cache_pct, scraped_at}`. " <>
+                  "The engine sees callers that bypass Airo, so when it " <>
+                  "reports more running than Airo counts, availability uses " <>
+                  "the engine's number and `source` says \"engine\". One " <>
+                  "outbound call per vLLM slot, so off by default.",
+                %Schema{type: :boolean, default: false}
+              )
+            ],
+            resp("ServingActivity", "Per-deployment loaded state and concurrency.")
+          )
+      },
       "/v1/usage" => %PathItem{
         get:
           management_op(
@@ -656,6 +683,30 @@ defmodule AiroWeb.ApiSpec do
             description:
               "Alias resolution. `servable` tracks the hard gate (at least one " <>
                 "eligible candidate); `routable_candidates` counts the healthy ones.",
+            items: %Schema{type: :object, additionalProperties: true}
+          }
+        }
+      },
+      "ServingActivity" => %Schema{
+        type: :object,
+        description:
+          "Per-deployment activity for something about to dispatch. `loaded` " <>
+            "follows the same identity rule Airo uses for health: the " <>
+            "deployment whose model is resident on an `up` slot. `slot_status` " <>
+            "is one of `up`, `empty`, `loading`, `down`, `stale`, " <>
+            "`not_resident` (another model is resident on the slot), " <>
+            "`peer_rank` (a tensor-parallel rank that serves no API) or " <>
+            "`external` (not agent-managed; loaded means probe health up).",
+        properties: %{
+          generated_at: %Schema{type: :string, format: :"date-time"},
+          deployments: %Schema{
+            type: :array,
+            description:
+              "`in_flight` counts requests through Airo, realtime sessions " <>
+                "included; `source` is \"gateway\" unless `engine=1` found " <>
+                "the engine running more, then \"engine\". `engine.waiting` " <>
+                "is queue depth and is reported beside availability, not " <>
+                "subtracted from it.",
             items: %Schema{type: :object, additionalProperties: true}
           }
         }

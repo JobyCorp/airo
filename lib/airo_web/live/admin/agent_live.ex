@@ -20,6 +20,7 @@ defmodule AiroWeb.Admin.AgentLive do
 
   alias Airo.Agents
   alias Airo.Agents.{Capacity, Control, Ingest, Lifecycle, Liveness, SlotState}
+  alias Airo.Gateway.InFlight
   alias Airo.Config
   alias Airo.Engines
   alias Airo.Repo
@@ -653,9 +654,15 @@ defmodule AiroWeb.Admin.AgentLive do
       ctx_total: state[:ctx_total],
       engine_build: state[:engine_build],
       profile: state[:profile] || %{},
+      in_flight: Enum.reduce(provider.deployments, 0, &(InFlight.count(&1.id) + &2)),
       deployment_count: length(provider.deployments)
     }
   end
+
+  # "N / M" when the engine's cap is known, bare "N" otherwise. Read at render
+  # time from the Registry, so it is as fresh as the last push or refresh.
+  defp in_flight_line(%{in_flight: n, parallel: max}) when is_integer(max), do: "#{n} / #{max}"
+  defp in_flight_line(%{in_flight: n}), do: "#{n}"
 
   # The serving port is the slot's identity for control calls; it's the suffix of
   # the registered name "<host_id>:<port>".
@@ -941,6 +948,14 @@ defmodule AiroWeb.Admin.AgentLive do
           <:col :let={slot} label="Context">
             <span :if={slot.ctx} class="font-mono text-xs tabular-nums">{context_line(slot)}</span>
             <span :if={is_nil(slot.ctx)} class="text-base-content/40">—</span>
+          </:col>
+          <:col :let={slot} label="In flight">
+            <span class={[
+              "font-mono text-xs tabular-nums",
+              slot.in_flight == 0 && "text-base-content/40"
+            ]}>
+              {in_flight_line(slot)}
+            </span>
           </:col>
           <:col :let={slot} label="Serving">
             <.profile_tags profile={slot.profile} />
