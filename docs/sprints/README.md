@@ -90,5 +90,6 @@ Ordered — each depends on prior merged sprints unless noted in the sprint file
 - [x] [S25 — Agent lifecycle observability](./25-agent-lifecycle-observability.md) — airo only; prod acceptance pending deploy
 - [x] [S26 — Observer airos (one controller, N observers per agent)](./26-observer-airos.md) — airo + airo_agent; pilot on pvegpu, fleet rollout pending
 - [x] [S27 — Speculative-decode observability](./27-speculative-decode-observability.md) — acceptance rate, per-draft and the per-position decay curve on `/v1/serving?speculative=1` and `/metrics`; per-request acceptance is not on the wire. Deployed 2026-09-09 (`de8ac94`); helm's management key still to mint
+- [ ] [S28 — Serving activity: loaded, max concurrency, available concurrency](./28-serving-activity.md) — planned 2026-09-12; in-flight counter in the gateway, `GET /v1/serving/activity`, topology `ETag` repair; memory pressure explicitly out
 
 See [`STATUS.md`](./STATUS.md) for merge history.
