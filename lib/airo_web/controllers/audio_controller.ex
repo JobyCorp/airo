@@ -22,7 +22,11 @@ defmodule AiroWeb.AudioController do
       GatewayUsage.record(conn, plan, info, latency_ms: latency)
 
       conn
-      |> GatewayHeaders.put(info.served, fallback_used: info.fallback_used, latency_ms: latency)
+      |> GatewayHeaders.put(info.served,
+        fallback_used: info.fallback_used,
+        affinity: info.affinity,
+        latency_ms: latency
+      )
       |> put_resp_content_type(content_type, nil)
       |> send_resp(200, data)
     else
@@ -45,7 +49,11 @@ defmodule AiroWeb.AudioController do
       GatewayUsage.record(conn, plan, info, response: response, latency_ms: latency)
 
       conn
-      |> GatewayHeaders.put(info.served, fallback_used: info.fallback_used, latency_ms: latency)
+      |> GatewayHeaders.put(info.served,
+        fallback_used: info.fallback_used,
+        affinity: info.affinity,
+        latency_ms: latency
+      )
       |> json(response)
     else
       {:error, reason} ->

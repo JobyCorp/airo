@@ -19,7 +19,11 @@ defmodule AiroWeb.EmbeddingsController do
       GatewayUsage.record(conn, plan, info, response: response, latency_ms: latency)
 
       conn
-      |> GatewayHeaders.put(info.served, fallback_used: info.fallback_used, latency_ms: latency)
+      |> GatewayHeaders.put(info.served,
+        fallback_used: info.fallback_used,
+        affinity: info.affinity,
+        latency_ms: latency
+      )
       |> json(response)
     else
       {:error, reason} ->

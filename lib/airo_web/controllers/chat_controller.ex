@@ -36,6 +36,7 @@ defmodule AiroWeb.ChatController do
         conn
         |> put_gateway_headers(info.served,
           fallback_used: info.fallback_used,
+          affinity: info.affinity,
           latency_ms: latency
         )
         |> json(response)
@@ -50,7 +51,7 @@ defmodule AiroWeb.ChatController do
     # candidate (after any failover) lands in the trailing metadata event. The
     # response is not committed until the first delta is chunked, so a pre-byte
     # failover (or total failure) can still return a clean HTTP status.
-    conn = put_gateway_headers(conn, hd(plan.attempts), [])
+    conn = put_gateway_headers(conn, hd(plan.attempts), affinity: plan.affinity)
 
     case Gateway.run_stream(plan, conn, &sse_delta/2, &committed?/1) do
       {:ok, conn, info} ->
@@ -64,6 +65,7 @@ defmodule AiroWeb.ChatController do
         meta =
           Gateway.transparency(info.served,
             fallback_used: info.fallback_used,
+            affinity: info.affinity,
             latency_ms: latency
           )
           |> GatewayTrace.put_meta(GatewayTrace.conn_trace_id(conn))
@@ -157,6 +159,7 @@ defmodule AiroWeb.ChatController do
     |> put_resp_header("x-gateway-model", meta["model"])
     |> put_resp_header("x-gateway-deployment", to_string(meta["deployment_id"]))
     |> put_resp_header("x-gateway-fallback", to_string(meta["fallback_used"]))
+    |> put_resp_header("x-gateway-affinity", meta["affinity"])
     |> maybe_trace_header(GatewayTrace.conn_trace_id(conn))
     |> maybe_latency_header(meta["latency_ms"])
   end

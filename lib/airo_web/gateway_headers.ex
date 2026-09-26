@@ -18,6 +18,7 @@ defmodule AiroWeb.GatewayHeaders do
     |> put_resp_header("x-gateway-model", meta["model"])
     |> put_resp_header("x-gateway-deployment", to_string(meta["deployment_id"]))
     |> put_resp_header("x-gateway-fallback", to_string(meta["fallback_used"]))
+    |> put_resp_header("x-gateway-affinity", meta["affinity"])
     |> put_trace(GatewayTrace.conn_trace_id(conn))
     |> maybe_latency(meta["latency_ms"])
   end

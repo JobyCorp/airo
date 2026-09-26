@@ -27,6 +27,7 @@ defmodule Airo.Gateway do
   alias Airo.Logs
   alias Airo.Registry
   alias Airo.Routing
+  alias Airo.Routing.Affinity
   alias Airo.Routing.Classifier
 
   # Chat/stream upstream calls can legitimately run for minutes — a big-context +
@@ -53,13 +54,15 @@ defmodule Airo.Gateway do
           model: String.t(),
           capability: atom(),
           usage_capability: atom(),
+          affinity: Affinity.outcome(),
           attempts: [attempt(), ...]
         }
 
-  @type info :: %{served: attempt(), fallback_used: boolean()}
+  @type info :: %{served: attempt(), fallback_used: boolean(), affinity: Affinity.outcome()}
 
   @type error ::
           :missing_model
+          | :invalid_affinity
           | {:model_not_found, String.t()}
           | {:forbidden, String.t()}
           | :no_deployment
@@ -85,6 +88,7 @@ defmodule Airo.Gateway do
     resource = resource_capability(capability, params)
 
     with {:ok, model} <- fetch_model(params),
+         :ok <- validate_affinity(params),
          :ok <- authorize(client_key, model),
          {:ok, resolution} <- resolve_target(model, params, resource),
          {:ok, attempts} <-
@@ -94,6 +98,7 @@ defmodule Airo.Gateway do
          model: model,
          capability: capability,
          usage_capability: resolution.usage_capability,
+         affinity: resolution.affinity,
          attempts: attempts
        }}
     end
@@ -118,8 +123,8 @@ defmodule Airo.Gateway do
   (served attempt + whether a fallback fired).
   """
   @spec run(plan()) :: {:ok, term(), info()} | {:error, error()}
-  def run(%{capability: capability, attempts: attempts}),
-    do: run_attempts(attempts, capability, false)
+  def run(%{capability: capability, attempts: attempts} = plan),
+    do: attempts |> run_attempts(capability, false) |> with_affinity(plan)
 
   defp run_attempts([attempt | rest], capability, fallback_used) do
     log_attempt(:info, "gateway.attempt.started", attempt, capability, fallback_used)
@@ -155,9 +160,18 @@ defmodule Airo.Gateway do
   @spec run_stream(plan(), acc, (map(), acc -> acc), (acc -> boolean())) ::
           {:ok, acc, info()} | {:partial_error, error(), acc} | {:error, error(), acc}
         when acc: term()
-  def run_stream(%{attempts: attempts}, acc, reducer, committed?) do
-    stream_attempts(attempts, acc, reducer, committed?, false)
+  def run_stream(%{attempts: attempts} = plan, acc, reducer, committed?) do
+    attempts
+    |> stream_attempts(acc, reducer, committed?, false)
+    |> with_affinity(plan)
   end
+
+  # The affinity outcome is decided at routing time, not per attempt, so it
+  # rides on the plan and is copied onto `info` for the caller.
+  defp with_affinity({:ok, result, info}, plan),
+    do: {:ok, result, Map.put(info, :affinity, Map.get(plan, :affinity, :none))}
+
+  defp with_affinity(other, _plan), do: other
 
   defp stream_attempts([attempt | rest], acc, reducer, committed?, fallback_used) do
     log_attempt(:info, "gateway.stream_attempt.started", attempt, :stream, fallback_used)
@@ -267,7 +281,8 @@ defmodule Airo.Gateway do
 
   @doc """
   Transparency metadata for the served attempt (DESIGN §5.1): which concrete
-  provider/model served, whether a fallback fired, and (when known) latency.
+  provider/model served, whether a fallback fired, the affinity outcome
+  (`none` unless given), and (when known) latency.
   """
   @spec transparency(attempt(), keyword()) :: map()
   def transparency(%{provider: provider, deployment: deployment}, extra \\ []) do
@@ -275,7 +290,8 @@ defmodule Airo.Gateway do
       "provider" => provider.name,
       "model" => deployment.model_name,
       "deployment_id" => deployment.id,
-      "fallback_used" => Keyword.get(extra, :fallback_used, false)
+      "fallback_used" => Keyword.get(extra, :fallback_used, false),
+      "affinity" => to_string(Keyword.get(extra, :affinity, :none))
     }
     |> maybe_put("latency_ms", Keyword.get(extra, :latency_ms))
   end
@@ -288,6 +304,14 @@ defmodule Airo.Gateway do
       _ -> {:error, :missing_model}
     end
   end
+
+  # `route.affinity` is optional; when present it must be a string of at most
+  # 128 bytes. A malformed `route` (not a map) is ignored, as it always was.
+  defp validate_affinity(%{"route" => %{} = route}) do
+    if Affinity.valid_key?(route["affinity"]), do: :ok, else: {:error, :invalid_affinity}
+  end
+
+  defp validate_affinity(_params), do: :ok
 
   defp authorize(client_key, model) do
     if ClientKey.scoped?(client_key, model), do: :ok, else: {:error, {:forbidden, model}}
@@ -308,12 +332,13 @@ defmodule Airo.Gateway do
     route = if is_map(params["route"]), do: params["route"], else: %{}
     route = maybe_classify(alias_, params, route, resource)
 
-    case Routing.candidates(alias_, route, resource) do
-      {:ok, []} ->
+    case Routing.route(alias_, route, resource) do
+      {:ok, [], _affinity} ->
         {:error, :no_deployment}
 
-      {:ok, candidates} ->
-        {:ok, %{candidates: candidates, alias: alias_, usage_capability: resource}}
+      {:ok, candidates, affinity} ->
+        {:ok,
+         %{candidates: candidates, alias: alias_, usage_capability: resource, affinity: affinity}}
 
       {:error, _reason} = error ->
         error
@@ -440,7 +465,8 @@ defmodule Airo.Gateway do
          %{
            candidates: Routing.deployment_candidates(deployments),
            alias: nil,
-           usage_capability: resource
+           usage_capability: resource,
+           affinity: :none
          }}
     end
   end

@@ -273,6 +273,14 @@ defmodule AiroWeb.Admin.AliasLive do
           <.input field={@form[:name]} label="Name (e.g. chat-deep)" />
           <.input field={@form[:capability]} type="select" label="Capability" options={@capabilities} />
           <.input field={@form[:strategy]} type="select" label="Strategy" options={@strategies} />
+          <p
+            :if={to_string(@form[:strategy].value) == "affinity"}
+            id="affinity-hint"
+            class="-mt-2 text-xs text-base-content/60"
+          >
+            Requests with the same <code>route.affinity</code>
+            key go to the same deployment. A new key goes to the one with the fewest in-flight requests; a key moves when its deployment is disabled or down, and is dropped after 30 minutes idle. Requests with no key are round-robin.
+          </p>
           <.input
             field={@form[:fallback]}
             label="Fallback aliases"
