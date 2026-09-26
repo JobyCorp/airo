@@ -230,6 +230,7 @@ defmodule AiroWeb.Admin.UsageLive do
       {"HTTP status", r.http_status},
       {"Upstream status", r.upstream_status},
       {"Fallback", if(r.fallback_used, do: "yes", else: "no")},
+      {"Affinity", r.affinity && to_string(r.affinity)},
       {"Tokens", "#{r.tokens_in} in / #{r.tokens_out} out"},
       {"Cost", cost(r.cost)},
       {"Trace", r.trace_id}

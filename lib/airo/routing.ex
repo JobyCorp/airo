@@ -11,7 +11,9 @@ defmodule Airo.Routing do
       resource survive (skipped when no capability is passed).
     - **Route filters** — `route.class` and `route.tools` narrow the candidates.
     - **Strategy** — `:priority` (lowest first), `:weighted` (Efraimidis–Spirakis
-      weighted shuffle), or `:round_robin` (rotated each call via an ETS counter).
+      weighted shuffle), `:round_robin` (rotated each call via an ETS counter),
+      or `:affinity` (round-robin, with the deployment assigned to the
+      request's `route.affinity` key moved first — see `Airo.Routing.Affinity`).
     - **Health preference** — `:up` before `:unknown` before `:down`, applied as
       a *stable* re-sort so it never overrides strategy within a tier. Health is
       a preference, not a gate: a `:down` candidate is still tried last.
@@ -22,9 +24,15 @@ defmodule Airo.Routing do
   **Strict pin:** when `route.binding` is set, exactly the matching deployment is
   returned (no strategy, no fallback, no substitution); if it isn't an enabled
   candidate of the alias, `{:error, :selected_binding_unavailable}` (ORC-073).
+  A binding wins over affinity: the key is neither read nor updated.
+
+  **Affinity** applies to the requested alias only. A fallback alias with
+  `strategy: :affinity` orders its own candidates round-robin, so one key
+  never holds two assignments.
   """
 
   alias Airo.{Config, Health, Repo}
+  alias Airo.Routing.Affinity
   alias Airo.Runtime.Store
 
   @type candidate :: %{deployment: Airo.Config.Deployment.t(), provider: Airo.Config.Provider.t()}
@@ -38,6 +46,21 @@ defmodule Airo.Routing do
   @spec candidates(Airo.Config.Alias.t(), map(), atom() | nil) ::
           {:ok, [candidate()]} | {:error, :no_deployment | :selected_binding_unavailable}
   def candidates(alias_, route, capability \\ nil) when is_map(route) do
+    with {:ok, candidates, _affinity} <- route(alias_, route, capability) do
+      {:ok, candidates}
+    end
+  end
+
+  @doc """
+  `candidates/3` plus the affinity outcome (`Airo.Routing.Affinity.outcome/0`)
+  for the `x-gateway-affinity` header and the request log. The outcome is
+  `:none` for a strict pin and for any alias whose strategy is not
+  `:affinity`.
+  """
+  @spec route(Airo.Config.Alias.t(), map(), atom() | nil) ::
+          {:ok, [candidate()], Affinity.outcome()}
+          | {:error, :no_deployment | :selected_binding_unavailable}
+  def route(alias_, route, capability \\ nil) when is_map(route) do
     case route["binding"] do
       nil -> chained_candidates(alias_, route, capability)
       binding -> pinned_candidate(alias_, binding)
@@ -61,7 +84,7 @@ defmodule Airo.Routing do
   defp pinned_candidate(alias_, binding) do
     case Enum.find(enabled_candidates(alias_), &binding_matches?(&1, binding)) do
       nil -> {:error, :selected_binding_unavailable}
-      candidate -> {:ok, [to_candidate(candidate)]}
+      candidate -> {:ok, [to_candidate(candidate)], :none}
     end
   end
 
@@ -77,16 +100,30 @@ defmodule Airo.Routing do
   defp chained_candidates(alias_, route, capability) do
     fallback_names = route["fallback"] || alias_.fallback
 
+    {primary, affinity} =
+      alias_
+      |> ordered_alias_candidates(route, capability)
+      |> affinity_order(alias_, route)
+
     ordered =
-      [alias_ | fallback_aliases(fallback_names)]
+      fallback_names
+      |> fallback_aliases()
       |> Enum.flat_map(&ordered_alias_candidates(&1, route, capability))
+      |> then(&(primary ++ &1))
       |> Enum.uniq_by(& &1.deployment.id)
 
     case ordered do
       [] -> {:error, :no_deployment}
-      list -> {:ok, Enum.map(list, &to_candidate/1)}
+      list -> {:ok, Enum.map(list, &to_candidate/1), affinity}
     end
   end
+
+  # After the health re-sort, so the key's deployment leads even when it is
+  # `:unknown` and a sibling is `:up`; a `:down` one is reassigned instead.
+  defp affinity_order(candidates, %{strategy: :affinity} = alias_, route),
+    do: Affinity.order(candidates, alias_.id, Affinity.key(route))
+
+  defp affinity_order(candidates, _alias, _route), do: {candidates, :none}
 
   # Returns AliasCandidate structs (carrying weight/priority), filtered by
   # capability + route, ordered by strategy, then stably re-sorted by health.
@@ -133,8 +170,9 @@ defmodule Airo.Routing do
   defp strategy_order(candidates, %{strategy: :priority}), do: priority_order(candidates)
   defp strategy_order(candidates, %{strategy: :weighted}), do: weighted_order(candidates)
 
-  defp strategy_order(candidates, %{strategy: :round_robin} = alias_),
-    do: round_robin_order(candidates, alias_.id)
+  defp strategy_order(candidates, %{strategy: strategy} = alias_)
+       when strategy in [:round_robin, :affinity],
+       do: round_robin_order(candidates, alias_.id)
 
   defp priority_order(candidates),
     do: Enum.sort_by(candidates, &{&1.priority, &1.deployment_id})

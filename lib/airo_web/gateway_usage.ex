@@ -23,6 +23,7 @@ defmodule AiroWeb.GatewayUsage do
       deployment_id: info.served.deployment.id,
       model: info.served.deployment.model_name,
       fallback_used: info.fallback_used,
+      affinity: info[:affinity],
       latency_ms: opts[:latency_ms]
     )
 
@@ -33,6 +34,7 @@ defmodule AiroWeb.GatewayUsage do
       alias_name: plan.model,
       capability: plan.usage_capability,
       fallback_used: info.fallback_used,
+      affinity: info[:affinity],
       outcome: :success,
       response: opts[:response],
       latency_ms: opts[:latency_ms]

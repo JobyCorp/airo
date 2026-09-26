@@ -228,7 +228,7 @@ Deployment        ← runnable model copy on a provider  (orchester CapabilityBi
 Alias             ← logical handle consumers call  ("chat-deep")
   capability
   candidates        [ {deployment_ref, weight, priority}, ... ]
-  strategy          weighted | priority | round-robin
+  strategy          weighted | priority | round-robin | affinity (S29: route.affinity → same deployment)
   fallback          [alias_ref, ...]
   default_params    ← alias layer
 

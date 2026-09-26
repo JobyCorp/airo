@@ -377,6 +377,16 @@ defmodule AiroWeb.ApiSpec do
             type: :string,
             description: "Strict pin to `adapter:model` or `provider:model`."
           },
+          affinity: %Schema{
+            type: :string,
+            maxLength: 128,
+            description:
+              "Session key (at most 128 bytes) for aliases with the `affinity` strategy: " <>
+                "requests with the same key go to the same deployment, so its prefix cache " <>
+                "is reused. The outcome is in the `x-gateway-affinity` response header " <>
+                "(`assigned`, `hit`, `reassigned` or `none`). Ignored by other strategies; " <>
+                "`binding` wins over it."
+          },
           fallback: %Schema{
             type: :array,
             items: %Schema{type: :string},

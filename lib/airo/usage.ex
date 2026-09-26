@@ -315,7 +315,7 @@ defmodule Airo.Usage do
 
   Context keys: `:client_key`, `:served` (a `Airo.Gateway.attempt` or nil),
   `:alias_name`, `:capability`, `:response` (OpenAI body or nil), `:latency_ms`,
-  `:outcome`, `:fallback_used`.
+  `:outcome`, `:fallback_used`, `:affinity`.
   """
   def record_async(context) do
     work = fn ->
@@ -369,6 +369,7 @@ defmodule Airo.Usage do
       upstream_status: context[:upstream_status],
       finish_reason: finish_reason(context[:response]),
       fallback_used: context[:fallback_used] || false,
+      affinity: context[:affinity],
       cost: cost(deployment, tokens_in, tokens_out)
     }
   end

@@ -27,6 +27,9 @@ defmodule Airo.Usage.UsageRecord do
     :realtime
   ]
   @outcomes [:success, :error, :timeout]
+  # Session-affinity outcome of the routing decision (S29); nil on error rows,
+  # which are written before or without a plan.
+  @affinities [:assigned, :hit, :reassigned, :none]
 
   @type t :: %__MODULE__{}
 
@@ -48,6 +51,7 @@ defmodule Airo.Usage.UsageRecord do
     field :upstream_status, :integer
     field :finish_reason, :string
     field :fallback_used, :boolean, default: false
+    field :affinity, Ecto.Enum, values: @affinities
     field :cost, :decimal
 
     belongs_to :client_key, ClientKey
@@ -86,6 +90,7 @@ defmodule Airo.Usage.UsageRecord do
       :upstream_status,
       :finish_reason,
       :fallback_used,
+      :affinity,
       :cost
     ])
     |> validate_required([:outcome])

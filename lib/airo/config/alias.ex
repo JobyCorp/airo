@@ -12,7 +12,7 @@ defmodule Airo.Config.Alias do
   alias Airo.Config.AliasCandidate
 
   @capabilities [:chat, :embeddings, :rerank, :speech, :transcription, :vision, :classify]
-  @strategies [:weighted, :priority, :round_robin]
+  @strategies [:weighted, :priority, :round_robin, :affinity]
   @routers [:none, :classify]
   @router_modes [:shadow, :enforce]
 

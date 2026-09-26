@@ -67,6 +67,15 @@ defmodule AiroWeb.GatewayError do
          "missing_model"
        )}
 
+  defp to_response(:invalid_affinity),
+    do:
+      {400,
+       OpenAIError.body(
+         "`route.affinity` must be a string of at most #{Airo.Routing.Affinity.max_key_bytes()} bytes.",
+         "invalid_request_error",
+         "invalid_affinity"
+       )}
+
   defp to_response({:model_not_found, model}),
     do:
       {404,
