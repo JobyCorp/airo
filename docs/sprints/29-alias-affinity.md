@@ -1,8 +1,16 @@
 # Sprint 29 — Session affinity for aliases (`route.affinity` + an `affinity` strategy)
 
-> **Status: built on branch `feat/alias-affinity` on 2026-09-26; not merged or
-> deployed.** 691 tests (+19 over S28), `mix precommit` green,
-> `joby_kit.lint` 16 (unchanged). One migration (`usage_records.affinity`).
+> **Status: merged to `main` as `0c47254` and deployed to prod on 2026-09-26;
+> `airo.service` on VM 302 (`phx2`) came up at 19:42:31 UTC, and migration
+> `20260926120000` (`usage_records.affinity`) ran.** 691 tests (+19 over
+> S28), `mix precommit` green, `joby_kit.lint` 16 (unchanged). No alias uses
+> the strategy yet — `agent-fast` is still round-robin.
+
+> **Deploy note.** The workstation's upgrade to macOS 27 had removed Rosetta 2,
+> so Colima fell back to QEMU for the amd64 builder and `lld` segfaulted while
+> linking `ortex`'s `ort-sys` build script. Nothing reached the VM (the build
+> fails before the service stops). Fix: `softwareupdate --install-rosetta`,
+> then restart Colima so `/proc/sys/fs/binfmt_misc/rosetta` is registered.
 
 > **Goal (one sentence):** send consecutive rounds of one helm session to the
 > same card, so they hit that card's prefix cache.
